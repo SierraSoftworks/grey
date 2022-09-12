@@ -1,0 +1,49 @@
+---
+probes:
+  - name: rex.production
+    policy:
+      interval: 10000
+      timeout: 5000
+      retries: 2
+    target: !Http
+      url: https://rex.sierrasoftworks.com/api/v1/health
+    validators:
+      - !HttpStatus [200]
+  - name: rex.staging
+    policy:
+      interval: 10000
+      timeout: 5000
+      retries: 2
+    target: !Http
+      url: https://rex-staging.sierrasoftworks.com/api/v1/health
+    validators:
+      - !HttpStatus [200]
+  - name: bender.production
+    policy:
+      interval: 10000
+      timeout: 5000
+      retries: 2
+    target: !Http
+      url: https://bender.sierrasoftworks.com/api/v1/health
+    validators:
+      - !HttpStatus [200]
+  - name: vault.production
+    policy:
+      interval: 10000
+      timeout: 5000
+      retries: 2
+    target: !Http
+      url: https://vault.sierrasoftworks.com/sys/health
+      method: HEAD
+    validators:
+      - !HttpStatus [200, 429, 473]
+  - name: bender.development
+    policy:
+      interval: 5000
+      timeout: 1000
+      retries: 2
+    target: !Http
+      url: http://localhost:8000/api/v1/quote/Bender
+    validators:
+      - !HttpStatus [200]
+      - !Content Bender

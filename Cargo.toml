@@ -1,0 +1,26 @@
+[package]
+name = "grey"
+version = "0.1.0"
+edition = "2021"
+description = "A lightweight tool for checking the health of online services and reporting this to a monitoring system."
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = "0.1"
+clap = { version = "3.2", features = ["derive"] }
+futures = "0.3"
+lazy_static = "1.4"
+opentelemetry = { version = "0.17", features = ["tokio", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.10", features = ["tls-roots"] }
+rand = "0.8"
+reqwest = { version = "0.11", features = ["rustls-tls-webpki-roots"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+tokio = { version = "1", features = ["fs", "macros", "net", "rt", "time", "tracing"] }
+tonic = { version = "0.6.2", features = ["tls-roots"] }
+tracing = { git="https://github.com/SierraSoftworks/tracing.git" , features = ["log"] }
+tracing-attributes = { git="https://github.com/SierraSoftworks/tracing.git" }
+tracing-futures = { git="https://github.com/SierraSoftworks/tracing.git" , features = ["futures-03"] }
+tracing-opentelemetry = { git="https://github.com/SierraSoftworks/tracing.git" }
+tracing-subscriber = { git="https://github.com/SierraSoftworks/tracing.git" , features = ["tracing-log"] }

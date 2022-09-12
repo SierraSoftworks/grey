@@ -1,0 +1,36 @@
+on: push
+name: Rust
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: nightly
+        override: true
+        components: llvm-tools-preview
+  
+    - name: cargo install grcov
+      uses: SierraSoftworks/setup-grcov@v1
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Run tests
+      uses: actions-rs/cargo@v1
+      with:
+        command: test
+        args: --all-features --no-fail-fast
+      env:
+          RUSTFLAGS: -Zinstrument-coverage
+        
+    - name: grcov
+      run: grcov . --binary-path target/debug/deps/ -s . -t lcov --ignore-not-existing --ignore '../**' --ignore '/*' --ignore 'C:/' -o ./lcov.info
+    
+    - name: codecov upload
+      uses: codecov/codecov-action@v3
+      with:
+        files: ./lcov.info
