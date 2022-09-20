@@ -40,3 +40,35 @@ impl Display for HttpHeader {
         write!(f, "Header {} is '{}'", self.name, self.value)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate() {
+        let validator = HttpHeader {
+            name: "X-Test".to_string(),
+            value: "test".to_string(),
+        };
+
+        let sample = crate::Sample::default().with("http.header.X-Test", "test");
+        assert!(validator.validate(&sample).is_ok());
+
+        let sample = crate::Sample::default().with("http.header.X-Test", "test2");
+        assert!(validator.validate(&sample).is_err());
+
+        let sample = crate::Sample::default().with("http.header.X-Test2", "test");
+        assert!(validator.validate(&sample).is_err());
+    }
+
+    #[test]
+    fn display() {
+        let validator = HttpHeader {
+            name: "X-Test".to_string(),
+            value: "test".to_string(),
+        };
+
+        assert_eq!(validator.to_string(), "Header X-Test is 'test'");
+    }
+}

@@ -72,3 +72,9 @@ impl From<bool> for SampleValue {
         SampleValue::Bool(value)
     }
 }
+
+impl From<&str> for SampleValue {
+    fn from(value: &str) -> Self {
+        SampleValue::String(value.to_string())
+    }
+}
