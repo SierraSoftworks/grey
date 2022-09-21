@@ -18,7 +18,7 @@ jobs:
       run: |
         Invoke-WebRequest -OutFile protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-linux-x86_64.zip
         Expand-Archive protoc.zip
-        ls
+        chmod +x protoc
       shell: pwsh
   
     - name: cargo install grcov
