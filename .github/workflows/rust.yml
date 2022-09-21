@@ -17,8 +17,9 @@ jobs:
     - name: install protoc
       run: |
         Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-linux-x86_64.zip
-        Expand-Archive /tmp/protoc.zip -DestinationPath /usr
-        chmod +x /usr/bin/protoc
+        Expand-Archive /tmp/protoc.zip -DestinationPath /tmp
+        chmod +x /tmp/bin/protoc
+        sudo mv /tmp/bin/protoc /usr/bin/protoc
       shell: pwsh
   
     - name: cargo install grcov
