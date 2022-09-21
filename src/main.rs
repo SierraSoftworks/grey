@@ -19,7 +19,7 @@ pub use config::Config;
 pub use engine::Engine;
 pub use policy::Policy;
 pub use probe::Probe;
-pub use sample::Sample;
+pub use sample::{Sample, SampleValue};
 pub use targets::Target;
 pub use validators::Validator;
 

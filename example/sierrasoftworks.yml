@@ -8,7 +8,7 @@ probes:
     target: !Http
       url: https://rex.sierrasoftworks.com/api/v1/health
     validators:
-      - !HttpStatus [200]
+      http.status: !OneOf [200]
   - name: rex.staging
     policy:
       interval: 10000
@@ -17,7 +17,7 @@ probes:
     target: !Http
       url: https://rex-staging.sierrasoftworks.com/api/v1/health
     validators:
-      - !HttpStatus [200]
+      http.status: !OneOf [200]
   - name: bender.production
     policy:
       interval: 10000
@@ -26,7 +26,7 @@ probes:
     target: !Http
       url: https://bender.sierrasoftworks.com/api/v1/health
     validators:
-      - !HttpStatus [200]
+      http.status: !OneOf [200]
   - name: vault.production
     policy:
       interval: 10000
@@ -36,7 +36,7 @@ probes:
       url: https://vault.sierrasoftworks.com/sys/health
       method: HEAD
     validators:
-      - !HttpStatus [200, 429, 473]
+      http.status: !OneOf [200, 429, 473]
   - name: bender.development
     policy:
       interval: 5000
@@ -45,5 +45,5 @@ probes:
     target: !Http
       url: http://localhost:8000/api/v1/quote/Bender
     validators:
-      - !HttpStatus [200]
-      - !Content Bender
+      http.status: !OneOf [200]
+      http.body: !Contains "Bender"

@@ -24,3 +24,4 @@ tracing-attributes = { git="https://github.com/SierraSoftworks/tracing.git" }
 tracing-futures = { git="https://github.com/SierraSoftworks/tracing.git" , features = ["futures-03"] }
 tracing-opentelemetry = { git="https://github.com/SierraSoftworks/tracing.git" }
 tracing-subscriber = { git="https://github.com/SierraSoftworks/tracing.git" , features = ["tracing-log"] }
+trust-dns-resolver = { version = "0.22", features = ["tokio-runtime"] }

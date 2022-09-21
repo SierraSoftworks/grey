@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, fmt::Display};
 
 use opentelemetry::{trace::SpanKind, sdk::propagation::TraceContextPropagator, propagation::TextMapPropagator};
 use serde::{Serialize, Deserialize};
@@ -69,6 +69,12 @@ impl Target for HttpTarget {
             sample = sample.with(format!("http.header.{}", key.as_str().to_lowercase()), value.to_str()?.to_owned());
         }
 
-        Ok(sample.with("content", response.text().await?))
+        Ok(sample.with("http.body", response.text().await?))
+    }
+}
+
+impl Display for HttpTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "HTTP {} {}", self.method, self.url)
     }
 }

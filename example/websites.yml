@@ -8,8 +8,8 @@ probes:
     target: !Http
       url: https://google.com?q=grey+healthcheck+system
     validators:
-      - !HttpStatus [200]
-      - !HttpHeader { name: "content-type", value: "text/html; charset=ISO-8859-1" }
+      http.status: !OneOf [200]
+      http.header.content-type: !Equals "text/html; charset=ISO-8859-1"
   - name: twitter.homepage
     policy:
       interval: 5000
@@ -18,8 +18,8 @@ probes:
     target: !Http
       url: https://www.twitter.com
     validators:
-      - !HttpStatus [200]
-      - !HttpHeader { name: "content-type", value: "text/html; charset=ISO-8859-1" }
+      http.status: !OneOf [200]
+      http.header.content-type: !Equals "text/html; charset=utf-8"
   - name: github.repo
     policy:
       interval: 5000
@@ -28,4 +28,4 @@ probes:
     target: !Http
       url: https://github.com/SierraSoftworks/grey
     validators:
-      - !HttpStatus [200]
+      http.status: !OneOf [200]
