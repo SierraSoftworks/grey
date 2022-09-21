@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use opentelemetry::trace::{SpanKind, StatusCode};
+use opentelemetry::trace::{SpanKind, Status};
 use serde::{Deserialize, Serialize};
 use tracing::{field, Span};
 
@@ -70,7 +70,7 @@ impl Probe {
         }
     }
 
-    #[instrument(name = "probe.attempt", skip(self), err(Raw), fields(otel.kind=%SpanKind::Internal))]
+    #[instrument(name = "probe.attempt", skip(self), err(Raw), fields(otel.kind=?SpanKind::Internal))]
     async fn run_attempt(&self) -> Result<(), Box<dyn std::error::Error>> {
         let sample = self.target.run().await?;
         debug!(?sample, "Probe sample collected successfully.");
@@ -81,16 +81,16 @@ impl Probe {
                 otel.name=name,
                 field=%path,
                 validator=%validator,
-                otel.status_code=?StatusCode::Unset,
+                otel.status_code=?Status::Unset,
                 otel.status_message=field::Empty
             ).entered();
 
             match validator.validate(path, sample.get(path)) {
                 Ok(_) => {
-                    span.record("otel.status_code", field::debug(StatusCode::Ok));
+                    span.record("otel.status_code", "Ok");
                 }
                 Err(err) => {
-                    span.record("otel.status_code", field::debug(StatusCode::Error))
+                    span.record("otel.status_code", "Error")
                         .record("otel.status_message", &err.to_string());
                     error!(error = err, "{}", err);
                     return Err(err);

@@ -30,7 +30,7 @@ impl Target for HttpTarget {
     #[instrument(
         "target.http",
         skip(self), err(Raw), fields(
-        otel.kind=%SpanKind::Client,
+        otel.kind=?SpanKind::Client,
         http.url = %self.url,
         http.method = %self.method,
         http.request_content_length = self.body.as_ref().map(|b| b.len()).unwrap_or(0),

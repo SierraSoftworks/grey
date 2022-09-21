@@ -1,4 +1,4 @@
-use opentelemetry::trace::{SpanKind, StatusCode};
+use opentelemetry::trace::{SpanKind, Status};
 use tokio::time::Instant;
 use tracing::{instrument, Span, Level, Id, field, Instrument};
 
@@ -15,7 +15,7 @@ impl Engine {
         Self { config }
     }
 
-    #[instrument(name = "engine", skip(self), fields(otel.kind=%SpanKind::Internal), err(Raw))]
+    #[instrument(name = "engine", skip(self), fields(otel.kind=?SpanKind::Internal), err(Raw))]
     pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
         futures::future::join_all(self.config.probes.iter().map(|probe| self.schedule(probe)))
             .await
@@ -26,9 +26,9 @@ impl Engine {
     }
 
     #[instrument(name = "engine.schedule", skip(self, probe), err(Raw), fields(
-        otel.kind=%SpanKind::Producer,
+        otel.kind=?SpanKind::Producer,
         probe.name=probe.name,
-        otel.status_code=?StatusCode::Unset,
+        otel.status_code=?Status::Unset,
         error=field::Empty
     ))]
     async fn schedule(&self, probe: &Probe) -> Result<(), Box<dyn std::error::Error>> {
@@ -49,8 +49,8 @@ impl Engine {
             let probe_span = span!(parent: NO_PARENT, Level::INFO, "engine.probe",
                 %probe.name,
                 otel.name=probe.name,
-                otel.status_code=?StatusCode::Unset,
-                otel.kind=%SpanKind::Consumer,
+                otel.status_code=?Status::Unset,
+                otel.kind=?SpanKind::Consumer,
             );
 
             probe_span.follows_from(&parent_span);
@@ -59,11 +59,11 @@ impl Engine {
             match probe.run().instrument(probe_span.clone()).await {
                 Ok(_) => {
                     probe_span
-                        .record("otel.status_code", field::debug(StatusCode::Ok));
+                        .record("otel.status_code", "Ok");
                 },
                 Err(err) => {
                     probe_span
-                        .record("otel.status_code", field::debug(StatusCode::Error))
+                        .record("otel.status_code", "Error")
                         .record("error", field::debug(&err));
                 }
             }
