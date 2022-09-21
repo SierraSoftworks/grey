@@ -50,13 +50,18 @@ jobs:
             run_on: windows-latest
             target: x86_64-pc-windows-msvc
             extension: .exe
-
+            setup: |
+              Invoke-WebRequest -OutFile protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-win64.zip
+              Expand-Archive protoc.zip
           # Linux builds
           - arch: amd64
             run_on: ubuntu-latest
             os: linux
             target: x86_64-unknown-linux-gnu
             strip: strip --strip-debug
+            setup: |
+              Invoke-WebRequest -OutFile protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-linux-x86_64.zip
+              Expand-Archive protoc.zip
           # - arch: "386"
           #   os: linux
           #   run_on: ubuntu-latest
@@ -76,6 +81,9 @@ jobs:
 
               # Ensure that the libgcc library can be found
               sudo ln -s /usr/aarch64-linux-gnu/lib/libgcc_s.so.1 /usr/aarch64-linux-gnu/lib/libgcc_s.so
+
+              Invoke-WebRequest -OutFile protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-linux-aarch_64.zip
+              Expand-Archive protoc.zip
             strip: aarch64-linux-gnu-strip --strip-debug
             flags: --no-default-features
 
@@ -84,14 +92,21 @@ jobs:
             run_on: macos-latest
             os: darwin
             target: x86_64-apple-darwin
+            setup: |
+              Invoke-WebRequest -OutFile protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-osx-aarch_64.zip
+              Expand-Archive protoc.zip
           - arch: arm64
             run_on: macos-latest
             os: darwin
             target: aarch64-apple-darwin
+            setup: |
+              Invoke-WebRequest -OutFile protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-osx-x86_64.zip
+              Expand-Archive protoc.zip
 
     steps:
       - name: setup dependencies
         run: ${{ matrix.setup }}
+        shell: pwsh
         if: matrix.setup
 
       - name: Get Rust Stable
