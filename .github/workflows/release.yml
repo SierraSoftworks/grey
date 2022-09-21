@@ -52,8 +52,8 @@ jobs:
             extension: .exe
             setup: |
               Invoke-WebRequest -OutFile protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-win64.zip
-              Write-Host $env:PATH
-              Expand-Archive protoc.zip
+              Expand-Archive protoc.zip -DestinationPath ./tools
+              echo "./tools/bin" >> $env:GITHUB_PATH
           # Linux builds
           - arch: amd64
             run_on: ubuntu-latest
@@ -62,9 +62,8 @@ jobs:
             strip: strip --strip-debug
             setup: |
               Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-linux-x86_64.zip
-              Expand-Archive /tmp/protoc.zip -DestinationPath /tmp
-              chmod +x /tmp/bin/protoc
-              sudo mv /tmp/bin/protoc /usr/bin/protoc
+              Expand-Archive protoc.zip -DestinationPath ./tools
+              echo "./tools/bin" >> $env:GITHUB_PATH
           # - arch: "386"
           #   os: linux
           #   run_on: ubuntu-latest
@@ -86,9 +85,8 @@ jobs:
               sudo ln -s /usr/aarch64-linux-gnu/lib/libgcc_s.so.1 /usr/aarch64-linux-gnu/lib/libgcc_s.so
 
               Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-linux-aarch_64.zip
-              Expand-Archive /tmp/protoc.zip -DestinationPath /tmp
-              chmod +x /tmp/bin/protoc
-              sudo mv /tmp/bin/protoc /usr/bin/protoc
+              Expand-Archive protoc.zip -DestinationPath ./tools
+              echo "./tools/bin" >> $env:GITHUB_PATH
             strip: aarch64-linux-gnu-strip --strip-debug
             flags: --no-default-features
 
@@ -99,18 +97,16 @@ jobs:
             target: x86_64-apple-darwin
             setup: |
               Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-osx-x86_64.zip
-              Expand-Archive /tmp/protoc.zip -DestinationPath /tmp
-              chmod +x /tmp/bin/protoc
-              sudo mv /tmp/bin/protoc /usr/local/bin/protoc
+              Expand-Archive protoc.zip -DestinationPath ./tools
+              echo "./tools/bin" >> $env:GITHUB_PATH
           - arch: arm64
             run_on: macos-latest
             os: darwin
             target: aarch64-apple-darwin
             setup: |
               Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-osx-aarch_64.zip
-              Expand-Archive /tmp/protoc.zip -DestinationPath /tmp
-              chmod +x /tmp/bin/protoc
-              sudo mv /tmp/bin/protoc /usr/local/bin/protoc
+              Expand-Archive protoc.zip -DestinationPath ./tools
+              echo "./tools/bin" >> $env:GITHUB_PATH
 
     steps:
       - name: setup dependencies

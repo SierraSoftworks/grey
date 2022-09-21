@@ -2,8 +2,8 @@ on: push
 name: Rust
 
 jobs:
-  test:
-    name: Test
+  test-linux:
+    name: Test (Linux)
     runs-on: ubuntu-latest
 
     steps:
@@ -17,9 +17,49 @@ jobs:
     - name: install protoc
       run: |
         Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-linux-x86_64.zip
-        Expand-Archive /tmp/protoc.zip -DestinationPath /tmp
-        chmod +x /tmp/bin/protoc
-        sudo mv /tmp/bin/protoc /usr/bin/protoc
+        Expand-Archive protoc.zip -DestinationPath ./tools
+        echo "./tools/bin" >> $env:GITHUB_PATH
+      shell: pwsh
+  
+    - name: cargo install grcov
+      uses: SierraSoftworks/setup-grcov@v1
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Run tests
+      uses: actions-rs/cargo@v1
+      with:
+        command: test
+        args: --all-features --no-fail-fast
+      env:
+          RUSTFLAGS: -Cinstrument-coverage
+        
+    - name: grcov
+      run: grcov . --binary-path target/debug/deps/ -s . -t lcov --ignore-not-existing --ignore '../**' --ignore '/*' --ignore 'C:/' -o ./lcov.info
+    
+    - name: codecov upload
+      uses: codecov/codecov-action@v3
+      with:
+        files: ./lcov.info
+
+  
+  test-windows:
+    name: Test (Windows)
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        components: llvm-tools-preview
+
+    - name: install protoc
+      run: |
+        Invoke-WebRequest -OutFile protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-win64.zip
+        Expand-Archive protoc.zip -DestinationPath ./tools
+        echo "./tools/bin" >> $env:GITHUB_PATH
       shell: pwsh
   
     - name: cargo install grcov
