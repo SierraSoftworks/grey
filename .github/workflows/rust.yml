@@ -10,7 +10,7 @@ jobs:
     - uses: actions/checkout@v2
     - uses: actions-rs/toolchain@v1
       with:
-        toolchain: nightly
+        toolchain: stable
         override: true
         components: llvm-tools-preview
 
@@ -32,7 +32,7 @@ jobs:
         command: test
         args: --all-features --no-fail-fast
       env:
-          RUSTFLAGS: -Zinstrument-coverage
+          RUSTFLAGS: -Cinstrument-coverage
         
     - name: grcov
       run: grcov . --binary-path target/debug/deps/ -s . -t lcov --ignore-not-existing --ignore '../**' --ignore '/*' --ignore 'C:/' -o ./lcov.info
