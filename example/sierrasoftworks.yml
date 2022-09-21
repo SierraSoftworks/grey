@@ -33,7 +33,7 @@ probes:
       timeout: 5000
       retries: 2
     target: !Http
-      url: https://vault.sierrasoftworks.com/sys/health
+      url: https://vault.sierrasoftworks.com/v1/sys/health
       method: HEAD
     validators:
       http.status: !OneOf [200, 429, 473]
