@@ -52,7 +52,7 @@ jobs:
             extension: .exe
             setup: |
               Invoke-WebRequest -OutFile protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-win64.zip
-              Expand-Archive protoc.zip -DestinationPath ./tools
+              Expand-Archive protoc.zip -DestinationPath ../tools
               Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
           # Linux builds
           - arch: amd64
@@ -62,7 +62,7 @@ jobs:
             strip: strip --strip-debug
             setup: |
               Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-linux-x86_64.zip
-              Expand-Archive /tmp/protoc.zip -DestinationPath ./tools
+              Expand-Archive /tmp/protoc.zip -DestinationPath ../tools
               Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
           # - arch: "386"
           #   os: linux
@@ -85,7 +85,7 @@ jobs:
               sudo ln -s /usr/aarch64-linux-gnu/lib/libgcc_s.so.1 /usr/aarch64-linux-gnu/lib/libgcc_s.so
 
               Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-linux-aarch_64.zip
-              Expand-Archive /tmp/protoc.zip -DestinationPath ./tools
+              Expand-Archive /tmp/protoc.zip -DestinationPath ../tools
               Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
             strip: aarch64-linux-gnu-strip --strip-debug
             flags: --no-default-features
@@ -97,7 +97,7 @@ jobs:
             target: x86_64-apple-darwin
             setup: |
               Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-osx-x86_64.zip
-              Expand-Archive /tmp/protoc.zip -DestinationPath ./tools
+              Expand-Archive /tmp/protoc.zip -DestinationPath ../tools
               Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
           - arch: arm64
             run_on: macos-latest
@@ -105,7 +105,7 @@ jobs:
             target: aarch64-apple-darwin
             setup: |
               Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-osx-aarch_64.zip
-              Expand-Archive /tmp/protoc.zip -DestinationPath ./tools
+              Expand-Archive /tmp/protoc.zip -DestinationPath ../tools
               Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
 
     steps:

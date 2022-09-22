@@ -17,7 +17,7 @@ jobs:
     - name: install protoc
       run: |
         Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-linux-x86_64.zip
-        Expand-Archive /tmp/protoc.zip -DestinationPath ./tools
+        Expand-Archive /tmp/protoc.zip -DestinationPath ../tools
         Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
         Get-Content $env:GITHUB_PATH
       shell: pwsh
@@ -59,7 +59,7 @@ jobs:
     - name: install protoc
       run: |
         Invoke-WebRequest -OutFile protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-win64.zip
-        Expand-Archive protoc.zip -DestinationPath ./tools
+        Expand-Archive protoc.zip -DestinationPath ../tools
         Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
         Get-Content $env:GITHUB_PATH
       shell: pwsh
