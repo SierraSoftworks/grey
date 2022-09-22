@@ -53,7 +53,7 @@ jobs:
             setup: |
               Invoke-WebRequest -OutFile protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-win64.zip
               Expand-Archive protoc.zip -DestinationPath ./tools
-              Add-Content -Path $env:GITHUB_PATH -Content "$((get-item ./).parent.fullname)/tools/bin"
+              Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
           # Linux builds
           - arch: amd64
             run_on: ubuntu-latest
@@ -63,7 +63,7 @@ jobs:
             setup: |
               Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-linux-x86_64.zip
               Expand-Archive /tmp/protoc.zip -DestinationPath ./tools
-              Add-Content -Path $env:GITHUB_PATH -Content "$((get-item ./).parent.fullname)/tools/bin"
+              Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
           # - arch: "386"
           #   os: linux
           #   run_on: ubuntu-latest
@@ -86,7 +86,7 @@ jobs:
 
               Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-linux-aarch_64.zip
               Expand-Archive /tmp/protoc.zip -DestinationPath ./tools
-              Add-Content -Path $env:GITHUB_PATH -Content "$((get-item ./).parent.fullname)/tools/bin"
+              Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
             strip: aarch64-linux-gnu-strip --strip-debug
             flags: --no-default-features
 
@@ -98,7 +98,7 @@ jobs:
             setup: |
               Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-osx-x86_64.zip
               Expand-Archive /tmp/protoc.zip -DestinationPath ./tools
-              Add-Content -Path $env:GITHUB_PATH -Content "$((get-item ./).parent.fullname)/tools/bin"
+              Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
           - arch: arm64
             run_on: macos-latest
             os: darwin
@@ -106,7 +106,7 @@ jobs:
             setup: |
               Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-osx-aarch_64.zip
               Expand-Archive /tmp/protoc.zip -DestinationPath ./tools
-              Add-Content -Path $env:GITHUB_PATH -Content "$((get-item ./).parent.fullname)/tools/bin"
+              Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
 
     steps:
       - name: setup dependencies
