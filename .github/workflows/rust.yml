@@ -18,7 +18,7 @@ jobs:
       run: |
         Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-linux-x86_64.zip
         Expand-Archive /tmp/protoc.zip -DestinationPath ./tools
-        echo "$((get-item ./).parent.fullname)/tools/bin" >> $env:GITHUB_PATH
+        Add-Content -Path $env:GITHUB_PATH -Content "$((get-item ./).parent.fullname)/tools/bin"
       shell: pwsh
   
     - name: cargo install grcov
@@ -59,7 +59,7 @@ jobs:
       run: |
         Invoke-WebRequest -OutFile protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v3.20.2/protoc-3.20.2-win64.zip
         Expand-Archive protoc.zip -DestinationPath ./tools
-        echo "$((get-item ./).parent.fullname)/tools/bin" >> $env:GITHUB_PATH
+        Add-Content -Path $env:GITHUB_PATH -Content "$((get-item ./).parent.fullname)/tools/bin"
       shell: pwsh
   
     - name: cargo install grcov
