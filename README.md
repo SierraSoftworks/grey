@@ -26,8 +26,8 @@ probes:
     target: !Http
       url: https://google.com?q=grey+healthcheck+system
     validators:
-      - http.status: !OneOf [200]
-      - http.header.content-type: !Equals "text/html; charset=ISO-8859-1"
+      http.status: !OneOf [200]
+      http.header.content-type: !Equals "text/html; charset=ISO-8859-1"
 ```
 
 ## Targets

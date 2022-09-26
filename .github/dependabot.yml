@@ -1,8 +1,16 @@
 version: 2
 updates:
-  - directory: /
-    open-pull-requests-limit: 5
-    package-ecosystem: cargo
-    rebase-strategy: auto
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
-      interval: daily
+      interval: "daily"
+
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "daily"
+
+  - package-ecosystem: npm
+    directory: "/docs"
+    schedule:
+      interval: "daily"
