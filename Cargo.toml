@@ -8,7 +8,7 @@ description = "A lightweight tool for checking the health of online services and
 
 [dependencies]
 async-trait = "0.1"
-clap = { version = "3.2", features = ["derive"] }
+clap = { version = "4.0", features = ["derive"] }
 futures = "0.3"
 lazy_static = "1.4"
 opentelemetry = { version = "0.18", features = ["rt-tokio"] }
