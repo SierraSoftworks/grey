@@ -7,7 +7,15 @@ use tracing::{field, Span};
 use crate::{Target, Sample};
 
 lazy_static! {
-    static ref CLIENT: reqwest::Client = reqwest::Client::new();
+    static ref CLIENT_NO_VERIFY: reqwest::Client = reqwest::ClientBuilder::new()
+        .user_agent(version!("SierraSoftworks/grey@v"))
+        .build();
+
+
+    static ref CLIENT: reqwest::Client = reqwest::ClientBuilder::new()
+        .user_agent(version!("SierraSoftworks/grey@v"))
+        .danger_accept_invalid_certs(true)
+        .build();
 }
 
 fn default_get() -> String {
@@ -23,6 +31,8 @@ pub struct HttpTarget {
     pub headers: HashMap<String, String>,
     #[serde(default)]
     pub body: Option<String>,
+    #[serde(default)]
+    pub no_verify: bool,
 }
 
 #[async_trait::async_trait]
@@ -41,7 +51,8 @@ impl Target for HttpTarget {
     async fn run(&self) -> Result<Sample, Box<dyn std::error::Error>> {
         let method = reqwest::Method::from_str(&self.method)?;
 
-        let mut request = CLIENT.request(method, self.url.clone());
+        let client = if self.no_verify { CLIENT_NO_VERIFY } else { CLIENT };
+        let mut request = client.request(method, self.url.clone());
 
         let mut headers = self.headers.clone();
         let propagator = TraceContextPropagator::new();

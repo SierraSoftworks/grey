@@ -40,6 +40,7 @@ the response. It accepts the following options:
 - `method` (optional, default: `GET`): The HTTP method to use for the request.
 - `headers` (optional): A map of headers to include in the request.
 - `body` (optional): The body to include in the request.
+- `no_verify` (optional, default: `false`): Whether to disable TLS verification.
 
 It exposes the following fields for validation:
 

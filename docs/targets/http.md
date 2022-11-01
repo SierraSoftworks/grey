@@ -19,6 +19,7 @@ probes:
       headers:
         Authorization: Bearer <token>
       body: '{"foo": "bar"}'
+      no_verify: false
     validators:
       http.status: !OneOf [200, 201]
       http.header.content-type: !Equals "application/json"
@@ -49,6 +50,11 @@ values.
 The `body` property is used to specify the body that you wish to include in the request.
 It should be a string containing the body that you wish to send, in its UTF-8 encoded
 format.
+
+### no_verify <Badge text="default: false"/>
+The `no_verify` property is used to disable TLS verification for the request. This is useful in scenarios where the remote service is running
+with a self-signed certificate and/or you wish to ignore potentially
+expired certificates.
 
 ## Outputs
 
