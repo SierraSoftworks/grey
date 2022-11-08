@@ -10,10 +10,11 @@ in
       nixpkgs.latest.rustChannels.nightly.rust
       nixpkgs.libiconv
       nixpkgs.nodejs
+      nixpkgs.openssl
       nixpkgs.protobuf
     ]
-    ++ lib.optionals stdenv.isDarwin [darwin.apple_sdk.frameworks.Security]
-    ++ lib.optionals stdenv.isLinux [openssl pkg-config];
+    ++ lib.optionals stdenv.isDarwin [darwin.apple_sdk.frameworks.Security];
 
     PROTOC = "${pkgs.protobuf}/bin/protoc";
+    OPENSSL_DIR = "${pkgs.openssl}";
   }

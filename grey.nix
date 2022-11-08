@@ -13,11 +13,11 @@ rustPlatform.buildRustPackage rec {
   *.nix
 '' ./.;
 
-  buildInputs = [protobuf]
-    ++ lib.optionals stdenv.isDarwin [darwin.apple_sdk.frameworks.Security]
-    ++ lib.optionals stdenv.isLinux [openssl pkg-config];
+  buildInputs = [protobuf openssl]
+    ++ lib.optionals stdenv.isDarwin [darwin.apple_sdk.frameworks.Security];
 
   PROTOC = "${pkgs.protobuf}/bin/protoc";
+  OPENSSL_DIR = "${pkgs.openssl}";
 
   cargoLock = {
     lockFile = ./Cargo.lock;
