@@ -1,6 +1,6 @@
 with import <nixpkgs> {};
 
-{ lib, fetchFromGitHub, rustPlatform }:
+{ lib, rustPlatform }:
 
 rustPlatform.buildRustPackage rec {
   pname = "grey";
@@ -14,7 +14,8 @@ rustPlatform.buildRustPackage rec {
 '' ./.;
 
   buildInputs = [protobuf]
-    ++ lib.optionals stdenv.isDarwin [darwin.apple_sdk.frameworks.Security];
+    ++ lib.optionals stdenv.isDarwin [darwin.apple_sdk.frameworks.Security]
+    ++ lib.optionals stdenv.isLinux [openssl pkg-config];
 
   PROTOC = "${pkgs.protobuf}/bin/protoc";
 
