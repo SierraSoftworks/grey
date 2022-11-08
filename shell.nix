@@ -5,16 +5,18 @@ in
   with nixpkgs;
   stdenv.mkDerivation {
     name = "grey_shell";
-    buildInputs = [
-      # to use the latest nightly:
+    nativeBuildInputs = [
       nixpkgs.latest.rustChannels.nightly.rust
       nixpkgs.libiconv
       nixpkgs.nodejs
-      nixpkgs.openssl
       nixpkgs.protobuf
+      nixpkgs.pkg-config
     ]
     ++ lib.optionals stdenv.isDarwin [darwin.apple_sdk.frameworks.Security];
 
+    buildInputs = [
+      nixpkgs.openssl
+    ];
+
     PROTOC = "${pkgs.protobuf}/bin/protoc";
-    OPENSSL_DIR = "${pkgs.openssl.dev}";
   }
