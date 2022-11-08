@@ -17,7 +17,7 @@ rustPlatform.buildRustPackage rec {
     ++ lib.optionals stdenv.isDarwin [darwin.apple_sdk.frameworks.Security];
 
   PROTOC = "${pkgs.protobuf}/bin/protoc";
-  OPENSSL_DIR = "${pkgs.openssl}";
+  OPENSSL_DIR = "${pkgs.openssl.dev}";
 
   cargoLock = {
     lockFile = ./Cargo.lock;
