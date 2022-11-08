@@ -1,9 +1,10 @@
-name: "Test"
+name: "Nix"
 on:
   pull_request:
   push:
 jobs:
-  tests:
+  dev-environment:
+    name: "Dev Environment"
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
