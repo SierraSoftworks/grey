@@ -24,8 +24,8 @@
             ];
 
             buildInputs = [
-              pkgs.openssl
               pkgs.libiconv
+              pkgs.openssl
             ];
 
             PROTOC = "${pkgs.protobuf}/bin/protoc";
@@ -52,7 +52,11 @@
             *.nix
           '' ./.;
 
-            buildInputs = [pkgs.protobuf pkgs.openssl pkgs.pkg-config]
+            nativeBuildInputs = [
+              pkgs.protobuf
+              pkgs.pkg-config
+            ];
+            buildInputs = [pkgs.openssl]
               ++ lib.optionals pkgs.stdenv.isDarwin [pkgs.darwin.apple_sdk.frameworks.Security];
 
             PROTOC = "${pkgs.protobuf}/bin/protoc";
