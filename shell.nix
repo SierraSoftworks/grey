@@ -4,14 +4,19 @@ let
 in
   with nixpkgs;
   stdenv.mkDerivation {
-    name = "moz_overlay_shell";
-    buildInputs = [
-      # to use the latest nightly:
+    name = "grey_shell";
+    nativeBuildInputs = [
       nixpkgs.latest.rustChannels.nightly.rust
       nixpkgs.libiconv
+      nixpkgs.nodejs
       nixpkgs.protobuf
+      nixpkgs.pkg-config
     ]
     ++ lib.optionals stdenv.isDarwin [darwin.apple_sdk.frameworks.Security];
+
+    buildInputs = [
+      nixpkgs.openssl
+    ];
 
     PROTOC = "${pkgs.protobuf}/bin/protoc";
   }
