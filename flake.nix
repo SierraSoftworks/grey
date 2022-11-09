@@ -50,12 +50,15 @@
             /target
             /result
             *.nix
-          '' ./.;
+            '' ./.;
+
+            doCheck = false;
 
             nativeBuildInputs = [
               pkgs.protobuf
               pkgs.pkg-config
             ];
+
             buildInputs = [pkgs.openssl]
               ++ lib.optionals pkgs.stdenv.isDarwin [pkgs.darwin.apple_sdk.frameworks.Security];
 
