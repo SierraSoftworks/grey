@@ -11,7 +11,7 @@
         in
         {
           default = stdenv.mkDerivation {
-            name = "grey_dev_shell";
+            name = "grey-shell-${system}";
             system = system;
             nativeBuildInputs = [
               pkgs.rustc
