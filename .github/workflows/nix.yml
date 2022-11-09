@@ -11,9 +11,11 @@ jobs:
     - uses: cachix/install-nix-action@v18
       with:
         nix_path: nixpkgs=channel:nixos-unstable
+        extra_config: |
+          experimental-features = nix-command flakes
     - uses: cachix/cachix-action@v12
       with:
         name: sierrasoftworks
         extraPullNames: nix-community
-    - run: nix-build
-    - run: nix-shell --command 'cargo test'
+    - run: nix build .#
+    - run: nix flake check
