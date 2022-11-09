@@ -38,7 +38,6 @@
           pkgs = nixpkgs.legacyPackages.${system};
           lib = pkgs.lib;
           rustPlatform = pkgs.rustPlatform;
-          nodePackages = pkgs.nodePackages;
         in
         {
           grey = rustPlatform.buildRustPackage rec {
