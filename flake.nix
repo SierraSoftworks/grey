@@ -42,8 +42,8 @@
         in
         {
           grey = rustPlatform.buildRustPackage rec {
+            name = "grey-${system}";
             pname = "grey";
-            system = system;
 
             src = pkgs.nix-gitignore.gitignoreSourcePure ''
             /example
