@@ -73,7 +73,12 @@
               description = "A lightweight, OpenTelemetry native, external synthetic probing agent.";
               homepage = "https://github.com/SierraSoftworks/grey";
               license = licenses.mit;
-              maintainers = [ maintainers.tailhook ];
+              maintainers = [
+                {
+                  name = "Benjamin Pannell";
+                  email = "contact@sierrasoftworks.com";
+                }
+              ];
             };
           };
           default = self.packages.${system}.grey;
