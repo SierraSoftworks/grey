@@ -141,7 +141,7 @@ jobs:
         if: matrix.strip
 
       - name: Upload GitHub Release Artifacts
-        uses: SierraSoftworks/gh-releases@v1.0.6
+        uses: SierraSoftworks/gh-releases@v1.0.7
         with:
           files: "target/${{ matrix.target }}/release/grey${{ matrix.extension }} | grey-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.extension }}"
           token: ${{ secrets.GITHUB_TOKEN }}
