@@ -58,7 +58,7 @@ impl Probe {
         })
         .await;
 
-        Span::current().record("probe.attempts", &attempt_number);
+        Span::current().record("probe.attempts", attempt_number);
 
         match result {
             Ok(res) => res,

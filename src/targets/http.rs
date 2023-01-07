@@ -68,8 +68,8 @@ impl Target for HttpTarget {
 
         let response = request.send().await?;
         Span::current()
-            .record("http.status_code", &response.status().as_u16())
-            .record("http.response_content_length", &response.content_length().unwrap_or(0))
+            .record("http.status_code", response.status().as_u16())
+            .record("http.response_content_length", response.content_length().unwrap_or(0))
             .record("http.flavor", field::debug(response.version()));
 
         let mut sample = Sample::default()

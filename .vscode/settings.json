@@ -1,0 +1,13 @@
+{
+    "yaml.customTags": [
+        // Validators
+        "!Contains scalar",
+        "!Equals scalar",
+        "!OneOf sequence",
+
+        // Targets
+        "!Dns mapping",
+        "!Http mapping",
+        "!Tcp mapping",
+    ]
+}
