@@ -109,6 +109,12 @@ directly to TCP, resolve DNS names, and more.
 On top of these APIs, we also provide a couple of helpers to improve the
 integration with Grey.
 
+::: warning
+The runtime environment currently does **NOT** support the use of the `import`
+directive to import additional scripts either from the local filesystem or
+from remote endpoints.
+:::
+
 ### `setOutput(key: string, value: string): never`
 This method allows you to emit a new output value from your probe which
 can then be interrogated by the [validators](../validators/README.md)
