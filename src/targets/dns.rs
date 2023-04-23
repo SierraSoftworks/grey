@@ -1,12 +1,13 @@
 use std::{str::FromStr, fmt::Display};
 
+use opentelemetry::trace::SpanKind;
 use serde::{Deserialize, Serialize};
 use trust_dns_resolver::{
     config::{ResolverConfig, ResolverOpts},
     TokioAsyncResolver, proto::rr::RecordType,
 };
 
-use crate::{Sample, Target};
+use crate::Sample;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnsTarget {
@@ -14,9 +15,15 @@ pub struct DnsTarget {
     pub record_type: Option<String>,
 }
 
-#[async_trait::async_trait]
-impl Target for DnsTarget {
-    async fn run(&self) -> Result<Sample, Box<dyn std::error::Error>> {
+impl DnsTarget {
+    #[instrument(
+        "target.dns",
+        skip(self), err(Raw), fields(
+        otel.kind=?SpanKind::Client,
+        net.peer.name = %self.domain,
+        net.protocol.name = "dns",
+    ))]
+    pub async fn run(&self) -> Result<Sample, Box<dyn std::error::Error>> {
         let lookup = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default())?
             .lookup(self.domain.as_str(), RecordType::from_str(self.record_type.as_deref().unwrap_or("A"))?)
             .await?;

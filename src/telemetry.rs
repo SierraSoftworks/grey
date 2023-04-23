@@ -3,8 +3,6 @@ use tracing::Collect;
 use tracing_subscriber::{prelude::*, registry::LookupSpan, Subscribe};
 
 pub fn setup() {
-    
-
     tracing_subscriber::registry()
         .with(tracing_subscriber::filter::LevelFilter::DEBUG)
         .with(tracing_subscriber::filter::dynamic_filter_fn(
@@ -17,6 +15,8 @@ pub fn setup() {
         ))
         .with(load_output_layer())
         .init();
+
+    opentelemetry::global::set_text_map_propagator(opentelemetry::sdk::propagation::TraceContextPropagator::new());
 }
 
 fn load_otlp_headers() -> tonic::metadata::MetadataMap {
@@ -48,9 +48,10 @@ fn load_otlp_headers() -> tonic::metadata::MetadataMap {
     tracing_metadata
 }
 
-fn load_output_layer<S>() -> Box<dyn Subscribe<S> + Send + Sync + 'static> 
-where S: Collect + Send + Sync,
-for<'a> S: LookupSpan<'a>,
+fn load_output_layer<S>() -> Box<dyn Subscribe<S> + Send + Sync + 'static>
+where
+    S: Collect + Send + Sync,
+    for<'a> S: LookupSpan<'a>,
 {
     #[cfg(not(debug_assertions))]
     let tracing_endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok();
@@ -83,7 +84,6 @@ for<'a> S: LookupSpan<'a>,
             .with_tracer(tracer)
             .boxed()
     } else {
-        tracing_subscriber::fmt::subscriber()
-            .boxed()
+        tracing_subscriber::fmt::subscriber().boxed()
     }
 }

@@ -2,7 +2,7 @@
 probes:
   - name: rex.production
     policy:
-      interval: 10000
+      interval: 30000
       timeout: 5000
       retries: 2
     target: !Http
@@ -11,7 +11,7 @@ probes:
       http.status: !OneOf [200]
   - name: rex.staging
     policy:
-      interval: 10000
+      interval: 60000
       timeout: 5000
       retries: 2
     target: !Http
@@ -20,7 +20,7 @@ probes:
       http.status: !OneOf [200]
   - name: bender.production
     policy:
-      interval: 10000
+      interval: 30000
       timeout: 5000
       retries: 2
     target: !Http
@@ -29,7 +29,7 @@ probes:
       http.status: !OneOf [200]
   - name: vault.production
     policy:
-      interval: 10000
+      interval: 60000
       timeout: 5000
       retries: 2
     target: !Http
@@ -39,7 +39,7 @@ probes:
       http.status: !OneOf [200, 429, 473]
   - name: bender.development
     policy:
-      interval: 5000
+      interval: 60000
       timeout: 1000
       retries: 2
     target: !Http
@@ -47,3 +47,31 @@ probes:
     validators:
       http.status: !OneOf [200]
       http.body: !Contains "Bender"
+  - name: bender.production.script
+    policy:
+      interval: 60000
+      timeout: 5000
+      retries: 2
+    target: !Script
+      args:
+        - https://bender.sierrasoftworks.com
+      code: |
+        console.log(`Running trace ID ${getTraceHeaders()}`)
+
+        const resp = await fetch(`${Deno.args[0]}/api/v1/quote/bender`, {
+          headers: {
+            "Accept": "application/json",
+            ...getTraceHeaders()
+          }
+        })
+
+        setOutput("http.status", resp.status)
+
+        if (resp.ok) {
+          const quote = await resp.json()
+          setOutput("quote.who", quote.who)
+        }
+
+    validators:
+      http.status: !Equals "200"
+      quote.who: !Equals "Bender"
