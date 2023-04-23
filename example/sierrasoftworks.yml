@@ -73,5 +73,5 @@ probes:
         }
 
     validators:
-      http.status: !Equals "200"
+      http.status: !Equals 200
       quote.who: !Equals "Bender"
