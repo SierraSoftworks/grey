@@ -56,8 +56,6 @@ probes:
       args:
         - https://bender.sierrasoftworks.com
       code: |
-        console.log(`Running trace ID ${getTraceHeaders()}`)
-
         const resp = await fetch(`${Deno.args[0]}/api/v1/quote/bender`, {
           headers: {
             "Accept": "application/json",
