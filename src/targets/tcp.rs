@@ -1,18 +1,25 @@
 use std::fmt::Display;
 
+use opentelemetry::trace::SpanKind;
 use serde::{Deserialize, Serialize};
 use tokio::net::{lookup_host, TcpSocket};
 
-use crate::{Sample, Target};
+use crate::Sample;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TcpTarget {
     pub host: String,
 }
 
-#[async_trait::async_trait]
-impl Target for TcpTarget {
-    async fn run(&self) -> Result<Sample, Box<dyn std::error::Error>> {
+impl TcpTarget {
+    #[instrument(
+        "target.tcp",
+        skip(self), err(Raw), fields(
+        otel.kind=?SpanKind::Client,
+        net.peer.name = %self.host,
+        net.protocol.name = "tcp",
+    ))]
+    pub async fn run(&self) -> Result<Sample, Box<dyn std::error::Error>> {
         let addr = lookup_host(&self.host)
             .await?
             .next()

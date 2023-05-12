@@ -13,6 +13,10 @@ impl Sample {
         self
     }
 
+    pub fn set<K: ToString, V: Into<SampleValue>>(&mut self, key: K, value: V) {
+        self.metadata.insert(key.to_string(), value.into());
+    }
+
     pub fn get<K: ToString>(&self, key: K) -> &SampleValue {
         self.metadata.get(&key.to_string()).unwrap_or(&SampleValue::None)
     }

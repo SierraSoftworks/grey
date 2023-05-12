@@ -6,6 +6,7 @@ extern crate tracing;
 use clap::Parser;
 
 mod config;
+mod deno;
 mod engine;
 #[macro_use] mod macros;
 mod policy;
@@ -20,7 +21,6 @@ pub use engine::Engine;
 pub use policy::Policy;
 pub use probe::Probe;
 pub use sample::{Sample, SampleValue};
-pub use targets::Target;
 pub use validators::Validator;
 
 #[tokio::main(flavor = "current_thread")]

@@ -8,6 +8,8 @@
         // Targets
         "!Dns mapping",
         "!Http mapping",
+        "!Script mapping",
         "!Tcp mapping",
-    ]
+    ],
+    "rust-analyzer.showUnlinkedFileNotification": false
 }

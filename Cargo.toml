@@ -11,6 +11,8 @@ path = "./src/main.rs"
 [dependencies]
 async-trait = "0.1"
 clap = { version = "4.2", features = ["derive"] }
+deno_core = { version = "0.181" }
+deno_runtime = { version = "0.107", features = ["snapshot_from_snapshot"] }
 futures = "0.3"
 lazy_static = "1.4"
 opentelemetry = { version = "0.18", features = ["rt-tokio"] }
@@ -27,3 +29,9 @@ tracing-futures = { git="https://github.com/SierraSoftworks/tracing.git" , featu
 tracing-opentelemetry = { git="https://github.com/SierraSoftworks/tracing.git" }
 tracing-subscriber = { git="https://github.com/SierraSoftworks/tracing.git" , features = ["tracing-log"] }
 trust-dns-resolver = { version = "0.22", features = ["tokio-runtime"] }
+
+[build-dependencies]
+deno_core = { version = "0.181" }
+deno_runtime = { version = "0.107", features = ["snapshot_from_snapshot", "include_js_files_for_snapshotting"] }
+futures = "0.3"
+tokio = { version = "1", features = ["fs", "macros", "net", "rt", "time", "tracing"] }

@@ -4,7 +4,7 @@ use opentelemetry::trace::{SpanKind, Status};
 use serde::{Deserialize, Serialize};
 use tracing::{field, Span};
 
-use crate::{targets::TargetType, validators::ValidatorType, Policy, Target, Validator};
+use crate::{targets::TargetType, validators::ValidatorType, Policy, Validator};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Probe {
