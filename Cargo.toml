@@ -10,7 +10,7 @@ path = "./src/main.rs"
 
 [dependencies]
 async-trait = "0.1"
-clap = { version = "4.2", features = ["derive"] }
+clap = { version = "4.3", features = ["derive"] }
 futures = "0.3"
 lazy_static = "1.4"
 opentelemetry = { version = "0.18", features = ["rt-tokio"] }
