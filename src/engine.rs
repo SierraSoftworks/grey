@@ -15,7 +15,7 @@ impl Engine {
         Self { config }
     }
 
-    #[instrument(name = "engine", skip(self), fields(otel.kind=?SpanKind::Internal), err(Raw))]
+    #[instrument(name = "engine", skip(self), fields(otel.kind=?SpanKind::Internal), err(Debug))]
     pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
         futures::future::join_all(self.config.probes.iter().map(|probe| self.schedule(probe)))
             .await
@@ -25,7 +25,7 @@ impl Engine {
         Ok(())
     }
 
-    #[instrument(name = "engine.schedule", skip(self, probe), err(Raw), fields(
+    #[instrument(name = "engine.schedule", skip(self, probe), err(Debug), fields(
         otel.kind=?SpanKind::Producer,
         probe.name=probe.name,
         otel.status_code=?Status::Unset,

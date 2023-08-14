@@ -40,7 +40,7 @@ pub struct HttpTarget {
 impl Target for HttpTarget {
     #[instrument(
         "target.http",
-        skip(self), err(Raw), fields(
+        skip(self), err(Debug), fields(
         otel.kind=?SpanKind::Client,
         http.url = %self.url,
         http.method = %self.method,

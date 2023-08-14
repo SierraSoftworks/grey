@@ -1,6 +1,6 @@
 use opentelemetry_otlp::WithExportConfig;
-use tracing::Collect;
-use tracing_subscriber::{prelude::*, registry::LookupSpan, Subscribe};
+use tracing::Subscriber;
+use tracing_subscriber::{prelude::*, Layer, registry::LookupSpan};
 
 pub fn setup() {
     
@@ -48,8 +48,8 @@ fn load_otlp_headers() -> tonic::metadata::MetadataMap {
     tracing_metadata
 }
 
-fn load_output_layer<S>() -> Box<dyn Subscribe<S> + Send + Sync + 'static> 
-where S: Collect + Send + Sync,
+fn load_output_layer<S>() -> Box<dyn Layer<S> + Send + Sync + 'static> 
+where S: Subscriber + Send + Sync,
 for<'a> S: LookupSpan<'a>,
 {
     #[cfg(not(debug_assertions))]
@@ -79,11 +79,11 @@ for<'a> S: LookupSpan<'a>,
             .install_batch(opentelemetry::runtime::Tokio)
             .unwrap();
 
-        tracing_opentelemetry::subscriber()
+        tracing_opentelemetry::layer()
             .with_tracer(tracer)
             .boxed()
     } else {
-        tracing_subscriber::fmt::subscriber()
+        tracing_subscriber::fmt::layer()
             .boxed()
     }
 }

@@ -18,7 +18,7 @@ pub struct Probe {
 }
 
 impl Probe {
-    #[instrument(name = "probe.run", skip(self), err(Raw), fields(
+    #[instrument(name = "probe.run", skip(self), err(Debug), fields(
         otel.name=self.name,
         probe.name=self.name,
         probe.policy.interval=?self.policy.interval,
@@ -70,7 +70,7 @@ impl Probe {
         }
     }
 
-    #[instrument(name = "probe.attempt", skip(self), err(Raw), fields(otel.kind=?SpanKind::Internal))]
+    #[instrument(name = "probe.attempt", skip(self), err(Debug), fields(otel.kind=?SpanKind::Internal))]
     async fn run_attempt(&self) -> Result<(), Box<dyn std::error::Error>> {
         let sample = self.target.run().await?;
         debug!(?sample, "Probe sample collected successfully.");
