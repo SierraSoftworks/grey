@@ -67,7 +67,7 @@
               lockFile = ./Cargo.lock;
 
               outputHashes = {
-                  "tracing-0.2.0" = "sha256-AWRx6P6slEusJbDrxMSxAkz4biQZH4iqVrdV09Olnc8=";
+                  "tracing-attributes-0.2.0" = "sha256-0Mm7YNgK3qkytq8eBRjUofaLLOVt/p5NF+jeBLr/K/Y=";
               };
             };
 
