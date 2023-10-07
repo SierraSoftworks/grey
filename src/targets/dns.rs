@@ -17,7 +17,7 @@ pub struct DnsTarget {
 #[async_trait::async_trait]
 impl Target for DnsTarget {
     async fn run(&self) -> Result<Sample, Box<dyn std::error::Error>> {
-        let lookup = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default())?
+        let lookup = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default())
             .lookup(self.domain.as_str(), RecordType::from_str(self.record_type.as_deref().unwrap_or("A"))?)
             .await?;
 
