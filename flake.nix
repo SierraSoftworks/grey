@@ -59,7 +59,7 @@
             ];
 
             buildInputs = [pkgs.openssl]
-              ++ lib.optionals pkgs.stdenv.isDarwin [pkgs.darwin.apple_sdk.frameworks.Security];
+              ++ lib.optionals pkgs.stdenv.isDarwin [pkgs.darwin.apple_sdk.frameworks.Security pkgs.darwin.apple_sdk.frameworks.SystemConfiguration];
 
             PROTOC = "${pkgs.protobuf}/bin/protoc";
 
