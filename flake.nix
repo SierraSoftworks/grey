@@ -21,6 +21,7 @@
               pkgs.pkg-config
             ] ++ lib.optionals stdenv.isDarwin [
               pkgs.darwin.apple_sdk.frameworks.Security
+              pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
             ];
 
             buildInputs = [
