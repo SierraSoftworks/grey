@@ -1,9 +1,10 @@
+use opentelemetry::{sdk::propagation::TraceContextPropagator, global};
 use opentelemetry_otlp::WithExportConfig;
 use tracing::Subscriber;
 use tracing_subscriber::{prelude::*, Layer, registry::LookupSpan};
 
 pub fn setup() {
-    
+    global::set_text_map_propagator(TraceContextPropagator::new());
 
     tracing_subscriber::registry()
         .with(tracing_subscriber::filter::LevelFilter::DEBUG)

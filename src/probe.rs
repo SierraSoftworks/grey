@@ -18,7 +18,7 @@ pub struct Probe {
 }
 
 impl Probe {
-    #[instrument(name = "probe.run", skip(self), err(Debug), fields(
+    #[instrument(name = "probe.run", skip(self), err(Value), fields(
         otel.name=self.name,
         probe.name=self.name,
         probe.policy.interval=?self.policy.interval,

@@ -1,20 +1,21 @@
 use std::{collections::HashMap, str::FromStr, fmt::Display};
 
-use opentelemetry::{trace::SpanKind, sdk::propagation::TraceContextPropagator, propagation::TextMapPropagator};
+use opentelemetry::trace::SpanKind;
 use serde::{Serialize, Deserialize};
 use tracing::{field, Span};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::{Target, Sample};
 
 lazy_static! {
     static ref CLIENT_NO_VERIFY: reqwest::Client = reqwest::ClientBuilder::new()
         .user_agent(version!("SierraSoftworks/grey@v"))
+        .danger_accept_invalid_certs(true)
         .build()
         .unwrap();
 
     static ref CLIENT: reqwest::Client = reqwest::ClientBuilder::new()
         .user_agent(version!("SierraSoftworks/grey@v"))
-        .danger_accept_invalid_certs(true)
         .build()
         .unwrap();
 }
@@ -48,15 +49,19 @@ impl Target for HttpTarget {
         http.status_code = field::Empty,
         http.response_content_length = field::Empty,
         http.flavor = field::Empty,
+        cert.no_verify = %self.no_verify,
     ))]
     async fn run(&self) -> Result<Sample, Box<dyn std::error::Error>> {
         let method = reqwest::Method::from_str(&self.method)?;
 
-        let mut request = if self.no_verify { CLIENT_NO_VERIFY.request(method, self.url.clone()) } else { CLIENT.request(method, self.url.clone()) };
+        let mut request = if self.no_verify {
+            CLIENT_NO_VERIFY.request(method, self.url.clone())
+        } else {
+            CLIENT.request(method, self.url.clone())
+        };
 
         let mut headers = self.headers.clone();
-        let propagator = TraceContextPropagator::new();
-        propagator.inject(&mut headers);
+        opentelemetry::global::get_text_map_propagator(|propagator| propagator.inject_context(&Span::current().context(), &mut headers));
 
         for (key, value) in headers.iter() {
             request = request.header(key, value);

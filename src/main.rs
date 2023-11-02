@@ -2,6 +2,8 @@
 extern crate lazy_static;
 #[macro_use]
 extern crate tracing;
+#[macro_use]
+extern crate tracing_attributes;
 
 use clap::Parser;
 
