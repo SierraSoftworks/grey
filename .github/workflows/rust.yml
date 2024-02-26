@@ -39,6 +39,6 @@ jobs:
       run: grcov . --binary-path target/debug/deps/ -s . -t lcov --ignore-not-existing --ignore '../**' --ignore '/*' --ignore 'C:/' -o ./lcov.info
     
     - name: codecov upload
-      uses: codecov/codecov-action@v4.0.1
+      uses: codecov/codecov-action@v4.0.2
       with:
         files: ./lcov.info
