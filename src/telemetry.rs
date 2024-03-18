@@ -1,4 +1,5 @@
-use opentelemetry::{sdk::propagation::TraceContextPropagator, global};
+use opentelemetry::global;
+use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_otlp::WithExportConfig;
 use tracing::Subscriber;
 use tracing_subscriber::{prelude::*, Layer, registry::LookupSpan};
@@ -69,15 +70,15 @@ for<'a> S: LookupSpan<'a>,
                     .with_endpoint(endpoint)
                     .with_metadata(metadata),
             )
-            .with_trace_config(opentelemetry::sdk::trace::config().with_resource(
-                opentelemetry::sdk::Resource::new(vec![
+            .with_trace_config(opentelemetry_sdk::trace::config().with_resource(
+                opentelemetry_sdk::Resource::new(vec![
                     opentelemetry::KeyValue::new("service.name", "grey"),
                     opentelemetry::KeyValue::new("service.version", version!("v")),
                     opentelemetry::KeyValue::new("host.os", std::env::consts::OS),
                     opentelemetry::KeyValue::new("host.architecture", std::env::consts::ARCH),
                 ]),
             ))
-            .install_batch(opentelemetry::runtime::Tokio)
+            .install_batch(opentelemetry_sdk::runtime::Tokio)
             .unwrap();
 
         tracing_opentelemetry::layer()
