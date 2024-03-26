@@ -24,8 +24,8 @@
   },
   "homepage": "https://github.com/SierraSoftworks/grey#readme",
   "devDependencies": {
-    "@vuepress/plugin-google-analytics": "2.0.0-rc.15",
-    "@vuepress/plugin-register-components": "2.0.0-rc.15",
+    "@vuepress/plugin-google-analytics": "2.0.0-rc.21",
+    "@vuepress/plugin-register-components": "2.0.0-rc.21",
     "vuepress-vite": "2.0.0-rc.0"
   }
 }
