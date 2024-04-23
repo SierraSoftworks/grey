@@ -73,6 +73,7 @@
 
           grey-doc = craneLib.cargoDoc {
             inherit cargoArtifacts src;
+            cargoDocExtraArgs = "--no-deps --no-default-features";
           };
 
           # Check formatting
