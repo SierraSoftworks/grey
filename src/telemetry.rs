@@ -1,6 +1,6 @@
 use opentelemetry::global;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::propagation::TraceContextPropagator;
+use opentelemetry_sdk::{propagation::TraceContextPropagator, trace::Sampler};
 use tracing::Subscriber;
 use tracing_subscriber::{prelude::*, registry::LookupSpan, Layer};
 
@@ -50,7 +50,7 @@ fn load_otlp_headers() -> tonic::metadata::MetadataMap {
     tracing_metadata
 }
 
-fn load_trace_sampler() -> opentelemetry_sdk::trace::Sampler {
+fn load_trace_sampler() -> Sampler {
     fn get_trace_ratio() -> f64 {
         std::env::var("OTEL_TRACES_SAMPLER_ARG")
             .ok()
@@ -58,23 +58,23 @@ fn load_trace_sampler() -> opentelemetry_sdk::trace::Sampler {
             .unwrap_or(1.0)
     }
 
-    match std::env::var("OTEL_TRACES_SAMPLER") {
-        Ok(&"always_on") => opentelemetry_sdk::trace::Sampler::AlwaysOn,
-        Ok(&"always_off") => opentelemetry_sdk::trace::Sampler::AlwaysOff,
-        Ok(&"traceidratio") => {
+    std::env::var("OTEL_TRACES_SAMPLER").map(|s| match s.as_str() {
+        "always_on" => opentelemetry_sdk::trace::Sampler::AlwaysOn,
+        "always_off" => opentelemetry_sdk::trace::Sampler::AlwaysOff,
+        "traceidratio" => {
             opentelemetry_sdk::trace::Sampler::TraceIdRatioBased(get_trace_ratio())
         }
-        Ok(&"parentbased_always_on") => opentelemetry_sdk::trace::Sampler::ParentBased(
-            opentelemetry_sdk::trace::Sampler::AlwaysOn,
+        "parentbased_always_on" => opentelemetry_sdk::trace::Sampler::ParentBased(
+            Box::new(opentelemetry_sdk::trace::Sampler::AlwaysOn),
         ),
-        Ok(&"parentbased_always_off") => opentelemetry_sdk::trace::Sampler::ParentBased(
-            opentelemetry_sdk::trace::Sampler::AlwaysOff,
+        "parentbased_always_off" => opentelemetry_sdk::trace::Sampler::ParentBased(
+            Box::new(opentelemetry_sdk::trace::Sampler::AlwaysOff),
         ),
-        Ok(&"parentbased_traceidratio") => opentelemetry_sdk::trace::Sampler::ParentBased(
-            opentelemetry_sdk::trace::Sampler::TraceIdRatioBased(get_trace_ratio()),
+        "parentbased_traceidratio" => opentelemetry_sdk::trace::Sampler::ParentBased(
+            Box::new(opentelemetry_sdk::trace::Sampler::TraceIdRatioBased(get_trace_ratio())),
         ),
         _ => opentelemetry_sdk::trace::Sampler::AlwaysOn,
-    }
+    }).unwrap_or(opentelemetry_sdk::trace::Sampler::AlwaysOn)
 }
 
 fn load_output_layer<S>() -> Box<dyn Layer<S> + Send + Sync + 'static>
@@ -87,11 +87,6 @@ where
 
     #[cfg(debug_assertions)]
     let tracing_endpoint = Some("https://api.honeycomb.io:443".to_string());
-
-    let sampling_ratio = std::env::var("OTEL_EXPORTER_OTLP_SAMPLING_RATIO")
-        .ok()
-        .and_then(|ratio| ratio.parse().ok())
-        .unwrap_or(1.0);
 
     if let Some(endpoint) = tracing_endpoint {
         let metadata = load_otlp_headers();
