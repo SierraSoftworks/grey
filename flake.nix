@@ -34,16 +34,18 @@
           *.nix
           '' ./.;
 
-        nativeBuildInputs = [
-          pkgs.pkg-config
-        ]
+        nativeBuildInputs = []
         ++ lib.optionals stdenv.isDarwin [
           pkgs.libiconv
           pkgs.darwin.apple_sdk.frameworks.Security
           pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
         ];
 
-        buildInputs = [ pkgs.openssl pkgs.protobuf ];
+        buildInputs = [
+          pkgs.pkg-config
+          pkgs.openssl
+          pkgs.protobuf
+        ];
 
         cargoArtifacts = craneLib.buildDepsOnly {
           inherit src nativeBuildInputs buildInputs;
@@ -69,6 +71,10 @@
           grey-clippy = craneLib.cargoClippy {
             inherit cargoArtifacts src buildInputs;
             cargoClippyExtraArgs = "--all-targets --no-deps";
+          };
+
+          grey-doc = craneLib.cargoDoc {
+            inherit cargoArtifacts src;
           };
 
           # Check formatting
