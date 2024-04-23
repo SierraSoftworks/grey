@@ -71,11 +71,6 @@
             cargoClippyExtraArgs = "--all-targets --no-deps";
           };
 
-          grey-doc = craneLib.cargoDoc {
-            inherit cargoArtifacts src;
-            cargoDocExtraArgs = "--no-deps --no-default-features";
-          };
-
           # Check formatting
           grey-fmt = craneLib.cargoFmt {
             inherit src;
