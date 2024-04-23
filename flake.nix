@@ -41,7 +41,7 @@
           rustPlatform = pkgs.rustPlatform;
         in
         {
-          grey = rustPlatform.buildRustPackage rec {
+          grey = rustPlatform.buildRustPackage {
             name = "grey-${system}";
             pname = "grey";
 
