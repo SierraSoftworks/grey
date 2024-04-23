@@ -13,6 +13,7 @@ async-trait = "0.1"
 clap = { version = "4.5", features = ["derive"] }
 futures = "0.3"
 lazy_static = "1.4"
+openssl-sys = { version = "0.9", features=["vendored"], optional = true }
 opentelemetry = { version = "0.22" }
 opentelemetry-otlp = { version = "0.15", features = ["tls-roots"] }
 opentelemetry_sdk = { version = "0.22", features = ["rt-tokio"] }
@@ -28,3 +29,7 @@ tracing-futures = { version = "0.2.5", features = ["futures-03"] }
 tracing-opentelemetry = "0.23"
 tracing-subscriber = { version = "0.3.18", features = ["tracing-log"] }
 trust-dns-resolver = { version = "0.23", features = ["tokio-runtime"] }
+
+[features]
+default = []
+openssl_src = ["dep:openssl-sys"]

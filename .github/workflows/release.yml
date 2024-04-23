@@ -79,7 +79,7 @@ jobs:
             experimental: true
             setup: |
               sudo apt-get update
-              sudo apt-get install -y gcc-aarch64-linux-gnu lld pkg-config libssl-dev
+              sudo apt-get install -y gcc-aarch64-linux-gnu lld pkg-config
 
               # Ensure that the libgcc library can be found
               sudo ln -s /usr/aarch64-linux-gnu/lib/libgcc_s.so.1 /usr/aarch64-linux-gnu/lib/libgcc_s.so
@@ -88,7 +88,7 @@ jobs:
               Expand-Archive /tmp/protoc.zip -DestinationPath ../tools
               Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
             strip: aarch64-linux-gnu-strip --strip-debug
-            flags: --no-default-features
+            flags: --features openssl_src
 
           # Apple MacOS builds
           - arch: amd64

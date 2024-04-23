@@ -34,10 +34,16 @@
           *.nix
           '' ./.;
 
-        nativeBuildInputs = [pkgs.pkg-config pkgs.protobuf];
+        nativeBuildInputs = [
+          pkgs.pkg-config
+        ]
+        ++ lib.optionals stdenv.isDarwin [
+          pkgs.libiconv
+          pkgs.darwin.apple_sdk.frameworks.Security
+          pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
+        ];
 
-        buildInputs = [ pkgs.openssl ]
-        ++ lib.optionals stdenv.isDarwin [pkgs.libiconv pkgs.darwin.apple_sdk.frameworks.Security pkgs.darwin.apple_sdk.frameworks.SystemConfiguration];
+        buildInputs = [ pkgs.openssl pkgs.protobuf ];
 
         cargoArtifacts = craneLib.buildDepsOnly {
           inherit src nativeBuildInputs buildInputs;
@@ -105,6 +111,7 @@
           nativeBuildInputs = with pkgs; [
             cargo
             rustc
+            nodejs
           ] ++ nativeBuildInputs;
         };
       });
