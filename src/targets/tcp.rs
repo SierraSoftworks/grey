@@ -26,8 +26,7 @@ impl Target for TcpTarget {
 
         let _stream = sock.connect(addr).await?;
 
-        Ok(Sample::default()
-            .with("net.ip", addr.ip().to_string()))
+        Ok(Sample::default().with("net.ip", addr.ip().to_string()))
     }
 }
 

@@ -1,11 +1,11 @@
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Policy {
-    #[serde(with="duration_ms")]
+    #[serde(with = "duration_ms")]
     pub interval: Duration,
-    #[serde(with="duration_ms")]
+    #[serde(with = "duration_ms")]
     pub timeout: Duration,
     #[serde(default)]
     pub retries: Option<u8>,
@@ -29,7 +29,7 @@ mod duration_ms {
     }
 
     struct DurationMillisecondVisitor;
-    impl <'de> serde::de::Visitor<'de> for DurationMillisecondVisitor {
+    impl<'de> serde::de::Visitor<'de> for DurationMillisecondVisitor {
         type Value = Duration;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {

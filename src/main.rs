@@ -9,7 +9,8 @@ use clap::Parser;
 
 mod config;
 mod engine;
-#[macro_use] mod macros;
+#[macro_use]
+mod macros;
 mod policy;
 mod probe;
 mod sample;

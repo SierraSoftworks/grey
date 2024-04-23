@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use crate::sample::SampleValue;
 
@@ -20,7 +20,11 @@ pub enum ValidatorType {
 }
 
 impl Validator for ValidatorType {
-    fn validate(&self, field: &str, sample: &SampleValue) -> Result<(), Box<dyn std::error::Error>> {
+    fn validate(
+        &self,
+        field: &str,
+        sample: &SampleValue,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         match self {
             ValidatorType::OneOf(validator) => validator.validate(field, sample),
             ValidatorType::Equals(validator) => validator.validate(field, sample),

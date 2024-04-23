@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use crate::SampleValue;
 
@@ -10,11 +10,19 @@ use super::Validator;
 pub struct OneOf(Vec<SampleValue>);
 
 impl Validator for OneOf {
-    fn validate(&self, field: &str, sample: &crate::SampleValue) -> Result<(), Box<dyn std::error::Error>> {
+    fn validate(
+        &self,
+        field: &str,
+        sample: &crate::SampleValue,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if self.0.contains(sample) {
             Ok(())
         } else {
-            Err(format!("The {} value '{}' did not match any of the expected values ({:?}).", field, sample, self.0).into())
+            Err(format!(
+                "The {} value '{}' did not match any of the expected values ({:?}).",
+                field, sample, self.0
+            )
+            .into())
         }
     }
 }

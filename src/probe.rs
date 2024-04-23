@@ -83,7 +83,8 @@ impl Probe {
                 validator=%validator,
                 otel.status_code=?Status::Unset,
                 otel.status_message=field::Empty
-            ).entered();
+            )
+            .entered();
 
             match validator.validate(path, sample.get(path)) {
                 Ok(_) => {

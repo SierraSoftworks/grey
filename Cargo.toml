@@ -13,7 +13,6 @@ async-trait = "0.1"
 clap = { version = "4.5", features = ["derive"] }
 futures = "0.3"
 lazy_static = "1.4"
-openssl-sys = { version = "0.9", features = ["vendored"] }
 opentelemetry = { version = "0.22" }
 opentelemetry-otlp = { version = "0.15", features = ["tls-roots"] }
 opentelemetry_sdk = { version = "0.22", features = ["rt-tokio"] }

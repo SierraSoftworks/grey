@@ -58,23 +58,25 @@ fn load_trace_sampler() -> Sampler {
             .unwrap_or(1.0)
     }
 
-    std::env::var("OTEL_TRACES_SAMPLER").map(|s| match s.as_str() {
-        "always_on" => opentelemetry_sdk::trace::Sampler::AlwaysOn,
-        "always_off" => opentelemetry_sdk::trace::Sampler::AlwaysOff,
-        "traceidratio" => {
-            opentelemetry_sdk::trace::Sampler::TraceIdRatioBased(get_trace_ratio())
-        }
-        "parentbased_always_on" => opentelemetry_sdk::trace::Sampler::ParentBased(
-            Box::new(opentelemetry_sdk::trace::Sampler::AlwaysOn),
-        ),
-        "parentbased_always_off" => opentelemetry_sdk::trace::Sampler::ParentBased(
-            Box::new(opentelemetry_sdk::trace::Sampler::AlwaysOff),
-        ),
-        "parentbased_traceidratio" => opentelemetry_sdk::trace::Sampler::ParentBased(
-            Box::new(opentelemetry_sdk::trace::Sampler::TraceIdRatioBased(get_trace_ratio())),
-        ),
-        _ => opentelemetry_sdk::trace::Sampler::AlwaysOn,
-    }).unwrap_or(opentelemetry_sdk::trace::Sampler::AlwaysOn)
+    std::env::var("OTEL_TRACES_SAMPLER")
+        .map(|s| match s.as_str() {
+            "always_on" => opentelemetry_sdk::trace::Sampler::AlwaysOn,
+            "always_off" => opentelemetry_sdk::trace::Sampler::AlwaysOff,
+            "traceidratio" => {
+                opentelemetry_sdk::trace::Sampler::TraceIdRatioBased(get_trace_ratio())
+            }
+            "parentbased_always_on" => opentelemetry_sdk::trace::Sampler::ParentBased(Box::new(
+                opentelemetry_sdk::trace::Sampler::AlwaysOn,
+            )),
+            "parentbased_always_off" => opentelemetry_sdk::trace::Sampler::ParentBased(Box::new(
+                opentelemetry_sdk::trace::Sampler::AlwaysOff,
+            )),
+            "parentbased_traceidratio" => opentelemetry_sdk::trace::Sampler::ParentBased(Box::new(
+                opentelemetry_sdk::trace::Sampler::TraceIdRatioBased(get_trace_ratio()),
+            )),
+            _ => opentelemetry_sdk::trace::Sampler::AlwaysOn,
+        })
+        .unwrap_or(opentelemetry_sdk::trace::Sampler::AlwaysOn)
 }
 
 fn load_output_layer<S>() -> Box<dyn Layer<S> + Send + Sync + 'static>

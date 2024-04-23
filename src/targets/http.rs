@@ -1,11 +1,11 @@
-use std::{collections::HashMap, str::FromStr, fmt::Display};
+use std::{collections::HashMap, fmt::Display, str::FromStr};
 
 use opentelemetry::trace::SpanKind;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use tracing::{field, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use crate::{Target, Sample};
+use crate::{Sample, Target};
 
 lazy_static! {
     static ref CLIENT_NO_VERIFY: reqwest::Client = reqwest::ClientBuilder::new()
@@ -13,7 +13,6 @@ lazy_static! {
         .danger_accept_invalid_certs(true)
         .build()
         .unwrap();
-
     static ref CLIENT: reqwest::Client = reqwest::ClientBuilder::new()
         .user_agent(version!("SierraSoftworks/grey@v"))
         .build()
@@ -27,7 +26,7 @@ fn default_get() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpTarget {
     pub url: String,
-    #[serde(default="default_get")]
+    #[serde(default = "default_get")]
     pub method: String,
     #[serde(default)]
     pub headers: HashMap<String, String>,
@@ -61,7 +60,9 @@ impl Target for HttpTarget {
         };
 
         let mut headers = self.headers.clone();
-        opentelemetry::global::get_text_map_propagator(|propagator| propagator.inject_context(&Span::current().context(), &mut headers));
+        opentelemetry::global::get_text_map_propagator(|propagator| {
+            propagator.inject_context(&Span::current().context(), &mut headers)
+        });
 
         for (key, value) in headers.iter() {
             request = request.header(key, value);
@@ -74,7 +75,10 @@ impl Target for HttpTarget {
         let response = request.send().await?;
         Span::current()
             .record("http.status_code", response.status().as_u16())
-            .record("http.response_content_length", response.content_length().unwrap_or(0))
+            .record(
+                "http.response_content_length",
+                response.content_length().unwrap_or(0),
+            )
             .record("http.flavor", field::debug(response.version()));
 
         let mut sample = Sample::default()
@@ -82,7 +86,10 @@ impl Target for HttpTarget {
             .with("http.version", format!("{:?}", response.version()));
 
         for (key, value) in response.headers().iter() {
-            sample = sample.with(format!("http.header.{}", key.as_str().to_lowercase()), value.to_str()?.to_owned());
+            sample = sample.with(
+                format!("http.header.{}", key.as_str().to_lowercase()),
+                value.to_str()?.to_owned(),
+            );
         }
 
         Ok(sample.with("http.body", response.text().await?))

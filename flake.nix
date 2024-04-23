@@ -1,91 +1,111 @@
 {
   description = "A lightweight, OpenTelemetry native, external synthetic probing agent.";
 
-  outputs = { self, nixpkgs }:
-    {
-      devShells = nixpkgs.lib.genAttrs ["aarch64-darwin" "aarch64-linux" "x86_64-darwin" "x86_64-linux"] (system:
-        let
-          pkgs = nixpkgs.legacyPackages.${system};
-          lib = pkgs.lib;
-          stdenv = pkgs.stdenv;
-        in
-        {
-          default = stdenv.mkDerivation {
-            name = "grey-shell-${system}";
-            system = system;
-            nativeBuildInputs = [
-              pkgs.rustc
-              pkgs.cargo
-              pkgs.nodejs
-              pkgs.protobuf
-              pkgs.pkg-config
-            ] ++ lib.optionals stdenv.isDarwin [
-              pkgs.darwin.apple_sdk.frameworks.Security
-              pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
-            ];
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
-            buildInputs = [
-              pkgs.libiconv
-              pkgs.openssl
-            ];
-
-            PROTOC = "${pkgs.protobuf}/bin/protoc";
-          };
-        }
-      );
-
-      packages = nixpkgs.lib.genAttrs ["aarch64-darwin" "aarch64-linux" "x86_64-darwin" "x86_64-linux"] (system:
-        let
-          pkgs = nixpkgs.legacyPackages.${system};
-          lib = pkgs.lib;
-          rustPlatform = pkgs.rustPlatform;
-        in
-        {
-          grey = rustPlatform.buildRustPackage {
-            name = "grey-${system}";
-            pname = "grey";
-
-            src = pkgs.nix-gitignore.gitignoreSourcePure ''
-            /example
-            /target
-            /result
-            *.nix
-            '' ./.;
-
-            doCheck = false;
-
-            nativeBuildInputs = [
-              pkgs.protobuf
-              pkgs.pkg-config
-            ];
-
-            buildInputs = [pkgs.openssl]
-              ++ lib.optionals pkgs.stdenv.isDarwin [pkgs.darwin.apple_sdk.frameworks.Security pkgs.darwin.apple_sdk.frameworks.SystemConfiguration];
-
-            PROTOC = "${pkgs.protobuf}/bin/protoc";
-
-            cargoLock = {
-              lockFile = ./Cargo.lock;
-
-              outputHashes = {
-                  "tracing-attributes-0.2.0" = "sha256-0Mm7YNgK3qkytq8eBRjUofaLLOVt/p5NF+jeBLr/K/Y=";
-              };
-            };
-
-            meta = with lib; {
-              description = "A lightweight, OpenTelemetry native, external synthetic probing agent.";
-              homepage = "https://github.com/SierraSoftworks/grey";
-              license = licenses.mit;
-              maintainers = [
-                {
-                  name = "Benjamin Pannell";
-                  email = "contact@sierrasoftworks.com";
-                }
-              ];
-            };
-          };
-          default = self.packages.${system}.grey;
-        }
-      );
+    crane = {
+      url = "github:ipetkov/crane";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    flake-utils.url = "github:numtide/flake-utils";
+
+    advisory-db = {
+      url = "github:rustsec/advisory-db";
+      flake = false;
+    };
+  };
+
+  outputs = { self, nixpkgs, crane, flake-utils, advisory-db, ... }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs {
+          inherit system;
+        };
+
+        inherit (pkgs) lib stdenv;
+
+        craneLib = crane.lib.${system};
+        src = pkgs.nix-gitignore.gitignoreSourcePure ''
+          /example
+          /target
+          /result
+          *.nix
+          '' ./.;
+
+        nativeBuildInputs = [pkgs.pkg-config pkgs.protobuf];
+
+        buildInputs = [ pkgs.openssl ]
+        ++ lib.optionals stdenv.isDarwin [pkgs.libiconv pkgs.darwin.apple_sdk.frameworks.Security pkgs.darwin.apple_sdk.frameworks.SystemConfiguration];
+
+        cargoArtifacts = craneLib.buildDepsOnly {
+          inherit src nativeBuildInputs buildInputs;
+        };
+
+        grey = craneLib.buildPackage {
+          inherit cargoArtifacts src nativeBuildInputs buildInputs;
+
+          doCheck = false;
+        };
+      in
+      {
+        checks = {
+          # Build the crate as part of `nix flake check` for convenience
+          inherit grey;
+
+          # Run clippy (and deny all warnings) on the crate source,
+          # again, resuing the dependency artifacts from above.
+          #
+          # Note that this is done as a separate derivation so that
+          # we can block the CI if there are issues here, but not
+          # prevent downstream consumers from building our crate by itself.
+          grey-clippy = craneLib.cargoClippy {
+            inherit cargoArtifacts src buildInputs;
+            cargoClippyExtraArgs = "--all-targets --no-deps";
+          };
+
+          grey-doc = craneLib.cargoDoc {
+            inherit cargoArtifacts src;
+          };
+
+          # Check formatting
+          grey-fmt = craneLib.cargoFmt {
+            inherit src;
+          };
+
+          # Audit dependencies
+          grey-audit = craneLib.cargoAudit {
+            inherit src advisory-db;
+          };
+
+          # Run tests with cargo-nextest
+          # Consider setting `doCheck = false` on `my-crate` if you do not want
+          # the tests to run twice
+          grey-nextest = craneLib.cargoNextest {
+            inherit cargoArtifacts src nativeBuildInputs buildInputs;
+            partitions = 1;
+            partitionType = "count";
+
+            # Disable impure tests (which access the network and/or filesystem)
+            cargoNextestExtraArgs = "--no-fail-fast";
+          };
+        };
+
+        packages.default = grey;
+
+        apps.default = flake-utils.lib.mkApp {
+          drv = grey;
+        };
+
+        devShells.default = pkgs.mkShell {
+          inputsFrom = builtins.attrValues self.checks;
+
+          # Extra inputs can be added here
+          nativeBuildInputs = with pkgs; [
+            cargo
+            rustc
+          ] ++ nativeBuildInputs;
+        };
+      });
 }

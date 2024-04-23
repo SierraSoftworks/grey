@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use crate::SampleValue;
 
@@ -10,11 +10,19 @@ use super::Validator;
 pub struct Equals(SampleValue);
 
 impl Validator for Equals {
-    fn validate(&self, field: &str, sample: &crate::SampleValue) -> Result<(), Box<dyn std::error::Error>> {
+    fn validate(
+        &self,
+        field: &str,
+        sample: &crate::SampleValue,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if sample == &self.0 {
             Ok(())
         } else {
-            Err(format!("The {} value '{}' did not match the expected value '{}'.", field, sample, self.0).into())
+            Err(format!(
+                "The {} value '{}' did not match the expected value '{}'.",
+                field, sample, self.0
+            )
+            .into())
         }
     }
 }

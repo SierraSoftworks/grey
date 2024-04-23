@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use crate::sample::SampleValue;
 
@@ -10,7 +10,11 @@ use super::Validator;
 pub struct Contains(SampleValue);
 
 impl Validator for Contains {
-    fn validate(&self, field: &str, sample: &crate::SampleValue) -> Result<(), Box<dyn std::error::Error>> {
+    fn validate(
+        &self,
+        field: &str,
+        sample: &crate::SampleValue,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         match (sample, &self.0) {
             (SampleValue::String(value), SampleValue::String(substr)) => {
                 if value.contains(substr) {
