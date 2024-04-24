@@ -111,17 +111,8 @@ jobs:
           - arch: "arm64"
             os: linux
             run_on: ubuntu-latest
-            target: aarch64-unknown-linux-musl
-            setup: |
-              sudo apt-get update
-              sudo apt-get install -y gcc-aarch64-linux-gnu lld pkg-config
-
-              # Ensure that the libgcc library can be found
-              sudo ln -s /usr/aarch64-linux-gnu/lib/libgcc_s.so.1 /usr/aarch64-linux-gnu/lib/libgcc_s.so
-
-              Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v${env:PROTOC_VERSION}/protoc-${env:PROTOC_VERSION}-linux-x86_64.zip
-              Expand-Archive /tmp/protoc.zip -DestinationPath ../tools
-              Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
+            target: aarch64-unknown-linux-gnu
+            cross: true
             flags: --features openssl_src
 
           # Apple MacOS builds
@@ -167,6 +158,7 @@ jobs:
       - name: cargo build
         uses: actions-rs/cargo@v1.0.3
         with:
+          use-cross: ${{ matrix.cross }}
           command: build
           args: --release --target ${{ matrix.target }} ${{ matrix.flags }}
 
