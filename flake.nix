@@ -96,7 +96,7 @@
             partitionType = "count";
 
             # Disable impure tests (which access the network and/or filesystem)
-            cargoNextestExtraArgs = "--no-fail-fast";
+            cargoNextestExtraArgs = "--no-fail-fast --features pure_tests";
           };
         };
 

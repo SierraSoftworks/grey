@@ -47,6 +47,7 @@ impl Display for DnsTarget {
 }
 
 #[cfg(test)]
+#[cfg(not(feature = "pure_tests"))]
 mod tests {
     use crate::sample::SampleValue;
 

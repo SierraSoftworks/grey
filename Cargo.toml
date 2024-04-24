@@ -32,4 +32,5 @@ trust-dns-resolver = { version = "0.23", features = ["tokio-runtime"] }
 
 [features]
 default = []
+pure_tests = []
 openssl_src = ["dep:openssl-sys"]
