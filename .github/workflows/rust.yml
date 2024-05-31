@@ -1,7 +1,6 @@
 name: Rust
 on:
-  push:
-    tags-ignore: .*
+  push: {}
   release:
     types: [published]
 
@@ -56,12 +55,12 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
           Get-Content $env:GITHUB_PATH
         shell: pwsh
-    
+
       - name: cargo install grcov
         uses: SierraSoftworks/setup-grcov@v1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          
+
       - name: Run tests
         uses: actions-rs/cargo@v1
         with:
@@ -69,10 +68,10 @@ jobs:
           args: --all-features --no-fail-fast
         env:
             RUSTFLAGS: -Cinstrument-coverage
-          
+
       - name: grcov
         run: grcov . --binary-path target/debug/deps/ -s . -t lcov --ignore-not-existing --ignore '../**' --ignore '/*' --ignore 'C:/' -o ./lcov.info
-      
+
       - name: codecov upload
         uses: codecov/codecov-action@v4.3.0
         with:
@@ -98,7 +97,7 @@ jobs:
               Invoke-WebRequest -OutFile protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v${env:PROTOC_VERSION}/protoc-${env:PROTOC_VERSION}-win64.zip
               Expand-Archive protoc.zip -DestinationPath ../tools
               Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
-          
+
           # Linux builds
           - arch: amd64
             run_on: ubuntu-latest
@@ -177,4 +176,3 @@ jobs:
         with:
           name: grey-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.extension }}
           path: target/${{ matrix.target }}/release/grey${{ matrix.extension }}
-
