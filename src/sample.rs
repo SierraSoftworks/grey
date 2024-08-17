@@ -43,41 +43,24 @@ impl SampleValue {
     }
 }
 
-impl From<i16> for SampleValue {
-    fn from(value: i16) -> Self {
-        SampleValue::Int(value.into())
-    }
+macro_rules! number {
+    ($type:ident, $base:ty => $target:ty) => {
+        impl From<$base> for SampleValue {
+            fn from(value: $base) -> Self {
+                SampleValue::$type(value as $target)
+            }
+        }
+    };
 }
 
-impl From<u16> for SampleValue {
-    fn from(value: u16) -> Self {
-        SampleValue::Int(value.into())
-    }
-}
-
-impl From<i32> for SampleValue {
-    fn from(value: i32) -> Self {
-        SampleValue::Int(value.into())
-    }
-}
-
-impl From<u32> for SampleValue {
-    fn from(value: u32) -> Self {
-        SampleValue::Int(value.into())
-    }
-}
-
-impl From<i64> for SampleValue {
-    fn from(value: i64) -> Self {
-        SampleValue::Int(value)
-    }
-}
-
-impl From<f64> for SampleValue {
-    fn from(value: f64) -> Self {
-        SampleValue::Double(value)
-    }
-}
+number!(Int, i8 => i64);
+number!(Int, i16 => i64);
+number!(Int, u16 => i64);
+number!(Int, i32 => i64);
+number!(Int, u32 => i64);
+number!(Int, i64 => i64);
+number!(Double, f32 => f64);
+number!(Double, f64 => f64);
 
 impl From<String> for SampleValue {
     fn from(value: String) -> Self {

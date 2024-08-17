@@ -35,3 +35,21 @@ impl Display for TcpTarget {
         write!(f, "TCP {}", self.host)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::SampleValue;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_tcp_target() {
+        let target = TcpTarget {
+            host: "httpbin.org:443".to_string(),
+        };
+
+        let sample = target.run().await.unwrap();
+
+        assert!(matches!(sample.get("net.ip"), SampleValue::String(s) if !s.is_empty()));
+    }
+}

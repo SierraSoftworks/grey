@@ -10,6 +10,8 @@ path = "./src/main.rs"
 
 [dependencies]
 async-trait = "0.1"
+chrono = { version = "0.4.38", features = ["serde"] }
+circular-buffer = "0.1.7"
 clap = { version = "4.5", features = ["derive"] }
 futures = "0.3"
 lazy_static = "1.5"

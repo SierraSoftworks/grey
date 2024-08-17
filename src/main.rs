@@ -9,13 +9,16 @@ use clap::Parser;
 
 mod config;
 mod engine;
+mod history;
 #[macro_use]
 mod macros;
 mod policy;
 mod probe;
+mod result;
 mod sample;
 mod targets;
 mod telemetry;
+mod ui;
 mod validators;
 
 pub use config::Config;

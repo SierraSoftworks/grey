@@ -13,7 +13,7 @@ pub async fn load_config<P: Into<PathBuf>>(path: P) -> Result<Config, Box<dyn st
     Ok(config)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub probes: Vec<Probe>,

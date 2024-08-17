@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use opentelemetry::trace::{SpanKind, Status};
 use tokio::time::Instant;
 use tracing::{field, instrument, Id, Instrument, Level, Span};
@@ -5,22 +7,29 @@ use tracing::{field, instrument, Id, Instrument, Level, Span};
 use crate::{Config, Probe};
 
 pub struct Engine {
-    pub config: Config,
+    probes: Vec<Arc<Probe>>,
 }
 
 const NO_PARENT: Option<Id> = None;
 
 impl Engine {
     pub fn new(config: Config) -> Self {
-        Self { config }
+        Self {
+            probes: config.probes.into_iter().map(Arc::new).collect(),
+        }
     }
 
     #[instrument(name = "engine", skip(self), fields(otel.kind=?SpanKind::Internal), err(Debug))]
     pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
-        futures::future::join_all(self.config.probes.iter().map(|probe| self.schedule(probe)))
-            .await
-            .into_iter()
-            .collect::<Result<Vec<()>, Box<dyn std::error::Error>>>()?;
+        futures::future::join_all(
+            self.probes
+                .iter()
+                .cloned()
+                .map(|probe| self.schedule(probe)),
+        )
+        .await
+        .into_iter()
+        .collect::<Result<Vec<()>, Box<dyn std::error::Error>>>()?;
 
         Ok(())
     }
@@ -31,7 +40,7 @@ impl Engine {
         otel.status_code=?Status::Unset,
         error=field::Empty
     ))]
-    async fn schedule(&self, probe: &Probe) -> Result<(), Box<dyn std::error::Error>> {
+    async fn schedule(&self, probe: Arc<Probe>) -> Result<(), Box<dyn std::error::Error>> {
         // Calculate a random delay between 0 and the probe interval
         let start_delay = rand::random::<u128>() % probe.policy.interval.as_millis();
         let mut next_run_time =
