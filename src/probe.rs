@@ -6,9 +6,14 @@ use tracing_batteries::prelude::opentelemetry::trace::{
 };
 use tracing_batteries::prelude::*;
 
-use crate::{targets::TargetType, validators::ValidatorType, Policy, Target, Validator};
+use crate::{
+    result::{ProbeResult, ValidationResult},
+    targets::TargetType,
+    validators::ValidatorType,
+    Policy, Target, Validator,
+};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Probe {
     pub name: String,
     pub policy: Policy,
@@ -17,6 +22,9 @@ pub struct Probe {
     pub tags: HashMap<String, String>,
     #[serde(default)]
     pub validators: HashMap<String, ValidatorType>,
+
+    #[serde(skip)]
+    pub history: std::sync::RwLock<circular_buffer::CircularBuffer<256, ProbeResult>>,
 }
 
 impl Probe {
@@ -32,24 +40,22 @@ impl Probe {
         probe.attempts=0,
     ))]
     pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut history = ProbeResult::new();
         let total_attempts = self.policy.retries.unwrap_or(2);
-        let mut attempt_number = 0;
 
         let result = tokio::time::timeout(self.policy.timeout, async {
-            while attempt_number < total_attempts {
-                attempt_number += 1;
+            while history.attempts < total_attempts {
+                history.attempts += 1;
                 info!(
                     "Running probe attempt {}/{}...",
-                    attempt_number, total_attempts,
+                    history.attempts, total_attempts,
                 );
-                match self.run_attempt().await {
-                    Ok(_) => {
-                        break;
-                    }
+                match self.run_attempt(&mut history).await {
+                    Ok(res) => return Ok(res),
                     Err(err) => {
                         warn!("Probe failed: {}", err);
-                        if attempt_number == total_attempts {
-                            error!("Probe failed after {} attempts: {}", attempt_number, err);
+                        if history.attempts == total_attempts {
+                            error!("Probe failed after {} attempts: {}", history.attempts, err);
                             return Err(err);
                         }
                     }
@@ -60,20 +66,40 @@ impl Probe {
         })
         .await;
 
-        Span::current().record("probe.attempts", attempt_number);
+        Span::current().record("probe.attempts", history.attempts);
 
-        match result {
-            Ok(res) => res,
-            Err(_) => Err(format!(
-                "Probe timed out after {} milliseconds.",
-                self.policy.timeout.as_millis()
-            )
-            .into()),
-        }
+        let result = match result {
+            Ok(Ok(_)) => {
+                history.pass = true;
+                history.message = "Probe completed successfully.".to_owned();
+                Ok(())
+            }
+            Ok(Err(e)) => {
+                history.pass = false;
+                history.message = e.to_string();
+                Err(e)
+            }
+            Err(_) => {
+                history.pass = false;
+                history.message = format!(
+                    "Probe timed out after {} milliseconds.",
+                    self.policy.timeout.as_millis()
+                );
+
+                Err(history.message.clone().into())
+            }
+        };
+
+        self.history.write().unwrap().push_back(history);
+        result
     }
 
+
     #[tracing::instrument(name = "probe.attempt", skip(self), err(Debug), fields(otel.kind=?OpenTelemetrySpanKind::Internal))]
-    async fn run_attempt(&self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn run_attempt(
+        &self,
+        history: &mut ProbeResult,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let sample = self.target.run().await?;
         debug!(?sample, "Probe sample collected successfully.");
         for (path, validator) in &self.validators {
@@ -91,11 +117,17 @@ impl Probe {
             match validator.validate(path, sample.get(path)) {
                 Ok(_) => {
                     span.record("otel.status_code", "Ok");
+                    history
+                        .validations
+                        .insert(path.to_owned(), ValidationResult::pass(validator));
                 }
                 Err(err) => {
                     span.record("otel.status_code", "Error")
                         .record("otel.status_message", &err.to_string());
                     error!(error = err, "{}", err);
+                    history
+                        .validations
+                        .insert(path.to_owned(), ValidationResult::fail(validator, &err));
                     return Err(err);
                 }
             }

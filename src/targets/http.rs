@@ -100,3 +100,26 @@ impl Display for HttpTarget {
         write!(f, "HTTP {} {}", self.method, self.url)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::SampleValue;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_get() {
+        let target = HttpTarget {
+            url: "https://httpbin.org/get".to_string(),
+            method: "GET".to_string(),
+            headers: HashMap::new(),
+            body: None,
+            no_verify: true,
+        };
+
+        let sample = target.run().await.unwrap();
+        assert_eq!(sample.get("http.status"), &200.into());
+        assert_eq!(sample.get("http.version"), &"HTTP/1.1".into());
+        assert!(matches!(sample.get("http.body"), SampleValue::String(s) if !s.is_empty()));
+    }
+}
