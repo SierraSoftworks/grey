@@ -1,0 +1,24 @@
+---
+ui:
+  enabled: true
+  listen: 127.0.0.1:3002
+
+probes:
+  - name: example.healthy
+    policy:
+      interval: 500
+      timeout: 2000
+      retries: 3
+    target: !Dns
+      domain: google.com
+    validators:
+      dns.answers: !NotEquals []
+  - name: example.unhealthy
+    policy:
+      interval: 500
+      timeout: 2000
+      retries: 3
+    target: !Tcp
+      host: example.com:443
+    validators:
+      net.ip: !Equals "127.0.0.1"
