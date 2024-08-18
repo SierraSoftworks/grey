@@ -1,3 +1,4 @@
+use std::sync::{atomic::AtomicBool, Arc};
 use tokio::time::Instant;
 use tracing_batteries::prelude::opentelemetry::trace::{
     SpanKind as OpenTelemetrySpanKind, Status as OpenTelemetryStatus,
@@ -20,12 +21,12 @@ impl Engine {
     }
 
     #[tracing::instrument(name = "engine", skip(self), fields(otel.kind=?OpenTelemetrySpanKind::Internal), err(Debug))]
-    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(&self, cancel: &AtomicBool) -> Result<(), Box<dyn std::error::Error>> {
         futures::future::join_all(
             self.probes
                 .iter()
                 .cloned()
-                .map(|probe| self.schedule(probe)),
+                .map(|probe| self.schedule(probe, cancel)),
         )
         .await
         .into_iter()
@@ -40,7 +41,11 @@ impl Engine {
         otel.status_code=?OpenTelemetryStatus::Unset,
         error=EmptyField
     ))]
-    async fn schedule(&self, probe: Arc<Probe>) -> Result<(), Box<dyn std::error::Error>> {
+    async fn schedule(
+        &self,
+        probe: Arc<Probe>,
+        cancel: &AtomicBool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // Calculate a random delay between 0 and the probe interval
         let start_delay = rand::random::<u128>() % probe.policy.interval.as_millis();
         let mut next_run_time =
@@ -48,10 +53,14 @@ impl Engine {
 
         let parent_span = Span::current();
 
-        loop {
+        while !cancel.load(std::sync::atomic::Ordering::Relaxed) {
             let now = Instant::now();
-            if now < next_run_time {
-                tokio::time::sleep(next_run_time - now).await;
+            let sleep_time = next_run_time - now;
+            if sleep_time > tokio::time::Duration::from_secs(1) {
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                continue;
+            } else if sleep_time > tokio::time::Duration::from_secs(0) {
+                tokio::time::sleep(sleep_time).await;
             }
 
             next_run_time += probe.policy.interval;
@@ -66,7 +75,7 @@ impl Engine {
             probe_span.follows_from(&parent_span);
 
             info!("Starting next probing session...");
-            let run_result = probe.run().instrument(probe_span.clone()).await;
+            let run_result = probe.run(cancel).instrument(probe_span.clone()).await;
             match run_result {
                 Ok(_) => {
                     probe_span.record("otel.status_code", "Ok");
@@ -78,5 +87,7 @@ impl Engine {
                 }
             }
         }
+
+        Ok(())
     }
 }

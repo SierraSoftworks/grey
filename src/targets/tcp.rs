@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, sync::atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
 use tokio::net::{lookup_host, TcpSocket};
@@ -12,7 +12,7 @@ pub struct TcpTarget {
 
 #[async_trait::async_trait]
 impl Target for TcpTarget {
-    async fn run(&self) -> Result<Sample, Box<dyn std::error::Error>> {
+    async fn run(&self, _cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>> {
         let addr = lookup_host(&self.host)
             .await?
             .next()
@@ -48,7 +48,8 @@ mod tests {
             host: "httpbin.org:443".to_string(),
         };
 
-        let sample = target.run().await.unwrap();
+        let cancel = AtomicBool::new(false);
+        let sample = target.run(&cancel).await.unwrap();
 
         assert!(matches!(sample.get("net.ip"), SampleValue::String(s) if !s.is_empty()));
     }

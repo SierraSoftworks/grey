@@ -2,6 +2,8 @@
 extern crate lazy_static;
 extern crate tracing_batteries;
 
+use std::sync::atomic::AtomicBool;
+
 use clap::Parser;
 
 mod config;
@@ -25,8 +27,14 @@ pub use sample::{Sample, SampleValue};
 pub use targets::Target;
 pub use validators::Validator;
 
+static CANCEL: AtomicBool = AtomicBool::new(false);
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ctrlc::set_handler(|| {
+        CANCEL.store(true, std::sync::atomic::Ordering::Relaxed);
+    })?;
+
     let args = Args::parse();
 
     let telemetry = tracing_batteries::Session::new("grey", version!("v"))
@@ -38,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting Grey with {} probes...", config.probes.len());
 
     let engine = Engine::new(config);
-    engine.run().await?;
+    engine.run(&CANCEL).await?;
 
     telemetry.shutdown();
 

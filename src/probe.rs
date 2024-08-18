@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
 use tracing_batteries::prelude::opentelemetry::trace::{
@@ -39,18 +39,20 @@ impl Probe {
         probe.tags=?self.tags,
         probe.attempts=0,
     ))]
-    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(&self, cancel: &AtomicBool) -> Result<(), Box<dyn std::error::Error>> {
         let mut history = ProbeResult::new();
         let total_attempts = self.policy.retries.unwrap_or(2);
 
         let result = tokio::time::timeout(self.policy.timeout, async {
-            while history.attempts < total_attempts {
+            while history.attempts < total_attempts
+                && !cancel.load(std::sync::atomic::Ordering::Relaxed)
+            {
                 history.attempts += 1;
                 info!(
                     "Running probe attempt {}/{}...",
                     history.attempts, total_attempts,
                 );
-                match self.run_attempt(&mut history).await {
+                match self.run_attempt(&mut history, cancel).await {
                     Ok(res) => return Ok(res),
                     Err(err) => {
                         warn!("Probe failed: {}", err);
@@ -99,8 +101,9 @@ impl Probe {
     async fn run_attempt(
         &self,
         history: &mut ProbeResult,
+        cancel: &AtomicBool,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let sample = self.target.run().await?;
+        let sample = self.target.run(cancel).await?;
         debug!(?sample, "Probe sample collected successfully.");
         for (path, validator) in &self.validators {
             let name = format!("{} {}", path, validator);
