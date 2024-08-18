@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, sync::atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +10,7 @@ mod tcp;
 
 #[async_trait::async_trait]
 pub trait Target: Display {
-    async fn run(&self) -> Result<Sample, Box<dyn std::error::Error>>;
+    async fn run(&self, cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,13 +36,13 @@ impl Display for TargetType {
 
 #[async_trait::async_trait]
 impl Target for TargetType {
-    async fn run(&self) -> Result<Sample, Box<dyn std::error::Error>> {
+    async fn run(&self, cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>> {
         match self {
             #[cfg(test)]
             TargetType::Mock => Ok(Sample::default()),
-            TargetType::Dns(target) => target.run().await,
-            TargetType::Http(target) => target.run().await,
-            TargetType::Tcp(target) => target.run().await,
+            TargetType::Dns(target) => target.run(cancel).await,
+            TargetType::Http(target) => target.run(cancel).await,
+            TargetType::Tcp(target) => target.run(cancel).await,
         }
     }
 }

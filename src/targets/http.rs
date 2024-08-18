@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display, str::FromStr};
+use std::{collections::HashMap, fmt::Display, str::FromStr, sync::atomic::AtomicBool};
 
 use opentelemetry::trace::SpanKind;
 use serde::{Deserialize, Serialize};
@@ -40,7 +40,7 @@ pub struct HttpTarget {
 impl Target for HttpTarget {
     #[instrument(
         "target.http",
-        skip(self), err(Debug), fields(
+        skip(self, _cancel), err(Debug), fields(
         otel.kind=?SpanKind::Client,
         http.url = %self.url,
         http.method = %self.method,
@@ -50,7 +50,7 @@ impl Target for HttpTarget {
         http.flavor = field::Empty,
         cert.no_verify = %self.no_verify,
     ))]
-    async fn run(&self) -> Result<Sample, Box<dyn std::error::Error>> {
+    async fn run(&self, _cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>> {
         let method = reqwest::Method::from_str(&self.method)?;
 
         let mut request = if self.no_verify {
@@ -118,7 +118,9 @@ mod tests {
             no_verify: true,
         };
 
-        let sample = target.run().await.unwrap();
+        let cancel = AtomicBool::new(false);
+
+        let sample = target.run(&cancel).await.unwrap();
         assert_eq!(sample.get("http.status"), &200.into());
         assert_eq!(sample.get("http.version"), &"HTTP/1.1".into());
         assert!(matches!(sample.get("http.body"), SampleValue::String(s) if !s.is_empty()));
