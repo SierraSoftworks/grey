@@ -17,4 +17,18 @@ pub async fn load_config<P: Into<PathBuf>>(path: P) -> Result<Config, Box<dyn st
 pub struct Config {
     #[serde(default)]
     pub probes: Vec<Probe>,
+
+    pub ui: UiConfig,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UiConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_ui_listen")]
+    pub listen: String,
+}
+
+fn default_ui_listen() -> String {
+    "0.0.0.0:3002".to_string()
 }

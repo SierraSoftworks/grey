@@ -30,9 +30,9 @@ static CANCEL: AtomicBool = AtomicBool::new(false);
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ctrlc::set_handler(|| {
-        CANCEL.store(true, std::sync::atomic::Ordering::Relaxed);
-    })?;
+    // ctrlc::set_handler(|| {
+    //     CANCEL.store(true, std::sync::atomic::Ordering::Relaxed);
+    // })?;
 
     let args = Args::parse();
 

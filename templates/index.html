@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>{{title}}</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      html {
+        font-family: sans-serif;
+      }
+
+      body {
+        height: 100vh;
+        width: 100vw;
+        margin: 0;
+      }
+
+      .error {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+      }
+
+      h1 {
+        font-size: 2rem;
+        font-weight: 100;
+      }
+
+      h1>strong {
+        font-weight: 700;
+      }
+
+      .header {
+        position: absolute;
+        top: 1rem;
+        left: 1rem;
+      }
+
+      .header>img {
+        height: 30px;
+        aspect-ratio: 5/1;
+      }
+
+      footer {
+        position: absolute;
+        bottom: 1rem;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-size: 0.8rem;
+        opacity: 0.7;
+      }
+    </style>
+</head>
+
+<body>
+    <!-- TODO: Make this configurable -->
+    <div class="header"> <img src="{{logo}}" alt="The company logo.">
+    </div>
+    <div class="error">
+        <h1><strong>Grey</strong> Uptime Reporting</h1>
+        <p>Check the uptime of your probes through a lovely web UI... eventually</p>
+    </div>
+    <footer>
+        <p>Copyright &copy; Sierra Softworks</p>
+    </footer>
+</body>
+
+</html>

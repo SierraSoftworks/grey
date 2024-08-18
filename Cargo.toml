@@ -9,6 +9,8 @@ name = "grey"
 path = "./src/main.rs"
 
 [dependencies]
+askama = { version = "0.12.1", features = ["with-tide", "markdown"] }
+askama_tide = "0.15.0"
 async-trait = "0.1"
 chrono = { version = "0.4.38", features = ["serde"] }
 circular-buffer = "0.1.7"
@@ -21,6 +23,7 @@ rand = "0.9"
 reqwest = { version = "0.12", features = ["rustls-tls-webpki-roots"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
+tide = "0.16.0"
 tokio = { version = "1", features = [
   "fs",
   "macros",
