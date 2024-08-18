@@ -11,7 +11,6 @@ use clap::Parser;
 
 mod config;
 mod engine;
-mod history;
 #[macro_use]
 mod macros;
 mod policy;
