@@ -17,6 +17,7 @@ circular-buffer = "0.1.7"
 clap = { version = "4.5", features = ["derive"] }
 ctrlc = "3.4.5"
 futures = "0.3"
+humantime = "2.1.0"
 lazy_static = "1.5"
 openssl-sys = { version = "0.9", features = ["vendored"], optional = true }
 rand = "0.9"

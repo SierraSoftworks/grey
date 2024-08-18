@@ -24,7 +24,7 @@ pub struct Probe {
     pub validators: HashMap<String, ValidatorType>,
 
     #[serde(skip)]
-    pub history: std::sync::RwLock<circular_buffer::CircularBuffer<256, ProbeResult>>,
+    pub history: std::sync::RwLock<circular_buffer::CircularBuffer<100, ProbeResult>>,
 }
 
 impl Probe {
@@ -137,5 +137,15 @@ impl Probe {
         }
 
         Ok(())
+    }
+
+    pub fn availability(&self) -> f64 {
+        if let Ok(history) = self.history.read() {
+            let total = history.len();
+            let passed = history.iter().filter(|r| r.pass).count();
+            100.0 * passed as f64 / total as f64
+        } else {
+            0.0
+        }
     }
 }
