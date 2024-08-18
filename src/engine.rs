@@ -1,13 +1,15 @@
 use std::sync::{atomic::AtomicBool, Arc};
 
+use futures::TryFutureExt;
 use opentelemetry::trace::{SpanKind, Status};
 use tokio::time::Instant;
 use tracing::{field, instrument, Id, Instrument, Level, Span};
 
-use crate::{Config, Probe};
+use crate::{config::UiConfig, Config, Probe};
 
 pub struct Engine {
     probes: Vec<Arc<Probe>>,
+    ui: UiConfig,
 }
 
 const NO_PARENT: Option<Id> = None;
@@ -16,20 +18,31 @@ impl Engine {
     pub fn new(config: Config) -> Self {
         Self {
             probes: config.probes.into_iter().map(Arc::new).collect(),
+            ui: config.ui,
         }
     }
 
     #[instrument(name = "engine", skip(self), fields(otel.kind=?SpanKind::Internal), err(Debug))]
     pub async fn run(&self, cancel: &AtomicBool) -> Result<(), Box<dyn std::error::Error>> {
-        futures::future::join_all(
+        let app = crate::ui::new(self.probes.iter().cloned().collect());
+
+        let probe_future = futures::future::try_join_all(
             self.probes
                 .iter()
                 .cloned()
                 .map(|probe| self.schedule(probe, cancel)),
-        )
-        .await
-        .into_iter()
-        .collect::<Result<Vec<()>, Box<dyn std::error::Error>>>()?;
+        );
+
+        if self.ui.enabled {
+            eprintln!("Starting web UI on http://{}", self.ui.listen.as_str());
+            futures::future::try_join(
+                app.listen(self.ui.listen.clone()).map_err(|e| e.into()),
+                probe_future,
+            )
+            .await?;
+        } else {
+            probe_future.await?;
+        }
 
         Ok(())
     }

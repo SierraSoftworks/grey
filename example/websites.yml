@@ -1,4 +1,8 @@
 ---
+ui:
+  enabled: true
+  listen: 127.0.0.1:3002
+
 probes:
   - name: google.search
     policy:
