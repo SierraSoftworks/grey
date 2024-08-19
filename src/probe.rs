@@ -142,6 +142,10 @@ impl Probe {
     pub fn availability(&self) -> f64 {
         if let Ok(history) = self.history.read() {
             let total = history.len();
+            if total == 0 {
+                return 0.0;
+            }
+
             let passed = history.iter().filter(|r| r.pass).count();
             100.0 * passed as f64 / total as f64
         } else {

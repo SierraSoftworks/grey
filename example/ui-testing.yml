@@ -3,6 +3,13 @@ ui:
   enabled: true
   listen: 127.0.0.1:3002
 
+  title: Sierra Softworks (dev)
+
+  notices:
+    - title: Testing Underway
+      description: We are currently testing the system, please do not be alarmed if you see some odd UI behaviour...
+      timestamp: 2024-08-19T12:00:00Z
+
 probes:
   - name: example.healthy
     policy:

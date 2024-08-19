@@ -7,11 +7,13 @@ mod page;
 
 #[derive(Clone)]
 pub struct State {
+    pub config: crate::config::UiConfig,
     pub probes: HashMap<String, Arc<Probe>>,
 }
 
-pub fn new(probes: Vec<Arc<Probe>>) -> tide::Server<State> {
+pub fn new(config: crate::config::UiConfig, probes: Vec<Arc<Probe>>) -> tide::Server<State> {
     let mut state = State {
+        config,
         probes: HashMap::new(),
     };
 

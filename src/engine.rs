@@ -26,7 +26,7 @@ impl Engine {
 
     #[tracing::instrument(name = "engine", skip(self), fields(otel.kind=?OpenTelemetrySpanKind::Internal), err(Debug))]
     pub async fn run(&self, cancel: &AtomicBool) -> Result<(), Box<dyn std::error::Error>> {
-        let app = crate::ui::new(self.probes.iter().cloned().collect());
+        let app = crate::ui::new(self.ui.clone(), self.probes.iter().cloned().collect());
 
         let probe_future = futures::future::try_join_all(
             self.probes

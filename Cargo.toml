@@ -9,7 +9,7 @@ name = "grey"
 path = "./src/main.rs"
 
 [dependencies]
-askama = { version = "0.12.1", features = ["with-tide", "markdown"] }
+askama = { version = "0.12.1", features = ["with-tide"] }
 askama_tide = "0.15.0"
 async-trait = "0.1"
 chrono = { version = "0.4.38", features = ["serde"] }
