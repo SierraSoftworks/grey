@@ -1,6 +1,8 @@
-use opentelemetry::trace::{SpanKind, Status};
 use tokio::time::Instant;
-use tracing::{field, instrument, Id, Instrument, Level, Span};
+use tracing_batteries::prelude::opentelemetry::trace::{
+    SpanKind as OpenTelemetrySpanKind, Status as OpenTelemetryStatus,
+};
+use tracing_batteries::prelude::*;
 
 use crate::{Config, Probe};
 
@@ -8,14 +10,14 @@ pub struct Engine {
     pub config: Config,
 }
 
-const NO_PARENT: Option<Id> = None;
+const NO_PARENT: Option<tracing::Id> = None;
 
 impl Engine {
     pub fn new(config: Config) -> Self {
         Self { config }
     }
 
-    #[instrument(name = "engine", skip(self), fields(otel.kind=?SpanKind::Internal), err(Debug))]
+    #[tracing::instrument(name = "engine", skip(self), fields(otel.kind=?OpenTelemetrySpanKind::Internal), err(Debug))]
     pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
         futures::future::join_all(self.config.probes.iter().map(|probe| self.schedule(probe)))
             .await
@@ -25,11 +27,11 @@ impl Engine {
         Ok(())
     }
 
-    #[instrument(name = "engine.schedule", skip(self, probe), err(Debug), fields(
-        otel.kind=?SpanKind::Producer,
+    #[tracing::instrument(name = "engine.schedule", skip(self, probe), err(Debug), fields(
+        otel.kind=?OpenTelemetrySpanKind::Producer,
         probe.name=probe.name,
-        otel.status_code=?Status::Unset,
-        error=field::Empty
+        otel.status_code=?OpenTelemetryStatus::Unset,
+        error=EmptyField
     ))]
     async fn schedule(&self, probe: &Probe) -> Result<(), Box<dyn std::error::Error>> {
         // Calculate a random delay between 0 and the probe interval
@@ -47,11 +49,11 @@ impl Engine {
 
             next_run_time += probe.policy.interval;
 
-            let probe_span = span!(parent: NO_PARENT, Level::INFO, "engine.probe",
+            let probe_span = span!(parent: NO_PARENT, tracing::Level::INFO, "engine.probe",
                 %probe.name,
                 otel.name=probe.name,
-                otel.status_code=?Status::Unset,
-                otel.kind=?SpanKind::Consumer,
+                otel.status_code=?OpenTelemetryStatus::Unset,
+                otel.kind=?OpenTelemetrySpanKind::Consumer,
             );
 
             probe_span.follows_from(&parent_span);
@@ -65,7 +67,7 @@ impl Engine {
                 Err(err) => {
                     probe_span
                         .record("otel.status_code", "Error")
-                        .record("error", field::debug(&err));
+                        .record("error", debug(&err));
                 }
             }
         }
