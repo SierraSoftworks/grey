@@ -1,9 +1,6 @@
 #[macro_use]
 extern crate lazy_static;
-#[macro_use]
-extern crate tracing;
-#[macro_use]
-extern crate tracing_attributes;
+extern crate tracing_batteries;
 
 use clap::Parser;
 
@@ -15,7 +12,6 @@ mod policy;
 mod probe;
 mod sample;
 mod targets;
-mod telemetry;
 mod validators;
 
 pub use config::Config;
@@ -30,7 +26,8 @@ pub use validators::Validator;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
-    telemetry::setup();
+    let telemetry = tracing_batteries::Session::new("grey", version!("v"))
+        .with_battery(tracing_batteries::OpenTelemetry::new(""));
 
     let config = config::load_config(&args.config).await?;
 
@@ -39,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = Engine::new(config);
     engine.run().await?;
 
-    opentelemetry::global::shutdown_tracer_provider();
+    telemetry.shutdown();
 
     Ok(())
 }

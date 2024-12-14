@@ -1,9 +1,8 @@
 use std::{collections::HashMap, fmt::Display, str::FromStr};
 
-use opentelemetry::trace::SpanKind;
 use serde::{Deserialize, Serialize};
-use tracing::{field, Span};
-use tracing_opentelemetry::OpenTelemetrySpanExt;
+use tracing_batteries::prelude::opentelemetry::trace::SpanKind as OpenTelemetrySpanKind;
+use tracing_batteries::prelude::*;
 
 use crate::{Sample, Target};
 
@@ -38,16 +37,16 @@ pub struct HttpTarget {
 
 #[async_trait::async_trait]
 impl Target for HttpTarget {
-    #[instrument(
+    #[tracing::instrument(
         "target.http",
         skip(self), err(Debug), fields(
-        otel.kind=?SpanKind::Client,
+        otel.kind=?OpenTelemetrySpanKind::Client,
         http.url = %self.url,
         http.method = %self.method,
         http.request_content_length = self.body.as_ref().map(|b| b.len()).unwrap_or(0),
-        http.status_code = field::Empty,
-        http.response_content_length = field::Empty,
-        http.flavor = field::Empty,
+        http.status_code = EmptyField,
+        http.response_content_length = EmptyField,
+        http.flavor = EmptyField,
         cert.no_verify = %self.no_verify,
     ))]
     async fn run(&self) -> Result<Sample, Box<dyn std::error::Error>> {
@@ -79,7 +78,7 @@ impl Target for HttpTarget {
                 "http.response_content_length",
                 response.content_length().unwrap_or(0),
             )
-            .record("http.flavor", field::debug(response.version()));
+            .record("http.flavor", debug(response.version()));
 
         let mut sample = Sample::default()
             .with("http.status", response.status().as_u16())

@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 
-use opentelemetry::trace::{SpanKind, Status};
 use serde::{Deserialize, Serialize};
-use tracing::{field, Span};
+use tracing_batteries::prelude::opentelemetry::trace::{
+    SpanKind as OpenTelemetrySpanKind, Status as OpenTelemetryStatus,
+};
+use tracing_batteries::prelude::*;
 
 use crate::{targets::TargetType, validators::ValidatorType, Policy, Target, Validator};
 
@@ -18,7 +20,7 @@ pub struct Probe {
 }
 
 impl Probe {
-    #[instrument(name = "probe.run", skip(self), err(Value), fields(
+    #[tracing::instrument(name = "probe.run", skip(self), err(Display), fields(
         otel.name=self.name,
         probe.name=self.name,
         probe.policy.interval=?self.policy.interval,
@@ -70,7 +72,7 @@ impl Probe {
         }
     }
 
-    #[instrument(name = "probe.attempt", skip(self), err(Debug), fields(otel.kind=?SpanKind::Internal))]
+    #[tracing::instrument(name = "probe.attempt", skip(self), err(Debug), fields(otel.kind=?OpenTelemetrySpanKind::Internal))]
     async fn run_attempt(&self) -> Result<(), Box<dyn std::error::Error>> {
         let sample = self.target.run().await?;
         debug!(?sample, "Probe sample collected successfully.");
@@ -81,8 +83,8 @@ impl Probe {
                 otel.name=name,
                 field=%path,
                 validator=%validator,
-                otel.status_code=?Status::Unset,
-                otel.status_message=field::Empty
+                otel.status_code=?OpenTelemetryStatus::Unset,
+                otel.status_message=EmptyField
             )
             .entered();
 
