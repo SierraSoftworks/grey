@@ -2271,7 +2271,7 @@ dependencies = [
 [[package]]
 name = "tracing-batteries"
 version = "0.1.0"
-source = "git+https://github.com/sierrasoftworks/tracing-batteries-rs.git#299762c015bb2ed61e65f14877e9b238fbfdc886"
+source = "git+https://github.com/sierrasoftworks/tracing-batteries-rs.git#2262bc82d9b5302a43b7d2f1be2e29838f5a5d10"
 dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
