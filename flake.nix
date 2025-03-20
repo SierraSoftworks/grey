@@ -26,7 +26,7 @@
 
         inherit (pkgs) lib stdenv;
 
-        craneLib = crane.lib.${system};
+        craneLib = crane.mkLib pkgs;
         src = pkgs.nix-gitignore.gitignoreSourcePure ''
           /example
           /target
