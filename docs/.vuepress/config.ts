@@ -22,7 +22,11 @@ export default defineUserConfig({
 
   head: [
     ['meta', { name: "description", content: "Documentation for Grey, a lightweight health probing agent with native OpenTelemetry integration." }],
-    ['link', { rel: 'icon', href: '/favicon.ico' }]
+    ['link', { rel: 'icon', href: '/favicon.ico' }],
+    ["script", {
+        defer: "",
+        src: "https://analytics.sierrasoftworks.com/script.js",
+    }],
   ],
 
   extendsPage(page, app) {
