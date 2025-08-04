@@ -27,7 +27,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     let telemetry = tracing_batteries::Session::new("grey", version!("v"))
-        .with_battery(tracing_batteries::OpenTelemetry::new(""));
+        .with_battery(tracing_batteries::OpenTelemetry::new(""))
+        .with_battery(tracing_batteries::Medama::new("https://analytics.sierrasoftworks.com"));
 
     let config = config::load_config(&args.config).await?;
 
