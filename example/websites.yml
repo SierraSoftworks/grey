@@ -3,6 +3,11 @@ ui:
   enabled: true
   listen: 127.0.0.1:3002
 
+  notices:
+    - title: Example Notice
+      description: This is an example notice message showcasing how you can alert users to something happening on your platform.
+      timestamp: 2025-08-10T19:00:00Z
+
 probes:
   - name: google.search
     policy:

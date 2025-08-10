@@ -232,7 +232,7 @@ h4>strong {
 
 /* Add a separator between all sections */
 .section:not(:first-child) {
-  border-top: solid 1px var(--color-separator);
+  border-bottom: solid 1px var(--color-separator);
 }
 
 .section.ok {
@@ -272,7 +272,7 @@ h4>strong {
 }
 
 .section.probe {
-  border-top: none;
+  border-bottom: none;
 }
 
 .probe-config {
