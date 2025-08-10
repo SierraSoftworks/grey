@@ -1,0 +1,10 @@
+[build]
+target = "ui/index.html"
+dist = "dist"
+public_url = "/static/"
+
+[watch]
+# Files to watch for changes
+watch = ["ui/src/"]
+ignore = ["target/", "dist/"]
+

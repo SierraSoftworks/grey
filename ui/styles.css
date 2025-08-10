@@ -1,8 +1,10 @@
 :root {
-  --background-base: #f8f8f8;
+  --background-base: #f8fafc;
   --background-box: #fff;
   --color-base: #333;
   --color-box: #222;
+
+  --color-text: #333;
 
   --color-separator: #eee;
 
@@ -19,7 +21,7 @@ html {
 
 body {
   background-color: var(--background-base);
-  color: var(--color-base);
+  color: var(--color-text);
   width: 100vw;
   margin: 0;
   display: flex;
@@ -28,20 +30,145 @@ body {
   align-items: center;
 }
 
-header {
-  margin: 0;
-  padding: 1rem;
+.loading {
   display: flex;
-  flex-direction: row;
-  justify-content: flex-start;
+  justify-content: center;
   align-items: center;
-  width: 100%;
+  padding: 2rem;
+  font-size: 1.2rem;
+  opacity: 0.7;
 }
 
-header>img {
+header {
+  margin: 0;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  background-color: var(--background-box);
+}
+
+.header-brand {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 1rem;
+}
+
+.header-brand img {
   height: 2rem;
   aspect-ratio: 1/1;
-  margin: 0.5rem 1rem;
+  margin: 0 1rem 0 0;
+}
+
+.header-brand .title {
+  font-size: 1.2rem;
+  font-weight: 500;
+}
+
+.header-right {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.header-nav {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 1rem;
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background-color: #f8fafc;
+  border-radius: 8px;
+  color: var(--color-text);
+  font-size: 0.9rem;
+  font-weight: 500;
+  gap: 0.5rem;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.status-indicator.good .status-dot {
+  background-color: var(--color-status-ok); /* Blue */
+}
+
+.status-indicator.warning .status-dot {
+  background-color: var(--color-status-warn); /* Bright amber */
+}
+
+.status-indicator.error .status-dot {
+  background-color: var(--color-status-error); /* White on red */
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.2);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.status-text {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  letter-spacing: 0.025em;
+}
+
+.nav-link {
+  color: var(--color-base);
+  text-decoration: none;
+  padding: 1rem;
+  line-height: 2rem;
+  border-radius: 4px;
+  transition: background-color 0.2s ease;
+}
+
+.nav-link:hover {
+  background-color: var(--color-separator);
+  text-decoration: none;
+}
+
+@media only screen and (max-width: 600px) {
+  header {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: flex-start;
+  }
+
+  .header-right {
+    width: 100%;
+    justify-content: space-between;
+    padding: 0 1rem 1rem 1rem;
+  }
+
+  .header-nav {
+    order: 2;
+  }
+
+  .status-indicator {
+    order: 1;
+    font-size: 0.75rem;
+    padding: 0.375rem 0.75rem;
+  }
 }
 
 footer {
@@ -82,7 +209,7 @@ h4>strong {
   color: var(--color-box);
 }
 
-@media screen only and (max-width: 980px) {
+@media screen and (max-width: 980px) {
   body {
     background-color: var(--background-box);
   }
@@ -138,7 +265,9 @@ h4>strong {
   background-color: var(--color-status-unknown);
 }
 
-.probe {}
+.probe {
+  /* Probe-specific styles can be added here */
+}
 
 .probe-config {
   margin: 0.5rem 0;
@@ -151,7 +280,9 @@ h4>strong {
   justify-content: space-between;
 }
 
-.probe-validators {}
+.probe-validators {
+  display: none; /* Hidden for now */
+}
 
 .history {
   height: 2rem;
@@ -249,5 +380,6 @@ h4>strong {
 .status.unknown::before {
   background-color: var(--color-status-unknown);
   color: var(--color-status-text);
-  background-image: url("data:image/svg+xml;charset=utf8,%3Csvg width='16' height='16' viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill-rule='evenodd' clip-rule='evenodd' d='M5.433 2.304A4.494 4.494 0 003.5 6c0 1.598.832 3.002 2.09 3.802.518.328.929.923.902 1.64v.008l-.164 3.337a.75.75 0 11-1.498-.073l.163-3.33c.002-.085-.05-.216-.207-.316A5.996 5.996 0 012 6a5.994 5.994 0 012.567-4.92 1.482 1.482 0 011.673-.04c.462.296.76.827.76 1.423v2.82c0 .082.041.16.11.206l.75.51a.25.25 0 00.28 0l.75-.51A.25.25 0 009 5.282V2.463c0-.596.298-1.127.76-1.423a1.482 1.482 0 011.673.04A5.994 5.994 0 0114 6a5.996 5.996 0 01-2.786 5.068c-.157.1-.209.23-.207.315l.163 3.33a.75.75 0 11-1.498.074l-.164-3.345c-.027-.717.384-1.312.902-1.64A4.496 4.496 0 0012.5 6a4.494 4.494 0 00-1.933-3.696c-.024.017-.067.067-.067.16v2.818a1.75 1.75 0 01-.767 1.448l-.75.51a1.75 1.75 0 01-1.966 0l-.75-.51A1.75 1.75 0 015.5 5.282V2.463c0-.092-.043-.142-.067-.159zm.01-.005z' fill='%23fff'/%3E%3C/svg%3e") box-shadow: 0 0 5px rgba(0, 0, 0, 0.2);
+  background-image: url("data:image/svg+xml;charset=utf8,%3Csvg width='16' height='16' viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill-rule='evenodd' clip-rule='evenodd' d='M5.433 2.304A4.494 4.494 0 003.5 6c0 1.598.832 3.002 2.09 3.802.518.328.929.923.902 1.64v.008l-.164 3.337a.75.75 0 11-1.498-.073l.163-3.33c.002-.085-.05-.216-.207-.316A5.996 5.996 0 012 6a5.994 5.994 0 012.567-4.92 1.482 1.482 0 011.673-.04c.462.296.76.827.76 1.423v2.82c0 .082.041.16.11.206l.75.51a.25.25 0 00.28 0l.75-.51A.25.25 0 009 5.282V2.463c0-.596.298-1.127.76-1.423a1.482 1.482 0 011.673.04A5.994 5.994 0 0114 6a5.996 5.996 0 01-2.786 5.068c-.157.1-.209.23-.207.315l.163 3.33a.75.75 0 11-1.498.074l-.164-3.345c-.027-.717.384-1.312.902-1.64A4.496 4.496 0 0012.5 6a4.494 4.494 0 00-1.933-3.696c-.024.017-.067.067-.067.16v2.818a1.75 1.75 0 01-.767 1.448l-.75.51a1.75 1.75 0 01-1.966 0l-.75-.51A1.75 1.75 0 015.5 5.282V2.463c0-.092-.043-.142-.067-.159zm.01-.005z' fill='%23fff'/%3E%3C/svg%3e");
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.2);
 }

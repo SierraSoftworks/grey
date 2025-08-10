@@ -7,7 +7,8 @@ use tracing_batteries::prelude::opentelemetry::trace::{
 };
 use tracing_batteries::prelude::*;
 
-use crate::{config::UiConfig, Config, Probe};
+use crate::{Config, Probe};
+use grey_ui::UiConfig;
 
 pub struct Engine {
     probes: Vec<Arc<Probe>>,
@@ -26,8 +27,6 @@ impl Engine {
 
     #[tracing::instrument(name = "engine", skip(self), fields(otel.kind=?OpenTelemetrySpanKind::Internal), err(Debug))]
     pub async fn run(&self, cancel: &AtomicBool) -> Result<(), Box<dyn std::error::Error>> {
-        let app = crate::ui::new(self.ui.clone(), self.probes.iter().cloned().collect());
-
         let probe_future = futures::future::try_join_all(
             self.probes
                 .iter()
@@ -37,8 +36,11 @@ impl Engine {
 
         if self.ui.enabled {
             eprintln!("Starting web UI on http://{}", self.ui.listen.as_str());
+            
+            let ui_future = crate::ui::start_server(self.ui.clone(), self.probes.iter().cloned().collect());
+            
             futures::future::try_join(
-                app.listen(self.ui.listen.clone()).map_err(|e| e.into()),
+                ui_future.map_err(|e| e.into()),
                 probe_future,
             )
             .await?;
@@ -88,7 +90,7 @@ impl Engine {
 
             probe_span.follows_from(&parent_span);
 
-            info!("Starting next probing session...");
+            debug!("Starting next probing session...");
             let run_result = probe.run(cancel).instrument(probe_span.clone()).await;
             match run_result {
                 Ok(_) => {

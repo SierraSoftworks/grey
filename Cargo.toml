@@ -9,22 +9,21 @@ name = "grey"
 path = "./src/main.rs"
 
 [dependencies]
-askama = { version = "0.12.1", features = ["with-tide"] }
-askama_tide = "0.15.0"
+grey-ui = { path = "ui", default-features = false, features = ["ssr"] }
+
+# Server dependencies
+actix-web = "4.4"
 async-trait = "0.1"
-chrono = { version = "0.4.38", features = ["serde"] }
-circular-buffer = "0.1.7"
 clap = { version = "4.5", features = ["derive"] }
 ctrlc = "3.4.5"
 futures = "0.3"
 humantime = "2.1.0"
+include_dir = "0.7"
 lazy_static = "1.5"
 openssl-sys = { version = "0.9", features = ["vendored"], optional = true }
 rand = "0.9"
 reqwest = { version = "0.12", features = ["rustls-tls-webpki-roots"] }
-serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
-tide = "0.16.0"
 tokio = { version = "1", features = [
   "fs",
   "macros",
@@ -36,6 +35,13 @@ tokio = { version = "1", features = [
 tracing = "0.1.41"
 tracing-batteries = { git = "https://github.com/sierrasoftworks/tracing-batteries-rs.git", features = ["medama", "opentelemetry"] }
 trust-dns-resolver = { version = "0.23", features = ["tokio-runtime"] }
+
+# Shared dependencies
+chrono = { version = "0.4.38", features = ["serde"] }
+circular-buffer = "0.1.7"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+yew = { version = "0.21", features = ["ssr", "hydration"] }
 
 [features]
 default = []

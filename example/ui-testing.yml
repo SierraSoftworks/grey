@@ -10,6 +10,10 @@ ui:
       description: We are currently testing the system, please do not be alarmed if you see some odd UI behaviour...
       timestamp: 2024-08-19T12:00:00Z
 
+  links:
+    - title: GitHub
+      url: https://github.com/SierraSoftworks/grey
+
 probes:
   - name: example.healthy
     policy:
@@ -22,9 +26,9 @@ probes:
       dns.answers: !NotEquals []
   - name: example.unhealthy
     policy:
-      interval: 500
+      interval: 2000
       timeout: 2000
-      retries: 3
+      retries: 1
     target: !Tcp
       host: example.com:443
     validators:

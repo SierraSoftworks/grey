@@ -48,7 +48,7 @@ impl Probe {
                 && !cancel.load(std::sync::atomic::Ordering::Relaxed)
             {
                 history.attempts += 1;
-                info!(
+                debug!(
                     "Running probe attempt {}/{}...",
                     history.attempts, total_attempts,
                 );

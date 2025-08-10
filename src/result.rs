@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt::Display};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProbeResult {
     pub start_time: DateTime<Utc>,
     #[serde(with = "serde_humantime")]
@@ -32,7 +32,7 @@ impl ProbeResult {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ValidationResult {
     pub condition: String,
     pub pass: bool,
