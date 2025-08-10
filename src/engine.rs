@@ -8,7 +8,7 @@ use tracing_batteries::prelude::opentelemetry::trace::{
 use tracing_batteries::prelude::*;
 
 use crate::{Config, Probe};
-use grey_ui::UiConfig;
+use crate::config::UiConfig;
 
 pub struct Engine {
     probes: Vec<Arc<Probe>>,

@@ -1,6 +1,6 @@
 use yew::prelude::*;
 use super::status_indicator::StatusIndicator;
-use super::UiConfig;
+use grey_api::UiConfig;
 
 #[derive(Properties, PartialEq)]
 pub struct HeaderProps {
@@ -17,7 +17,6 @@ pub fn header(props: &HeaderProps) -> Html {
                 <span class="title">{&props.config.title}</span>
             </div>
             <div class="header-right">
-                <StatusIndicator last_update={props.last_update} />
                 {if !props.config.links.is_empty() {
                     html! {
                         <nav class="header-nav">
@@ -31,6 +30,8 @@ pub fn header(props: &HeaderProps) -> Html {
                 } else {
                     html! {}
                 }}
+
+                <StatusIndicator last_update={props.last_update} />
             </div>
         </header>
     }

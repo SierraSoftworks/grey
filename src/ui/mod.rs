@@ -1,7 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
 use actix_web::{web, App, HttpServer, HttpResponse, Result, http::header::ContentType};
-use grey_ui::UiConfig;
 use include_dir::{include_dir, Dir};
 
 use crate::Probe;
@@ -14,7 +13,7 @@ static ASSETS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/dist");
 
 #[derive(Clone)]
 pub struct AppState {
-    pub config: UiConfig,
+    pub ui_config: crate::config::UiConfig,
     pub probes: HashMap<String, Arc<Probe>>,
 }
 
@@ -45,13 +44,13 @@ pub fn create_app() -> App<impl actix_web::dev::ServiceFactory<actix_web::dev::S
         .route("/", web::get().to(page::index))
         .route("/api/v1/probes", web::get().to(api::get_probes))
         .route("/api/v1/probes/{probe}/history", web::get().to(api::get_history))
-        .route("/api/v1/app-data", web::get().to(api::get_app_data))
+        .route("/api/v1/user-interface", web::get().to(api::get_ui_config))
         .route("/static/{filename:.*}", web::get().to(serve_static))
 }
 
-pub async fn start_server(config: UiConfig, probes: Vec<Arc<Probe>>) -> std::io::Result<()> {
+pub async fn start_server(config: crate::config::UiConfig, probes: Vec<Arc<Probe>>) -> std::io::Result<()> {
     let mut state = AppState {
-        config: config.clone(),
+        ui_config: config.clone(),
         probes: HashMap::new(),
     };
 

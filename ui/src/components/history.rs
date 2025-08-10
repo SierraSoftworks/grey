@@ -1,10 +1,10 @@
 use yew::prelude::*;
 
-use super::probe::SampleData;
+use grey_api::ProbeResult;
 
 #[derive(Properties, PartialEq)]
 pub struct HistoryProps {
-    pub samples: Vec<SampleData>,
+    pub samples: Vec<ProbeResult>,
 }
 
 #[function_component(History)]

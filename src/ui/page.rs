@@ -1,47 +1,31 @@
 use actix_web::{web, HttpResponse, Result};
 use yew::ServerRenderer;
-use grey_ui::{ServerApp, ServerAppProps, AppData, ProbeData, SampleData};
+use grey_ui::{ServerApp, ServerAppProps};
 
 use super::{AppState, ASSETS_DIR};
 
 pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
-    let current_time = chrono::Utc::now();
-
-    let probes_data = data
+    let config: grey_api::UiConfig = (&data.ui_config).into();
+    
+    let probes = data
         .probes
-        .values()
-        .map(|probe| {
-            let samples = if let Ok(history) = probe.history.read() {
-                history.iter().map(|sample| SampleData {
-                    pass: sample.pass,
-                    message: sample.message.clone(),
-                }).collect()
+        .iter()
+        .map(|(_name, probe)| probe.as_ref().into())
+        .collect::<Vec<grey_api::Probe>>();
+    
+    let histories = data
+        .probes
+        .iter()
+        .map(|(name, probe)| {
+            let history = if let Ok(history) = probe.history.read() {
+                history.iter().map(|sample| sample.into()).collect()
             } else {
                 Vec::new()
             };
-
-            ProbeData {
-                name: probe.name.clone(),
-                availability: probe.availability(),
-                target: format!("{}", probe.target),
-                policy: format!("{}", probe.policy),
-                samples,
-            }
+            (name.clone(), history)
         })
-        .collect::<Vec<_>>();
+        .collect::<std::collections::HashMap<_, Vec<grey_api::ProbeResult>>>();
 
-    let availability = if probes_data.is_empty() {
-        100.0
-    } else {
-        probes_data.iter().map(|probe| probe.availability).sum::<f64>() / (probes_data.len() as f64)
-    };
-
-    let app_data = AppData {
-        config: data.config.clone(),
-        availability,
-        probes: probes_data,
-        last_update: current_time,
-    };
 
     // Read the embedded HTML template
     let html_template = ASSETS_DIR
@@ -51,7 +35,11 @@ pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
         .ok_or_else(|| actix_web::error::ErrorInternalServerError("HTML template is not valid UTF-8"))?;
 
     // Render the ServerApp component for SSR
-    let app_props = ServerAppProps { data: app_data };
+    let app_props = ServerAppProps { 
+        config,
+        probes,
+        histories,
+    };
     let renderer = ServerRenderer::<ServerApp>::with_props(move || app_props);
     let ssr_content = renderer.render().await;
 

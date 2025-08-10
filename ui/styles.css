@@ -22,6 +22,10 @@ html {
 body {
   background-color: var(--background-base);
   color: var(--color-text);
+  margin: 0;
+}
+
+#app {
   width: 100vw;
   margin: 0;
   display: flex;
@@ -72,7 +76,6 @@ header {
   flex-direction: row;
   align-items: center;
   gap: 1rem;
-  padding: 1rem;
 }
 
 .header-nav {
@@ -86,6 +89,7 @@ header {
   display: flex;
   align-items: center;
   padding: 0.5rem 1rem;
+  margin: 0 1rem;
   background-color: #f8fafc;
   border-radius: 8px;
   color: var(--color-text);
@@ -138,7 +142,6 @@ header {
   text-decoration: none;
   padding: 1rem;
   line-height: 2rem;
-  border-radius: 4px;
   transition: background-color 0.2s ease;
 }
 
@@ -201,6 +204,8 @@ h4>strong {
   width: 100%;
   max-width: 980px;
   overflow: hidden;
+
+  margin: 2rem auto;
 
   border-radius: 5px;
   box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);

@@ -3,13 +3,14 @@ mod client;
 
 // Export components for both SSR and WASM usage
 pub use components::*;
-pub use client::{ClientApp, ServerApp, ServerAppProps, AppData};
+pub use client::{ClientApp, ServerApp, ServerAppProps};
 
 // WASM-specific functionality
 #[cfg(feature = "wasm")]
 use wasm_bindgen::prelude::*;
 
 // Main entry point for trunk
+#[allow(dead_code)]
 #[cfg(feature = "wasm")]
 fn main() {
     wasm_logger::init(wasm_logger::Config::default());

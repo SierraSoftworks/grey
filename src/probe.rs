@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{collections::HashMap, sync::atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,11 @@ pub struct Probe {
     pub tags: HashMap<String, String>,
     #[serde(default)]
     pub validators: HashMap<String, ValidatorType>,
+
+    #[serde(default, skip_deserializing)]
+    pub sample_count_total: AtomicU64,
+    #[serde(default, skip_deserializing)]
+    pub sample_count_healthy: AtomicU64,
 
     #[serde(skip)]
     pub history: std::sync::RwLock<circular_buffer::CircularBuffer<100, ProbeResult>>,
@@ -92,6 +98,11 @@ impl Probe {
             }
         };
 
+        self.sample_count_total.fetch_add(1, Ordering::Relaxed);
+        if history.pass {
+            self.sample_count_healthy.fetch_add(1, Ordering::Relaxed);
+        }
+
         self.history.write().unwrap().push_back(history);
         result
     }
@@ -140,16 +151,6 @@ impl Probe {
     }
 
     pub fn availability(&self) -> f64 {
-        if let Ok(history) = self.history.read() {
-            let total = history.len();
-            if total == 0 {
-                return 0.0;
-            }
-
-            let passed = history.iter().filter(|r| r.pass).count();
-            100.0 * passed as f64 / total as f64
-        } else {
-            0.0
-        }
+        100.0 * self.sample_count_healthy.load(Ordering::Relaxed) as f64 / self.sample_count_total.load(Ordering::Relaxed) as f64
     }
 }

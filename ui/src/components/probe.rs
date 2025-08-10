@@ -1,26 +1,10 @@
 use yew::prelude::*;
-use serde::{Deserialize, Serialize};
-
-use super::History;
-
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
-pub struct ProbeData {
-    pub name: String,
-    pub availability: f64,
-    pub target: String,
-    pub policy: String,
-    pub samples: Vec<SampleData>,
-}
-
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
-pub struct SampleData {
-    pub pass: bool,
-    pub message: String,
-}
+use super::{History};
 
 #[derive(Properties, PartialEq)]
 pub struct ProbeProps {
-    pub probe: ProbeData,
+    pub probe: grey_api::Probe,
+    pub history: Vec<grey_api::ProbeResult>,
 }
 
 #[function_component(Probe)]
@@ -41,9 +25,9 @@ pub fn probe(props: &ProbeProps) -> Html {
             </h3>
             <div class="probe-config probe-target">
                 <span>{&props.probe.target}</span>
-                <span>{&props.probe.policy}</span>
+                <span>{format!("interval: {}ms", props.probe.policy.interval.as_millis())}</span>
             </div>
-            <History samples={props.probe.samples.clone()} />
+            <History samples={props.history.clone()} />
         </div>
     }
 }

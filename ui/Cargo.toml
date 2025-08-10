@@ -7,6 +7,7 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+grey-api = { path = "../api" }
 chrono = { version = "0.4.38", features = ["serde", "wasmbind"] }
 circular-buffer = "0.1.7"
 gloo = { version = "0.11", optional = true }

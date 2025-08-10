@@ -1,5 +1,5 @@
 use yew::prelude::*;
-use super::UiNotice;
+use grey_api::UiNotice;
 
 #[derive(Properties, PartialEq)]
 pub struct NoticeProps {

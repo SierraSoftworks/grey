@@ -1,7 +1,7 @@
 use std::process::Command;
 
 fn main() {
-    // Tell cargo to re-run this build script if the UI files change
+    println!("cargo:rerun-if-changed=api/");
     println!("cargo:rerun-if-changed=ui/");
     println!("cargo:rerun-if-changed=Trunk.toml");
     

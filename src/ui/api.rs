@@ -1,69 +1,71 @@
 use actix_web::{web, HttpResponse, Result};
-use serde_json::json;
-use serde::{Deserialize, Serialize};
-use grey_ui::{UiConfig, ProbeData, SampleData};
+use grey_api;
 
 use super::AppState;
 
-#[derive(Serialize, Deserialize)]
-pub struct AppData {
-    pub config: UiConfig,
-    pub availability: f64,
-    pub probes: Vec<ProbeData>,
-    #[serde(with = "chrono::serde::ts_seconds")]
-    pub last_update: chrono::DateTime<chrono::Utc>,
+// Implement conversions from src types to API types
+impl From<&crate::Probe> for grey_api::Probe {
+    fn from(probe: &crate::Probe) -> Self {
+        grey_api::Probe {
+            name: probe.name.clone(),
+            policy: grey_api::Policy {
+                interval: std::time::Duration::from_millis(probe.policy.interval.as_millis() as u64),
+                retries: probe.policy.retries,
+                timeout: std::time::Duration::from_millis(probe.policy.timeout.as_millis() as u64),
+            },
+            target: format!("{}", &probe.target),
+            tags: probe.tags.clone(),
+            validators: probe.validators.iter()
+                .map(|(k, v)| (k.clone(), format!("{}", v)))
+                .collect(),
+            availability: probe.availability(),
+        }
+    }
 }
 
-pub async fn get_app_data(data: web::Data<AppState>) -> Result<HttpResponse> {
-    let current_time = chrono::Utc::now();
+impl From<&crate::result::ProbeResult> for grey_api::ProbeResult {
+    fn from(result: &crate::result::ProbeResult) -> Self {
+        grey_api::ProbeResult {
+            start_time: result.start_time,
+            duration: std::time::Duration::from_millis(result.duration.num_milliseconds() as u64),
+            attempts: result.attempts,
+            pass: result.pass,
+            message: result.message.clone(),
+            validations: result.validations.iter()
+                .map(|(k, v)| (k.clone(), grey_api::ValidationResult {
+                    condition: v.condition.clone(),
+                    pass: v.pass,
+                    message: v.message.clone(),
+                }))
+                .collect(),
+        }
+    }
+}
 
-    let probes_data = data
-        .probes
-        .values()
-        .map(|probe| {
-            let samples = if let Ok(history) = probe.history.read() {
-                history.iter().map(|sample| SampleData {
-                    pass: sample.pass,
-                    message: sample.message.clone(),
-                }).collect()
-            } else {
-                Vec::new()
-            };
+impl From<&crate::config::UiConfig> for grey_api::UiConfig {
+    fn from(config: &crate::config::UiConfig) -> Self {
+        grey_api::UiConfig {
+            title: config.title.clone(),
+            logo: config.logo.clone(),
+            notices: config.notices.clone(),
+            links: config.links.clone(),
+        }
+    }
+}
 
-            ProbeData {
-                name: probe.name.clone(),
-                availability: probe.availability(),
-                target: format!("{}", probe.target),
-                policy: format!("{}", probe.policy),
-                samples,
-            }
-        })
-        .collect::<Vec<_>>();
-
-    let availability = if probes_data.is_empty() {
-        100.0
-    } else {
-        probes_data.iter().map(|probe| probe.availability).sum::<f64>() / (probes_data.len() as f64)
-    };
-
-    let app_data = AppData {
-        config: data.config.clone(),
-        availability,
-        probes: probes_data,
-        last_update: current_time,
-    };
-
-    Ok(HttpResponse::Ok().json(app_data))
+pub async fn get_ui_config(data: web::Data<AppState>) -> Result<HttpResponse> {
+    let api_config: grey_api::UiConfig = (&data.ui_config).into();
+    Ok(HttpResponse::Ok().json(api_config))
 }
 
 pub async fn get_probes(data: web::Data<AppState>) -> Result<HttpResponse> {
-    let probes = data
+    let api_probes: Vec<grey_api::Probe> = data
         .probes
         .values()
-        .map(|probe| probe.as_ref())
-        .collect::<Vec<_>>();
+        .map(|probe| probe.as_ref().into())
+        .collect();
     
-    Ok(HttpResponse::Ok().json(json!(probes)))
+    Ok(HttpResponse::Ok().json(api_probes))
 }
 
 pub async fn get_history(
@@ -79,8 +81,11 @@ pub async fn get_history(
 
     match probe.history.read() {
         Ok(history) => {
-            let history_vec = history.iter().cloned().collect::<Vec<_>>();
-            Ok(HttpResponse::Ok().json(json!(history_vec)))
+            let api_history: Vec<grey_api::ProbeResult> = history
+                .iter()
+                .map(|result| result.into())
+                .collect();
+            Ok(HttpResponse::Ok().json(api_history))
         }
         Err(_) => Err(actix_web::error::ErrorInternalServerError(
             "Failed to read history (lock is poisoned)",
