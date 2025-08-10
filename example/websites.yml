@@ -14,13 +14,13 @@ probes:
     validators:
       http.status: !OneOf [200]
       http.header.content-type: !Equals "text/html; charset=ISO-8859-1"
-  - name: twitter.homepage
+  - name: bing.search
     policy:
       interval: 5000
       timeout: 2000
       retries: 3
     target: !Http
-      url: https://www.twitter.com
+      url: https://www.bing.com
     validators:
       http.status: !OneOf [200]
       http.header.content-type: !Equals "text/html; charset=utf-8"
