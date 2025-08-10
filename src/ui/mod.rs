@@ -45,6 +45,7 @@ pub fn create_app() -> App<impl actix_web::dev::ServiceFactory<actix_web::dev::S
         .route("/api/v1/probes", web::get().to(api::get_probes))
         .route("/api/v1/probes/{probe}/history", web::get().to(api::get_history))
         .route("/api/v1/user-interface", web::get().to(api::get_ui_config))
+        .route("/api/v1/notices", web::get().to(api::get_notices))
         .route("/static/{filename:.*}", web::get().to(serve_static))
 }
 
@@ -63,7 +64,8 @@ pub async fn start_server(config: crate::config::UiConfig, probes: Vec<Arc<Probe
     HttpServer::new(move || {
         create_app().app_data(web::Data::new(state.clone()))
     })
-    .bind(&listen_addr)?
-    .run()
-    .await
+        .workers(1)
+        .bind(&listen_addr)?
+        .run()
+        .await
 }

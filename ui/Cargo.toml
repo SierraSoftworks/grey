@@ -3,6 +3,10 @@ name = "grey-ui"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "grey-ui"
+path = "./src/main.rs"
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
@@ -23,6 +27,6 @@ wasm-logger = { version = "0.2", optional = true }
 web-sys = { version = "0.3", optional = true }
 
 [features]
-default = ["wasm"]
+default = ["ssr"]
 ssr = []
 wasm = ["gloo", "gloo-console", "gloo-net", "gloo-timers", "wasm-bindgen", "wasm-bindgen-futures", "wasm-logger", "web-sys"]

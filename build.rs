@@ -4,7 +4,9 @@ fn main() {
     println!("cargo:rerun-if-changed=api/");
     println!("cargo:rerun-if-changed=ui/");
     println!("cargo:rerun-if-changed=Trunk.toml");
-    
+
+    println!("cargo:info=Building UI assets with trunk");
+
     // Build the UI with trunk
     let output = Command::new("trunk")
         .arg("build")
@@ -19,5 +21,5 @@ fn main() {
         );
     }
 
-    println!("cargo:warning=Successfully built UI assets with trunk");
+    println!("cargo:info=Successfully built UI assets with trunk");
 }

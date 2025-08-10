@@ -151,6 +151,14 @@ impl Probe {
     }
 
     pub fn availability(&self) -> f64 {
-        100.0 * self.sample_count_healthy.load(Ordering::Relaxed) as f64 / self.sample_count_total.load(Ordering::Relaxed) as f64
+        let (sample_count_healthy, sample_count_total) = (
+            self.sample_count_healthy.load(Ordering::Relaxed),
+            self.sample_count_total.load(Ordering::Relaxed),
+        );
+
+        match sample_count_total {
+            0 => 100.0,
+            _ => 100.0 * sample_count_healthy as f64 / sample_count_total as f64,
+        }
     }
 }

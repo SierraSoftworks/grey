@@ -47,7 +47,6 @@ impl From<&crate::config::UiConfig> for grey_api::UiConfig {
         grey_api::UiConfig {
             title: config.title.clone(),
             logo: config.logo.clone(),
-            notices: config.notices.clone(),
             links: config.links.clone(),
         }
     }
@@ -56,6 +55,14 @@ impl From<&crate::config::UiConfig> for grey_api::UiConfig {
 pub async fn get_ui_config(data: web::Data<AppState>) -> Result<HttpResponse> {
     let api_config: grey_api::UiConfig = (&data.ui_config).into();
     Ok(HttpResponse::Ok().json(api_config))
+}
+
+pub async fn get_notices(data: web::Data<AppState>) -> Result<HttpResponse> {
+    let api_notices: Vec<grey_api::UiNotice> = data.ui_config.notices
+        .iter()
+        .map(|notice| notice.clone().into())
+        .collect();
+    Ok(HttpResponse::Ok().json(api_notices))
 }
 
 pub async fn get_probes(data: web::Data<AppState>) -> Result<HttpResponse> {

@@ -1,76 +1,115 @@
 use std::collections::HashMap;
 
-use yew::prelude::*;
-use crate::header::_HeaderProps::last_update;
-
-use super::components::{Header, Banner, Notice, Probe as ProbeComponent, BannerKind};
+use chrono::Datelike;
 use grey_api::UiConfig;
+use yew::prelude::*;
 
-#[cfg(feature = "wasm")]
-use gloo_timers::callback::Interval;
-#[cfg(feature = "wasm")]
-use wasm_bindgen_futures::spawn_local;
+use crate::status::StatusLevel;
+
+use super::components::{Banner, BannerKind, Header, Notice, Probe as ProbeComponent};
 
 #[cfg(feature = "wasm")]
 pub enum ClientMsg {
     UpdateConfig(UiConfig),
+    UpdateNotices(Vec<grey_api::UiNotice>),
     UpdateProbes(Vec<grey_api::Probe>),
     UpdateProbeHistory(String, Vec<grey_api::ProbeResult>),
     Error(String),
 }
 
-#[cfg(feature = "wasm")]
-pub struct ClientApp {
+pub struct App {
     config: Option<UiConfig>,
+    notices: Vec<grey_api::UiNotice>,
     probes: Vec<grey_api::Probe>,
     probe_histories: std::collections::HashMap<String, Vec<grey_api::ProbeResult>>,
-    last_updated: chrono::DateTime<chrono::Utc>,
+    has_error: bool,
 }
 
-#[cfg(not(feature = "wasm"))]
-pub struct ClientApp;
+// SSR-compatible version that just takes props
+#[derive(Properties, PartialEq)]
+pub struct AppProps {
+    pub config: grey_api::UiConfig,
+    pub notices: Vec<grey_api::UiNotice>,
+    pub probes: Vec<grey_api::Probe>,
+    pub histories: HashMap<String, Vec<grey_api::ProbeResult>>,
+}
 
-#[cfg(feature = "wasm")]
-impl Component for ClientApp {
+impl Component for App {
+    #[cfg(feature = "wasm")]
     type Message = ClientMsg;
+    #[cfg(feature = "wasm")]
     type Properties = ();
 
+    #[cfg(not(feature = "wasm"))]
+    type Message = ();
+    #[cfg(not(feature = "wasm"))]
+    type Properties = AppProps;
+
+    #[cfg(feature = "wasm")]
     fn create(ctx: &Context<Self>) -> Self {
         // Initial data fetch
         ctx.link().send_future(async move {
-            match fetch_probes().await {
+            match Self::fetch_probes().await {
                 Ok(probes) => ClientMsg::UpdateProbes(probes),
                 Err(err) => ClientMsg::Error(format!("Failed to fetch probes: {}", err)),
             }
         });
 
         ctx.link().send_future(async move {
-            match fetch_ui_config().await {
+            match Self::fetch_ui_config().await {
                 Ok(config) => ClientMsg::UpdateConfig(config),
                 Err(err) => ClientMsg::Error(format!("Failed to fetch UI config: {}", err)),
             }
         });
 
+        ctx.link().send_future(async move {
+            match Self::fetch_notices().await {
+                Ok(notices) => ClientMsg::UpdateNotices(notices),
+                Err(err) => ClientMsg::Error(format!("Failed to fetch notices: {}", err)),
+            }
+        });
+
         Self {
             config: None,
+            notices: vec![],
             probes: vec![],
             probe_histories: std::collections::HashMap::new(),
-            last_updated: chrono::Utc::now(),
+            has_error: false,
+        }
+    }
+    
+    #[cfg(not(feature = "wasm"))]
+    fn create(ctx: &Context<Self>) -> Self {
+        let AppProps {
+            config,
+            notices,
+            probes,
+            histories,
+        } = ctx.props();
+
+        Self {
+            config: Some(config.clone()),
+            notices: notices.clone(),
+            probes: probes.clone(),
+            probe_histories: histories.clone(),
+            has_error: false,
         }
     }
 
+    #[cfg(feature = "wasm")]
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
             ClientMsg::UpdateProbes(probes) => {
-                gloo::console::log!("Updated probes");
                 self.probes = probes;
-                self.last_updated = chrono::Utc::now();
                 for probe in self.probes.iter() {
                     let probe_name = probe.name.clone();
                     ctx.link().send_future(async move {
-                        match fetch_probe_history(&probe_name).await {
+                        match Self::fetch_probe_history(&probe_name).await {
                             Ok(history) => ClientMsg::UpdateProbeHistory(probe_name, history),
-                            Err(err) => ClientMsg::Error(format!("Failed to fetch history for {}: {}", probe_name, err)),
+                            Err(err) => ClientMsg::Error(format!(
+                                "Failed to fetch history for {}: {}",
+                                probe_name, err
+                            )),
                         }
                     });
                 }
@@ -78,9 +117,9 @@ impl Component for ClientApp {
                 ctx.link().send_future(async move {
                     use std::time::Duration;
 
-                    gloo::timers::future::sleep(Duration::from_secs(1)).await;
+                    gloo::timers::future::sleep(Duration::from_secs(10)).await;
 
-                    match fetch_probes().await {
+                    match Self::fetch_probes().await {
                         Ok(probes) => ClientMsg::UpdateProbes(probes),
                         Err(err) => ClientMsg::Error(format!("Failed to fetch probes: {}", err)),
                     }
@@ -89,128 +128,144 @@ impl Component for ClientApp {
                 true
             }
             ClientMsg::UpdateProbeHistory(probe_name, history) => {
-                gloo::console::log!(format!("Updated history for {}", probe_name));
                 self.probe_histories.insert(probe_name, history);
+                self.has_error = false;
                 true
             }
             ClientMsg::UpdateConfig(config) => {
-                gloo::console::log!("Updated config");
                 self.config = Some(config);
+                true
+            }
+            ClientMsg::UpdateNotices(notices) => {
+                self.notices = notices;
+
+                ctx.link().send_future(async move {
+                    use std::time::Duration;
+
+                    gloo::timers::future::sleep(Duration::from_secs(30)).await;
+
+                    match Self::fetch_notices().await {
+                        Ok(notices) => ClientMsg::UpdateNotices(notices),
+                        Err(err) => ClientMsg::Error(format!("Failed to fetch notices: {}", err)),
+                    }
+                });
                 true
             }
             ClientMsg::Error(err) => {
                 gloo::console::error!("{}", err);
+                self.has_error = true;
                 false
             }
         }
     }
 
     fn view(&self, _ctx: &Context<Self>) -> Html {
-        if let Some(config) = &self.config {
-            view_app_with_data(&config, self.last_updated, &self.probes, &self.probe_histories)
-        } else {
-            html! {
-                <div id="app">
-                    <div class="loading">{"Loading..."}</div>
+        let healthy_probes = self.probe_histories.iter()
+            .filter_map(|(_, history)| history.last())
+            .filter(|entry| entry.pass)
+            .count();
+
+        let banner_kind = match healthy_probes {
+            p if p == self.probes.len() => BannerKind::Ok,
+            p if p >= self.probes.len() / 2 => BannerKind::Warning,
+            _ => BannerKind::Error,
+        };
+
+        let status_text = match banner_kind {
+            BannerKind::Ok => "All services operating normally",
+            BannerKind::Warning => "Partial degradation in service",
+            BannerKind::Error => "Major outage affecting multiple services",
+        };
+
+        let config = self.config.clone().unwrap_or_default();
+
+        html! {
+            <div id="app">
+                <Header config={config.clone()} status={if self.has_error { StatusLevel::Error } else { StatusLevel::Good }} status_text={if self.has_error { "Error" } else { "OK" }} />
+
+                <div class="content">
+                    <Banner kind={banner_kind} text={status_text.to_string()} />
+
+                    {for self.notices.iter().map(|notice| {
+                        html! {
+                            <Notice notice={notice.clone()} />
+                        }
+                    })}
+
+                    {for self.probes.iter().map(|probe| {
+                        html! {
+                            <ProbeComponent probe={probe.clone()} history={self.probe_histories.get(&probe.name).cloned().unwrap_or_default()} />
+                        }
+                    })}
                 </div>
-            }
+
+                <footer>
+                    <p>{format!("Copyright © {} Sierra Softworks", chrono::Utc::now().year())}</p>
+                </footer>
+            </div>
         }
     }
 }
 
-// SSR-compatible version that just takes props
-#[derive(Properties, PartialEq)]
-pub struct ServerAppProps {
-    pub config: grey_api::UiConfig,
-    pub probes: Vec<grey_api::Probe>,
-    pub histories: HashMap<String, Vec<grey_api::ProbeResult>>,
-}
+impl App {
+    
 
-#[function_component(ServerApp)]
-pub fn server_app(props: &ServerAppProps) -> Html {
-    view_app_with_data(&props.config, chrono::Utc::now(), &props.probes, &props.histories)
-}
+    #[cfg(feature = "wasm")]
+    async fn fetch_ui_config() -> Result<UiConfig, Box<dyn std::error::Error>> {
+        let response = gloo::net::http::Request::get("/api/v1/user-interface")
+            .send()
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
-// Shared view logic for both SSR and CSR
-fn view_app_with_data(config: &grey_api::UiConfig, last_updated: chrono::DateTime<chrono::Utc>, probes: &Vec<grey_api::Probe>, histories: &HashMap<String, Vec<grey_api::ProbeResult>>) -> Html {
-    let availability = 100.0 * probes.iter().map(|p| p.availability).sum::<f64>() / probes.len() as f64;
-
-    let banner_kind = if availability == 100.0 {
-        BannerKind::Ok
-    } else if availability >= 90.0 {
-        BannerKind::Warning
-    } else {
-        BannerKind::Error
-    };
-
-    let status_text = if availability == 100.0 {
-        "All services operating normally"
-    } else if availability >= 90.0 {
-        "Partial degradation in service"
-    } else {
-        "Major outage affecting multiple services"
-    };
-
-    html! {
-        <div id="app">
-            <Header config={config.clone()} last_update={last_updated} />
-            
-            <div class="content">
-                <Banner kind={banner_kind} text={status_text.to_string()} />
-
-                {for config.notices.iter().map(|notice| {
-                    html! {
-                        <Notice notice={notice.clone()} />
-                    }
-                })}
-
-                {for probes.iter().map(|probe| {
-                    html! {
-                        <ProbeComponent probe={probe.clone()} history={histories.get(&probe.name).cloned().unwrap_or_default()} />
-                    }
-                })}
-            </div>
-
-            <footer>
-                <p>{"Copyright © 2025 Sierra Softworks"}</p>
-            </footer>
-        </div>
+        let config: UiConfig = response
+            .json()
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+        Ok(config)
     }
-}
 
-#[cfg(feature = "wasm")]
-async fn fetch_ui_config() -> Result<UiConfig, Box<dyn std::error::Error>> {
-    let response = gloo::net::http::Request::get("/api/v1/user-interface")
-        .send()
-        .await
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+    #[cfg(feature = "wasm")]
+    async fn fetch_notices() -> Result<Vec<grey_api::UiNotice>, Box<dyn std::error::Error>> {
+        let response = gloo::net::http::Request::get("/api/v1/notices")
+            .send()
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
-    let config: UiConfig = response.json().await
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-    Ok(config)
-}
+        let notices: Vec<grey_api::UiNotice> = response
+            .json()
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+        Ok(notices)
+    }
 
-#[cfg(feature = "wasm")]
-async fn fetch_probes() -> Result<Vec<grey_api::Probe>, Box<dyn std::error::Error>> {
-    let response = gloo::net::http::Request::get("/api/v1/probes")
-        .send()
-        .await
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-    
-    let probes: Vec<grey_api::Probe> = response.json().await
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-    Ok(probes)
-}
+    #[cfg(feature = "wasm")]
+    async fn fetch_probes() -> Result<Vec<grey_api::Probe>, Box<dyn std::error::Error>> {
+        let response = gloo::net::http::Request::get("/api/v1/probes")
+            .send()
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
-#[cfg(feature = "wasm")]
-async fn fetch_probe_history(probe_name: &str) -> Result<Vec<grey_api::ProbeResult>, Box<dyn std::error::Error>> {
-    let url = format!("/api/v1/probes/{}/history", probe_name);
-    let response = gloo::net::http::Request::get(&url)
-        .send()
-        .await
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-    
-    let history: Vec<grey_api::ProbeResult> = response.json().await
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-    Ok(history)
+        let probes: Vec<grey_api::Probe> = response
+            .json()
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+        Ok(probes)
+    }
+
+    #[cfg(feature = "wasm")]
+    async fn fetch_probe_history(
+        probe_name: &str,
+    ) -> Result<Vec<grey_api::ProbeResult>, Box<dyn std::error::Error>> {
+        let url = format!("/api/v1/probes/{}/history", probe_name);
+        let response = gloo::net::http::Request::get(&url)
+            .send()
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
+        let history: Vec<grey_api::ProbeResult> = response
+            .json()
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+        Ok(history)
+    }
 }

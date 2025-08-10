@@ -38,12 +38,17 @@ impl Engine {
             eprintln!("Starting web UI on http://{}", self.ui.listen.as_str());
             
             let ui_future = crate::ui::start_server(self.ui.clone(), self.probes.iter().cloned().collect());
-            
-            futures::future::try_join(
-                ui_future.map_err(|e| e.into()),
-                probe_future,
-            )
-            .await?;
+
+            let ui_future = Box::pin(ui_future.map_err(|e| Box::<dyn std::error::Error>::from(e)));
+            let probe_future = Box::pin(probe_future);
+
+            match futures::future::try_select(ui_future, probe_future).await {
+                Ok(_) => {}
+                Err(e) => {
+                    let (e, _) = e.factor_first();
+                    return Err(e)
+                },
+            }
         } else {
             probe_future.await?;
         }

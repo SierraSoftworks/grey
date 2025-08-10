@@ -9,5 +9,10 @@
         "!Dns mapping",
         "!Http mapping",
         "!Tcp mapping",
+    ],
+    "cSpell.words": [
+        "chrono",
+        "Csvg",
+        "gloo"
     ]
 }

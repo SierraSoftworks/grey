@@ -92,6 +92,7 @@ header {
   margin: 0 1rem;
   background-color: #f8fafc;
   border-radius: 8px;
+  border: 1px solid var(--color-separator);
   color: var(--color-text);
   font-size: 0.9rem;
   font-weight: 500;

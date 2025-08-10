@@ -1,11 +1,12 @@
-use yew::prelude::*;
-use super::status_indicator::StatusIndicator;
+use super::status::{Status, StatusLevel};
 use grey_api::UiConfig;
+use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct HeaderProps {
     pub config: UiConfig,
-    pub last_update: chrono::DateTime<chrono::Utc>,
+    pub status: StatusLevel,
+    pub status_text: String,
 }
 
 #[function_component(Header)]
@@ -17,21 +18,19 @@ pub fn header(props: &HeaderProps) -> Html {
                 <span class="title">{&props.config.title}</span>
             </div>
             <div class="header-right">
-                {if !props.config.links.is_empty() {
-                    html! {
-                        <nav class="header-nav">
-                            {for props.config.links.iter().map(|link| {
-                                html! {
-                                    <a href={link.url.clone()} class="nav-link">{&link.title}</a>
-                                }
-                            })}
-                        </nav>
+                if props.config.links.len() > 0 {
+                    <nav class="header-nav">
+                    {
+                        for props.config.links.iter().map(|link| {
+                            html! {
+                                <a href={link.url.clone()} class="nav-link">{&link.title}</a>
+                            }
+                        })
                     }
-                } else {
-                    html! {}
-                }}
+                    </nav>
+                }
 
-                <StatusIndicator last_update={props.last_update} />
+                <Status status={props.status} text={props.status_text.clone()} />
             </div>
         </header>
     }
