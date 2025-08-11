@@ -1,19 +1,17 @@
 use std::collections::HashMap;
 use yew::prelude::*;
+use crate::contexts::{use_probes, use_probe_history};
 use super::Probe as ProbeComponent;
 
-#[derive(Properties, PartialEq)]
-pub struct ProbeListProps {
-    pub probes: Vec<grey_api::Probe>,
-    pub probe_histories: HashMap<String, Vec<grey_api::ProbeHistory>>,
-}
-
 #[function_component(ProbeList)]
-pub fn probe_list(props: &ProbeListProps) -> Html {
+pub fn probe_list() -> Html {
+    let probes_ctx = use_probes();
+    let history_ctx = use_probe_history();
+
     // Group probes by service tag
     let mut service_groups: HashMap<String, Vec<&grey_api::Probe>> = HashMap::new();
     
-    for probe in &props.probes {
+    for probe in &probes_ctx.probes {
         let service = probe.tags
             .get("service")
             .cloned()
@@ -42,7 +40,7 @@ pub fn probe_list(props: &ProbeListProps) -> Html {
                 let probes = service_groups.get(service_name).unwrap();
                 
                 // Calculate service health and availability
-                let (service_health, service_availability) = calculate_service_health_and_availability(probes, &props.probe_histories);
+                let (service_health, service_availability) = calculate_service_health_and_availability(probes, &history_ctx.probe_histories);
                 
                 html! {
                     <div class={format!("section service-group {}", service_health)}>
@@ -54,7 +52,7 @@ pub fn probe_list(props: &ProbeListProps) -> Html {
                             html! {
                                 <ProbeComponent 
                                     probe={(*probe).clone()} 
-                                    history={props.probe_histories.get(&probe.name).cloned().unwrap_or_default()} 
+                                    history={history_ctx.probe_histories.get(&probe.name).cloned().unwrap_or_default()} 
                                 />
                             }
                         })}

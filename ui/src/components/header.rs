@@ -1,27 +1,28 @@
 use super::status::{Status, StatusLevel};
-use grey_api::UiConfig;
+use crate::contexts::use_ui_config;
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct HeaderProps {
-    pub config: UiConfig,
     pub status: StatusLevel,
     pub status_text: String,
 }
 
 #[function_component(Header)]
 pub fn header(props: &HeaderProps) -> Html {
+    let config_ctx = use_ui_config();
+
     html! {
         <header>
             <div class="header-brand">
-                <img src={props.config.logo.clone()} alt="The company logo." />
-                <span class="title">{&props.config.title}</span>
+                <img src={config_ctx.config.logo.clone()} alt="The company logo." />
+                <span class="title">{&config_ctx.config.title}</span>
             </div>
             <div class="header-right">
-                if props.config.links.len() > 0 {
+                if config_ctx.config.links.len() > 0 {
                     <nav class="header-nav">
                     {
-                        for props.config.links.iter().map(|link| {
+                        for config_ctx.config.links.iter().map(|link| {
                             html! {
                                 <a href={link.url.clone()} class="nav-link">{&link.title}</a>
                             }
