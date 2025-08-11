@@ -11,6 +11,7 @@ fn main() {
     let output = Command::new("trunk")
         .arg("build")
         .arg("--release")
+        .env_remove("RUSTFLAGS")  // Clear RUSTFLAGS to avoid conflicts with coverage instrumentation
         .output()
         .expect("Failed to execute trunk build. Make sure trunk is installed: cargo install trunk");
 
