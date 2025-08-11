@@ -186,14 +186,23 @@ impl Component for App {
                 <div class="content">
                     <Banner kind={banner_kind} text={status_text.to_string()} />
 
-                    {for self.notices.iter().map(|notice| {
-                        html! {
-                            <Notice notice={notice.clone()} />
-                        }
-                    })}
-
                     <ProbeList probes={self.probes.clone()} probe_histories={self.probe_histories.clone()} />
                 </div>
+
+                {if !self.notices.is_empty() {
+                    html! {
+                        <div class="notices-timeline">
+                            <div class="timeline-line"></div>
+                            {for self.notices.iter().map(|notice| {
+                                html! {
+                                    <Notice notice={notice.clone()} />
+                                }
+                            })}
+                        </div>
+                    }
+                } else {
+                    html! {}
+                }}
 
                 <footer>
                     <p>{format!("Copyright © {} Sierra Softworks", chrono::Utc::now().year())}</p>

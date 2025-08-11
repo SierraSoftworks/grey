@@ -16,22 +16,29 @@ pub fn notice(props: &NoticeProps) -> Html {
     };
 
     let timestamp_display = if let Some(timestamp) = props.notice.timestamp {
-        format!("{}", timestamp.format("%Y-%m-%d %H:%M UTC"))
+        format!("{}", timestamp.format("%Y-%m-%d\n%H:%M UTC"))
     } else {
         String::new()
     };
 
     html! {
-        <div class={format!("section notice {}", level_class)}>
-            <div class="notice-header">
-                <h3>{&props.notice.title}</h3>
+        <div class={format!("timeline-item {}", level_class)}>
+            <div class="timeline-timestamp">
                 {if !timestamp_display.is_empty() {
                     html! { <span class="notice-timestamp">{timestamp_display}</span> }
                 } else {
                     html! {}
                 }}
             </div>
-            <p>{&props.notice.description}</p>
+            <div class="timeline-dot-container">
+                <div class={format!("timeline-dot {}", level_class)}></div>
+            </div>
+            <div class="timeline-content">
+                <div class="notice-header">
+                    <h3>{&props.notice.title}</h3>
+                </div>
+                <p>{&props.notice.description}</p>
+            </div>
         </div>
     }
 }
