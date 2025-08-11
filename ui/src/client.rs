@@ -122,7 +122,7 @@ impl Component for App {
     fn view(&self, _ctx: &Context<Self>) -> Html {
         #[cfg(feature = "wasm")]
         let (config, notices, probes, probe_histories) = (
-            self.config.clone().unwrap_or_default(),
+            self.config.clone(),
             self.notices.clone(),
             self.probes.clone(),
             self.probe_histories.clone(),
