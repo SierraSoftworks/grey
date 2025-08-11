@@ -7,22 +7,21 @@ use tracing_batteries::prelude::opentelemetry::trace::{
 };
 use tracing_batteries::prelude::*;
 
-use crate::{Config, Probe};
-use crate::config::UiConfig;
+use crate::config::ConfigProvider;
+use crate::Probe;
 
 pub struct Engine {
+    config: ConfigProvider,
     probes: Vec<Arc<Probe>>,
-    ui: UiConfig,
 }
 
 const NO_PARENT: Option<tracing::Id> = None;
 
 impl Engine {
-    pub fn new(config: Config) -> Self {
-        Self {
-            probes: config.probes.into_iter().map(Arc::new).collect(),
-            ui: config.ui,
-        }
+    pub fn new(config: ConfigProvider) -> Self {
+        let probes = config.probes();
+
+        Self { config, probes }
     }
 
     #[tracing::instrument(name = "engine", skip(self), fields(otel.kind=?OpenTelemetrySpanKind::Internal), err(Debug))]
@@ -34,10 +33,24 @@ impl Engine {
                 .map(|probe| self.schedule(probe, cancel)),
         );
 
-        if self.ui.enabled {
-            eprintln!("Starting web UI on http://{}", self.ui.listen.as_str());
-            
-            let ui_future = crate::ui::start_server(self.ui.clone(), self.probes.iter().cloned().collect());
+        if self.config.ui().enabled {
+            eprintln!(
+                "Starting web UI on http://{}",
+                self.config.ui().listen.as_str()
+            );
+
+            let ui_future =
+                crate::ui::start_server(self.config.clone(), self.probes.iter().cloned().collect());
+
+            let config = self.config.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                    if let Err(err) = config.reload().await {
+                        error!("Failed to reload config: {}", err);
+                    }
+                }
+            });
 
             let ui_future = Box::pin(ui_future.map_err(|e| Box::<dyn std::error::Error>::from(e)));
             let probe_future = Box::pin(probe_future);
@@ -46,8 +59,8 @@ impl Engine {
                 Ok(_) => {}
                 Err(e) => {
                     let (e, _) = e.factor_first();
-                    return Err(e)
-                },
+                    return Err(e);
+                }
             }
         } else {
             probe_future.await?;

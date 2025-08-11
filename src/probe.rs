@@ -14,7 +14,7 @@ use crate::{
     Policy, Target, Validator,
 };
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize,)]
 pub struct Probe {
     pub name: String,
     pub policy: Policy,

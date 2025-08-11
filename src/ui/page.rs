@@ -5,8 +5,8 @@ use grey_ui::{App, AppProps};
 use super::{AppState, ASSETS_DIR};
 
 pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
-    let config: grey_api::UiConfig = (&data.ui_config).into();
-    let notices = data.ui_config.notices.clone();
+    let config: grey_api::UiConfig = (&data.config.ui()).into();
+    let notices = data.config.ui().notices;
     let probes = data
         .probes
         .iter()

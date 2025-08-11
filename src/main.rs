@@ -41,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_battery(tracing_batteries::OpenTelemetry::new(""))
         .with_battery(tracing_batteries::Medama::new("https://analytics.sierrasoftworks.com"));
 
-    let config = config::load_config(&args.config).await?;
+    let config = config::ConfigProvider::from_path(&args.config).await?;
 
     println!("Starting Grey with {} probes...", config.probes.len());
 
