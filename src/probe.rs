@@ -74,6 +74,8 @@ impl Probe {
         })
         .await;
 
+        history.duration = chrono::Utc::now() - history.start_time;
+
         Span::current().record("probe.attempts", history.attempts);
 
         let result = match result {
