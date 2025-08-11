@@ -6,7 +6,7 @@ use yew::prelude::*;
 
 use crate::status::StatusLevel;
 
-use super::components::{Banner, BannerKind, Header, Notice, Probe as ProbeComponent};
+use super::components::{Banner, BannerKind, Header, Notice, ProbeList};
 
 #[cfg(feature = "wasm")]
 pub enum ClientMsg {
@@ -192,11 +192,7 @@ impl Component for App {
                         }
                     })}
 
-                    {for self.probes.iter().map(|probe| {
-                        html! {
-                            <ProbeComponent probe={probe.clone()} history={self.probe_histories.get(&probe.name).cloned().unwrap_or_default()} />
-                        }
-                    })}
+                    <ProbeList probes={self.probes.clone()} probe_histories={self.probe_histories.clone()} />
                 </div>
 
                 <footer>

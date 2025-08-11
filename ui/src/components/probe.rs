@@ -23,14 +23,15 @@ pub fn probe(props: &ProbeProps) -> Html {
         props.probe.policy.retries.unwrap_or(0));
 
     html! {
-        <div class={format!("section probe {}", probe_class)}>
-            <h3>
-                <span>
-                    {&props.probe.name}
+        <div class="probe">
+            <div class="probe-title">
+                <div class="probe-name-section">
+                    <div class={format!("status-dot {}", probe_class)}></div>
+                    <h3 class="probe-name">{&props.probe.name}</h3>
 
                     if !props.probe.tags.is_empty() {
                         <div class="probe-tags">
-                            {for props.probe.tags.iter().map(|(name, value)| {
+                            {for props.probe.tags.iter().filter(|(name, _)| *name != "service").map(|(name, value)| {
                                 html! {
                                     <div class="probe-tag">
                                         <span class="tag-name">{name}{":"}</span>
@@ -40,9 +41,9 @@ pub fn probe(props: &ProbeProps) -> Html {
                             })}
                         </div>
                     }
-                </span>
-                <span class="availability">{format!("{:.3}%", props.probe.availability)}</span>
-            </h3>
+                </div>
+                <div class="availability">{format!("{:.1}%", props.probe.availability)}</div>
+            </div>
             <div class="probe-config probe-target">
                 <span>{&props.probe.target}</span>
                 <span>{policy}</span>

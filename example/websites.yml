@@ -21,7 +21,7 @@ probes:
       http.header.content-type: !Equals "text/html; charset=ISO-8859-1"
     tags:
       domain: google.com
-      service: internet
+      service: Search
   - name: bing.search
     policy:
       interval: 5000
@@ -34,7 +34,7 @@ probes:
       http.header.content-type: !Equals "text/html; charset=utf-8"
     tags:
       domain: bing.com
-      service: internet
+      service: Search
   - name: github.repo
     policy:
       interval: 5000
@@ -46,4 +46,4 @@ probes:
       http.status: !OneOf [200]
     tags:
       domain: github.com
-      service: internet
+      service: Coding

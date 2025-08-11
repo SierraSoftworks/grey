@@ -107,6 +107,23 @@ header {
   animation: pulse 2s infinite;
 }
 
+/* Status dot colors when used directly */
+.status-dot.ok {
+  background-color: var(--color-status-ok);
+}
+
+.status-dot.warn {
+  background-color: var(--color-status-warn);
+}
+
+.status-dot.error {
+  background-color: var(--color-status-error);
+}
+
+.status-dot.unknown {
+  background-color: var(--color-status-unknown);
+}
+
 .status-indicator.good .status-dot {
   background-color: var(--color-status-ok); /* Blue */
 }
@@ -294,6 +311,60 @@ h4>strong {
 
 .section.probe {
   border-bottom: none;
+}
+
+.probe {
+  padding: 1.5rem 0rem 1.5rem 2rem;
+  border-bottom: solid 1px var(--color-separator);
+}
+
+.probe:last-child {
+  border-bottom: none;
+}
+
+.probe-title {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+}
+
+.probe-name-section {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.probe-name {
+  font-weight: inherit;
+  margin: 0;
+}
+
+.service-group {
+  margin-bottom: 0;
+}
+
+.service-group:last-child {
+  margin-bottom: 0;
+}
+
+.service-title {
+  margin: 0;
+  color: var(--color-text);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.service-name {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 200;
+}
+
+.service-availability {
+  font-weight: 100;
+  font-size: 1.2rem;
 }
 
 .probe-config {
