@@ -164,13 +164,16 @@ jobs:
 
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@main
+        if: ${{ !matrix.cross }}
 
       - name: Install trunk (for building web UI)
+        if: ${{ !matrix.cross }}
         run: |
           cargo binstall --no-confirm trunk
           echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
 
       - name: Add wasm32 target (for web UI builds)
+        if: ${{ !matrix.cross }}
         run: rustup target add wasm32-unknown-unknown
 
       - name: cargo build
