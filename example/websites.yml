@@ -19,6 +19,9 @@ probes:
     validators:
       http.status: !OneOf [200]
       http.header.content-type: !Equals "text/html; charset=ISO-8859-1"
+    tags:
+      domain: google.com
+      service: internet
   - name: bing.search
     policy:
       interval: 5000
@@ -29,6 +32,9 @@ probes:
     validators:
       http.status: !OneOf [200]
       http.header.content-type: !Equals "text/html; charset=utf-8"
+    tags:
+      domain: bing.com
+      service: internet
   - name: github.repo
     policy:
       interval: 5000
@@ -38,3 +44,6 @@ probes:
       url: https://github.com/SierraSoftworks/grey
     validators:
       http.status: !OneOf [200]
+    tags:
+      domain: github.com
+      service: internet

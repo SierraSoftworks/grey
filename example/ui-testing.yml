@@ -29,6 +29,9 @@ probes:
       domain: google.com
     validators:
       dns.answers: !NotEquals []
+    tags:
+      domain: google.com
+      service: internet
   - name: example.unhealthy
     policy:
       interval: 2000
@@ -38,3 +41,6 @@ probes:
       host: example.com:443
     validators:
       net.ip: !Equals "127.0.0.1"
+    tags:
+      domain: example.com
+      service: failure

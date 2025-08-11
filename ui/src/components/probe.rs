@@ -25,7 +25,22 @@ pub fn probe(props: &ProbeProps) -> Html {
     html! {
         <div class={format!("section probe {}", probe_class)}>
             <h3>
-                {&props.probe.name}
+                <span>
+                    {&props.probe.name}
+
+                    if !props.probe.tags.is_empty() {
+                        <div class="probe-tags">
+                            {for props.probe.tags.iter().map(|(name, value)| {
+                                html! {
+                                    <div class="probe-tag">
+                                        <span class="tag-name">{name}{":"}</span>
+                                        <strong class="tag-value">{value}</strong>
+                                    </div>
+                                }
+                            })}
+                        </div>
+                    }
+                </span>
                 <span class="availability">{format!("{:.3}%", props.probe.availability)}</span>
             </h3>
             <div class="probe-config probe-target">
