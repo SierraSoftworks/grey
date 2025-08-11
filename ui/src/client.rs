@@ -117,7 +117,7 @@ impl Component for App {
                 ctx.link().send_future(async move {
                     use std::time::Duration;
 
-                    gloo::timers::future::sleep(Duration::from_secs(10)).await;
+                    gloo::timers::future::sleep(Duration::from_secs(120)).await;
 
                     match Self::fetch_probes().await {
                         Ok(probes) => ClientMsg::UpdateProbes(probes),
@@ -142,7 +142,7 @@ impl Component for App {
                 ctx.link().send_future(async move {
                     use std::time::Duration;
 
-                    gloo::timers::future::sleep(Duration::from_secs(30)).await;
+                    gloo::timers::future::sleep(Duration::from_secs(300)).await;
 
                     match Self::fetch_notices().await {
                         Ok(notices) => ClientMsg::UpdateNotices(notices),
