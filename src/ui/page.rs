@@ -34,6 +34,7 @@ pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
         .ok_or_else(|| actix_web::error::ErrorInternalServerError("HTML template is not valid UTF-8"))?;
 
     // Render the ServerApp component for SSR
+    let title = config.title.clone();
     let app_props = AppProps { 
         config,
         notices,
@@ -43,8 +44,9 @@ pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
     let renderer = ServerRenderer::<App>::with_props(move || app_props).hydratable(true);
     let ssr_content = renderer.render().await;
 
+
     let (index_html_before, index_html_after) = html_template.split_once("<body>").unwrap();
-    let mut index_html_before = index_html_before.to_owned();
+    let mut index_html_before = index_html_before.replace("<title></title>", &format!("<title>{}</title>", title));
     index_html_before.push_str("<body>");
     
     Ok(HttpResponse::Ok().content_type("text/html").body(format!(
