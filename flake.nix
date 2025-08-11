@@ -45,6 +45,7 @@
           pkgs.pkg-config
           pkgs.openssl
           pkgs.protobuf
+          pkgs.trunk
         ];
 
         cargoArtifacts = craneLib.buildDepsOnly {
