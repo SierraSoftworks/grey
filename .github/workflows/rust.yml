@@ -61,7 +61,9 @@ jobs:
         uses: cargo-bins/cargo-binstall@main
 
       - name: Install trunk (for building web UI)
-        run: cargo binstall --no-confirm trunk
+        run: |
+          cargo binstall --no-confirm trunk
+          echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
 
       - name: Add wasm32 target (for web UI builds)
         run: rustup target add wasm32-unknown-unknown
@@ -164,7 +166,9 @@ jobs:
         uses: cargo-bins/cargo-binstall@main
 
       - name: Install trunk (for building web UI)
-        run: cargo binstall --no-confirm trunk
+        run: |
+          cargo binstall --no-confirm trunk
+          echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
 
       - name: Add wasm32 target (for web UI builds)
         run: rustup target add wasm32-unknown-unknown
