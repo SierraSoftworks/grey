@@ -9,6 +9,11 @@ ui:
     - title: Testing Underway
       description: We are currently testing the system, please do not be alarmed if you see some odd UI behaviour...
       timestamp: 2024-08-19T12:00:00Z
+      level: warning
+    - title: Maintenance Scheduled
+      description: Scheduled maintenance will occur on Sunday at 2 AM UTC.
+      timestamp: 2024-08-20T14:00:00Z
+      level: ok
 
   links:
     - title: GitHub

@@ -11,3 +11,6 @@ pub use notice::Notice;
 pub use probe::Probe;
 pub use history::History;
 
+// Re-export UI types from the API library
+pub use grey_api::{UiNotice, NoticeLevel};
+

@@ -343,11 +343,33 @@ h4>strong {
   clear: both;
 }
 
+.notice-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.5rem;
+}
+
+.notice-header h3 {
+  margin: 0;
+  flex: 1;
+}
+
 .notice-timestamp {
-  float: right;
-  clear: both;
   font-size: 0.8rem;
-  vertical-align: middle;
+  color: #666;
+  font-weight: normal;
+  white-space: nowrap;
+  margin-left: 1rem;
+}
+
+/* Notice level specific styles */
+.section.notice.warning {
+  border-left-color: var(--color-status-warn);
+}
+
+.section.notice.error {
+  border-left-color: var(--color-status-error);
 }
 
 .status::before {
