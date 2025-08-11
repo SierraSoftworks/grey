@@ -4,7 +4,7 @@ use super::{History};
 #[derive(Properties, PartialEq)]
 pub struct ProbeProps {
     pub probe: grey_api::Probe,
-    pub history: Vec<grey_api::ProbeResult>,
+    pub history: Vec<grey_api::ProbeHistory>,
 }
 
 #[function_component(Probe)]

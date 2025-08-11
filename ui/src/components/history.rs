@@ -1,5 +1,5 @@
 use yew::prelude::*;
-use grey_api::ProbeResult;
+use grey_api::ProbeHistory;
 
 #[cfg(feature = "wasm")]
 use {
@@ -12,14 +12,14 @@ use gloo_console as console;
 
 #[derive(Properties, PartialEq)]
 pub struct HistoryProps {
-    pub samples: Vec<ProbeResult>,
+    pub samples: Vec<ProbeHistory>,
 }
 
 #[derive(Clone, PartialEq)]
 struct TooltipData {
     pub visible: bool,
     pub element_index: usize,
-    pub probe_result: Option<grey_api::ProbeResult>,
+    pub probe_result: Option<grey_api::ProbeHistory>,
 }
 
 impl Default for TooltipData {
@@ -32,9 +32,30 @@ impl Default for TooltipData {
     }
 }
 
+/// Calculate normalized logarithmic weights for UI display (percentages that sum to 100%)
+fn calculate_ui_weights(samples: &[ProbeHistory]) -> Vec<f64> {
+    let log_weights: Vec<f64> = samples.iter()
+        .map(|sample| {
+            let duration_seconds = sample.state_duration.as_secs().max(1) as f64;
+            duration_seconds.log10().max(0.01) // Minimum weight to ensure visibility
+        })
+        .collect();
+    
+    let total_log_weight: f64 = log_weights.iter().sum();
+    
+    if total_log_weight > 0.0 {
+        log_weights.iter().map(|w| 100.0 * w / total_log_weight).collect()
+    } else {
+        vec![100.0 / samples.len() as f64; samples.len()] // Equal weights if no valid durations
+    }
+}
+
 #[function_component(History)]
 pub fn history(props: &HistoryProps) -> Html {
     let tooltip_data = use_state(TooltipData::default);
+    
+    // Calculate UI weights for proportional sizing
+    let ui_weights = calculate_ui_weights(&props.samples);
 
     #[cfg(feature = "wasm")]
     let on_mouse_enter = {
@@ -45,7 +66,7 @@ pub fn history(props: &HistoryProps) -> Html {
                 if let Ok(element) = target.dyn_into::<HtmlElement>() {
                     // Get the JSON data from the element
                     if let Some(json_data) = element.get_attribute("data-probe-result") {
-                        if let Ok(probe_result) = serde_json::from_str::<grey_api::ProbeResult>(&json_data) {
+                        if let Ok(probe_result) = serde_json::from_str::<grey_api::ProbeHistory>(&json_data) {
                             let element_index = element.get_attribute("data-index")
                                 .and_then(|s| s.parse::<usize>().ok())
                                 .unwrap_or(0);
@@ -99,6 +120,10 @@ pub fn history(props: &HistoryProps) -> Html {
             {for props.samples.iter().enumerate().map(|(index, sample)| {
                 let sample_class = if sample.pass { "ok" } else { "error" };
                 
+                // Get the UI weight for this sample (as percentage)
+                let width_percent = ui_weights.get(index).copied().unwrap_or(0.0);
+                let width_style = format!("flex: {:.2}", width_percent);
+                
                 // Serialize the entire ProbeResult to JSON
                 let probe_result_json = serde_json::to_string(sample).unwrap_or_default();
                 
@@ -107,6 +132,7 @@ pub fn history(props: &HistoryProps) -> Html {
                 html! {
                     <span 
                         class={format!("history-sample {} {}", sample_class, if is_tooltip_target { "tooltip-target" } else { "" })}
+                        style={width_style}
                         data-probe-result={probe_result_json}
                         data-index={index.to_string()}
                         onmouseenter={on_mouse_enter.clone()}
@@ -138,7 +164,7 @@ pub fn history(props: &HistoryProps) -> Html {
     }
 }
 
-fn render_tooltip(probe_result: &grey_api::ProbeResult) -> Html {
+fn render_tooltip(probe_result: &grey_api::ProbeHistory) -> Html {
     let status_text = if probe_result.pass { "Passed" } else { "Failed" };
     let status_class = if probe_result.pass { "ok" } else { "error" };
     
@@ -146,7 +172,10 @@ fn render_tooltip(probe_result: &grey_api::ProbeResult) -> Html {
     let timestamp = probe_result.start_time.format("%Y-%m-%d %H:%M:%S UTC").to_string();
     
     // Format duration
-    let duration_text = format!("{}", humantime::format_duration(probe_result.duration));
+    let duration_text = format!("{}", humantime::format_duration(probe_result.latency));
+    
+    // Format state duration
+    let state_duration_text = format!("{}", humantime::format_duration(probe_result.state_duration));
 
     html! {
         <div class="tooltip visible">
@@ -160,12 +189,20 @@ fn render_tooltip(probe_result: &grey_api::ProbeResult) -> Html {
                     <span>{timestamp}</span>
                 </div>
                 <div class="tooltip-row">
-                    <span class="tooltip-label">{"Duration:"}</span>
+                    <span class="tooltip-label">{"State Duration:"}</span>
+                    <span>{state_duration_text}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">{"Latency:"}</span>
                     <span>{duration_text}</span>
                 </div>
                 <div class="tooltip-row">
-                    <span class="tooltip-label">{"Attempts:"}</span>
-                    <span>{probe_result.attempts}</span>
+                    <span class="tooltip-label">{"Availability:"}</span>
+                    <span>{format!("{:.1}%", probe_result.availability())}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">{"Retry Rate:"}</span>
+                    <span>{format!("{:.1}%", probe_result.retry_rate())}</span>
                 </div>
                 if !probe_result.message.is_empty() {
                     <div class="tooltip-row">

@@ -23,21 +23,29 @@ impl From<&crate::Probe> for grey_api::Probe {
     }
 }
 
-impl From<&crate::result::ProbeResult> for grey_api::ProbeResult {
-    fn from(result: &crate::result::ProbeResult) -> Self {
-        grey_api::ProbeResult {
-            start_time: result.start_time,
-            duration: std::time::Duration::from_millis(result.duration.num_milliseconds() as u64),
-            attempts: result.attempts,
-            pass: result.pass,
-            message: result.message.clone(),
-            validations: result.validations.iter()
+impl From<&crate::history::StateBucket> for grey_api::ProbeHistory {
+    fn from(bucket: &crate::history::StateBucket) -> Self {
+        let state_duration = match bucket.end_time {
+            Some(end_time) => std::time::Duration::from_secs((end_time - bucket.start_time).num_seconds().max(1) as u64),
+            None => std::time::Duration::from_secs((chrono::Utc::now() - bucket.start_time).num_seconds().max(1) as u64),
+        };
+        
+        grey_api::ProbeHistory {
+            start_time: bucket.start_time,
+            latency: std::time::Duration::from_millis(bucket.average_latency.num_milliseconds() as u64),
+            state_duration,
+            attempts: bucket.total_attempts,
+            pass: bucket.state.pass,
+            message: bucket.state.message.clone(),
+            validations: bucket.state.validations.iter()
                 .map(|(k, v)| (k.clone(), grey_api::ValidationResult {
                     condition: v.condition.clone(),
                     pass: v.pass,
                     message: v.message.clone(),
                 }))
                 .collect(),
+            sample_count: bucket.total_samples,
+            successful_samples: bucket.successful_samples,
         }
     }
 }
@@ -86,16 +94,11 @@ pub async fn get_history(
         .get(&probe_name)
         .ok_or_else(|| actix_web::error::ErrorNotFound("Probe not found"))?;
 
-    match probe.history.read() {
-        Ok(history) => {
-            let api_history: Vec<grey_api::ProbeResult> = history
-                .iter()
-                .map(|result| result.into())
-                .collect();
-            Ok(HttpResponse::Ok().json(api_history))
-        }
-        Err(_) => Err(actix_web::error::ErrorInternalServerError(
-            "Failed to read history (lock is poisoned)",
-        )),
-    }
+    let api_history: Vec<grey_api::ProbeHistory> = probe
+        .history
+        .get_state_buckets()
+        .iter()
+        .map(|bucket| bucket.into())
+        .collect();
+    Ok(HttpResponse::Ok().json(api_history))
 }

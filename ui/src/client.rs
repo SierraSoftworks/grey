@@ -13,7 +13,7 @@ pub enum ClientMsg {
     UpdateConfig(UiConfig),
     UpdateNotices(Vec<grey_api::UiNotice>),
     UpdateProbes(Vec<grey_api::Probe>),
-    UpdateProbeHistory(String, Vec<grey_api::ProbeResult>),
+    UpdateProbeHistory(String, Vec<grey_api::ProbeHistory>),
     Error(String),
 }
 
@@ -21,7 +21,7 @@ pub struct App {
     config: Option<UiConfig>,
     notices: Vec<grey_api::UiNotice>,
     probes: Vec<grey_api::Probe>,
-    probe_histories: std::collections::HashMap<String, Vec<grey_api::ProbeResult>>,
+    probe_histories: std::collections::HashMap<String, Vec<grey_api::ProbeHistory>>,
     has_error: bool,
 }
 
@@ -31,7 +31,7 @@ pub struct AppProps {
     pub config: grey_api::UiConfig,
     pub notices: Vec<grey_api::UiNotice>,
     pub probes: Vec<grey_api::Probe>,
-    pub histories: HashMap<String, Vec<grey_api::ProbeResult>>,
+    pub histories: HashMap<String, Vec<grey_api::ProbeHistory>>,
 }
 
 impl Component for App {
@@ -251,14 +251,14 @@ impl App {
     #[cfg(feature = "wasm")]
     async fn fetch_probe_history(
         probe_name: &str,
-    ) -> Result<Vec<grey_api::ProbeResult>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<grey_api::ProbeHistory>, Box<dyn std::error::Error>> {
         let url = format!("/api/v1/probes/{}/history", probe_name);
         let response = gloo::net::http::Request::get(&url)
             .send()
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
-        let history: Vec<grey_api::ProbeResult> = response
+        let history: Vec<grey_api::ProbeHistory> = response
             .json()
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;

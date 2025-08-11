@@ -32,7 +32,7 @@ impl ProbeResult {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct ValidationResult {
     pub condition: String,
     pub pass: bool,

@@ -5,7 +5,7 @@ use super::Probe as ProbeComponent;
 #[derive(Properties, PartialEq)]
 pub struct ProbeListProps {
     pub probes: Vec<grey_api::Probe>,
-    pub probe_histories: HashMap<String, Vec<grey_api::ProbeResult>>,
+    pub probe_histories: HashMap<String, Vec<grey_api::ProbeHistory>>,
 }
 
 #[function_component(ProbeList)]
@@ -67,7 +67,7 @@ pub fn probe_list(props: &ProbeListProps) -> Html {
 
 fn calculate_service_health_and_availability(
     probes: &[&grey_api::Probe],
-    probe_histories: &HashMap<String, Vec<grey_api::ProbeResult>>,
+    probe_histories: &HashMap<String, Vec<grey_api::ProbeHistory>>,
 ) -> (String, f64) {
     if probes.is_empty() {
         return ("unknown".to_string(), 0.0);

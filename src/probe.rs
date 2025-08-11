@@ -1,4 +1,3 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::{collections::HashMap, sync::atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
@@ -8,6 +7,7 @@ use tracing_batteries::prelude::opentelemetry::trace::{
 use tracing_batteries::prelude::*;
 
 use crate::{
+    history::ProbeHistory,
     result::{ProbeResult, ValidationResult},
     targets::TargetType,
     validators::ValidatorType,
@@ -24,13 +24,8 @@ pub struct Probe {
     #[serde(default)]
     pub validators: HashMap<String, ValidatorType>,
 
-    #[serde(default, skip_deserializing)]
-    pub sample_count_total: AtomicU64,
-    #[serde(default, skip_deserializing)]
-    pub sample_count_healthy: AtomicU64,
-
     #[serde(skip)]
-    pub history: std::sync::RwLock<circular_buffer::CircularBuffer<100, ProbeResult>>,
+    pub history: ProbeHistory<10>,
 }
 
 impl Probe {
@@ -100,12 +95,7 @@ impl Probe {
             }
         };
 
-        self.sample_count_total.fetch_add(1, Ordering::Relaxed);
-        if history.pass {
-            self.sample_count_healthy.fetch_add(1, Ordering::Relaxed);
-        }
-
-        self.history.write().unwrap().push_back(history);
+        self.history.add_sample(history);
         result
     }
 
@@ -153,14 +143,6 @@ impl Probe {
     }
 
     pub fn availability(&self) -> f64 {
-        let (sample_count_healthy, sample_count_total) = (
-            self.sample_count_healthy.load(Ordering::Relaxed),
-            self.sample_count_total.load(Ordering::Relaxed),
-        );
-
-        match sample_count_total {
-            0 => 100.0,
-            _ => 100.0 * sample_count_healthy as f64 / sample_count_total as f64,
-        }
+        self.history.availability()
     }
 }

@@ -16,14 +16,15 @@ pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
         .probes
         .iter()
         .map(|(name, probe)| {
-            let history = if let Ok(history) = probe.history.read() {
-                history.iter().map(|sample| sample.into()).collect()
-            } else {
-                Vec::new()
-            };
+            let history = probe
+                .history
+                .get_state_buckets()
+                .iter()
+                .map(|bucket| bucket.into())
+                .collect();
             (name.clone(), history)
         })
-        .collect::<std::collections::HashMap<_, Vec<grey_api::ProbeResult>>>();
+        .collect::<std::collections::HashMap<_, Vec<grey_api::ProbeHistory>>>();
 
 
     // Read the embedded HTML template

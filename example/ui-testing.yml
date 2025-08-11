@@ -40,7 +40,7 @@ probes:
     target: !Tcp
       host: example.com:443
     validators:
-      net.ip: !Equals "127.0.0.1"
+      net.ip: !Equals "23.215.0.138"
     tags:
       domain: example.com
       service: failure
