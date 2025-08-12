@@ -162,7 +162,7 @@
           # Note that this is done as a separate derivation so that
           # we can block the CI if there are issues here, but not
           # prevent downstream consumers from building our crate by itself.
-          my-app-clippy = craneLib.cargoClippy (
+          grey-clippy = craneLib.cargoClippy (
             commonArgs
             // {
               inherit cargoArtifacts;
@@ -178,6 +178,8 @@
           name = "grey";
           drv = grey;
         };
+
+        packages.default = grey;
 
         devShells.default = craneLib.devShell {
           # Inherit inputs from checks.
