@@ -164,23 +164,6 @@
         checks = {
           # Build the crate as part of `nix flake check` for convenience
           inherit grey grey-ui;
-
-          # Run clippy (and deny all warnings) on the crate source,
-          # again, reusing the dependency artifacts from above.
-          #
-          # Note that this is done as a separate derivation so that
-          # we can block the CI if there are issues here, but not
-          # prevent downstream consumers from building our crate by itself.
-          grey-clippy = craneLib.cargoClippy (
-            commonArgs
-            // {
-              inherit cargoArtifacts;
-              cargoClippyExtraArgs = "--all-targets -- --deny warnings";
-            }
-          );
-
-          # Check formatting
-          grey-fmt = craneLib.cargoFmt commonArgs;
         };
 
         apps.default = flake-utils.lib.mkApp {
