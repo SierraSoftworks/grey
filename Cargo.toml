@@ -54,3 +54,6 @@ openssl_src = ["dep:openssl-sys"]
 
 [profile.release]
 debug = 1
+strip = true
+opt-level = "z"
+lto = true
