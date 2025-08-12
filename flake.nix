@@ -87,6 +87,7 @@
 
         nativeArgs = commonArgs // {
           pname = "grey";
+          OPENSSL_DIR = pkgs.openssl;
         };
 
         # Build *just* the cargo dependencies, so we can reuse
@@ -101,7 +102,6 @@
             # The server needs to know where the client's dist dir is to
             # serve it, so we pass it as an environment variable at build time
             CLIENT_DIST = grey-ui;
-            OPENSSL_DIR = pkgs.openssl;
             preBuild = ''
               cp -r $CLIENT_DIST ./ui/dist
             '';
