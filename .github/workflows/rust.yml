@@ -46,6 +46,9 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
+      - name: Setup Cache
+        uses: Swatinem/rust-cache@v2
+
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@main
         if: ${{ !matrix.cross }}
@@ -79,6 +82,9 @@ jobs:
           toolchain: stable
           override: true
           components: llvm-tools-preview
+
+      - name: Setup Cache
+        uses: Swatinem/rust-cache@v2
 
       - name: install protoc
         run: |
@@ -193,6 +199,9 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           name: cargofile
+
+      - name: Setup Cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Fetch UI build artifacts
         uses: actions/download-artifact@v5
