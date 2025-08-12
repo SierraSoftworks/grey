@@ -1,13 +1,13 @@
 [target.aarch64-unknown-linux-gnu]
 pre-build = [
-    "apt update && apt install -y protobuf-compiler cargo",
+    "apt update && apt install -y protobuf-compiler",
     "curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash",
     "cargo binstall trunk"
 ]
 
 [target.x86_64-unknown-linux-gnu]
 pre-build = [
-    "apt update && apt install -y protobuf-compiler cargo",
+    "apt update && apt install -y protobuf-compiler",
     "curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash",
     "cargo binstall trunk"
 ]
