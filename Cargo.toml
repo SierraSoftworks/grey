@@ -53,4 +53,4 @@ pure_tests = []
 openssl_src = ["dep:openssl-sys"]
 
 [profile.release]
-debug = "limited"
+debug = 1
