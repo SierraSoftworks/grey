@@ -81,8 +81,9 @@
             pkgs.darwin.apple_sdk.frameworks.Security
             pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
           ];
-          
+
           OPENSSL_DIR = pkgs.openssl;
+          OPENSSL_INCLUDE_DIR = pkgs.openssl.dev.include;
         };
 
         # Native packages
