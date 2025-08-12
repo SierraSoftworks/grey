@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Generate Package Version (Release Tag)
         shell: pwsh
@@ -73,7 +73,7 @@ jobs:
       - build-ui
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -187,7 +187,7 @@ jobs:
           components: llvm-tools-preview
 
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Fetch Versioned Cargo.toml
         uses: actions/download-artifact@v5
