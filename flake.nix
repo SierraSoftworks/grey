@@ -81,13 +81,14 @@
             pkgs.darwin.apple_sdk.frameworks.Security
             pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
           ];
+          
+          OPENSSL_DIR = pkgs.openssl;
         };
 
         # Native packages
 
         nativeArgs = commonArgs // {
           pname = "grey";
-          OPENSSL_DIR = pkgs.openssl;
         };
 
         # Build *just* the cargo dependencies, so we can reuse
