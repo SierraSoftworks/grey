@@ -82,7 +82,7 @@
             pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
           ];
 
-          OPENSSL_DIR = pkgs.openssl;
+          OPENSSL_DIR = pkgs.openssl.dev;
           OPENSSL_INCLUDE_DIR = pkgs.openssl.dev;
         };
 
