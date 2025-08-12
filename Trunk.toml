@@ -1,6 +1,6 @@
 [build]
 target = "ui/index.html"
-dist = "dist"
+dist = "ui/dist"
 public_url = "/static/"
 minify = "on_release"
 

@@ -9,7 +9,7 @@ mod api;
 mod page;
 
 // Embed the dist directory at compile time
-static ASSETS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/dist");
+static ASSETS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/ui/dist");
 
 #[derive(Clone)]
 pub struct AppState {

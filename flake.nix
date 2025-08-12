@@ -53,6 +53,7 @@
               file:
               lib.any file.hasExt [
                 "html"
+                "css"
                 "scss"
               ]
             ) unfilteredRoot)
@@ -100,6 +101,9 @@
             # The server needs to know where the client's dist dir is to
             # serve it, so we pass it as an environment variable at build time
             CLIENT_DIST = grey-ui;
+            preBuild = ''
+              cp -r $CLIENT_DIST ./ui/dist
+            '';
             doCheck = false;
           }
         );
@@ -128,6 +132,7 @@
           // {
             pname = "grey-ui";
             cargoArtifacts = cargoArtifactsWasm;
+            trunkIndexPath = "./ui/index.html";
             # The version of wasm-bindgen-cli here must match the one from Cargo.lock.
             # When updating to a new version replace the hash values with lib.fakeHash,
             # then try to do a build, which will fail but will print out the correct value
