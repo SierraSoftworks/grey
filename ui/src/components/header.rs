@@ -24,7 +24,7 @@ pub fn header(props: &HeaderProps) -> Html {
                     {
                         for config_ctx.config.links.iter().map(|link| {
                             html! {
-                                <a href={link.url.clone()} class="nav-link">{&link.title}</a>
+                                <a href={link.url.clone()} class="nav-link" target="_blank" rel="noopener noreferrer">{&link.title}</a>
                             }
                         })
                     }

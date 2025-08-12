@@ -68,6 +68,15 @@ export default defineUserConfig({
         ]
       },
       {
+        text: "User Interface",
+        link: "/ui/",
+        children: [
+          '/ui/README.md',
+          '/ui/links.md',
+          '/ui/notices.md',
+        ]
+      },
+      {
         text: "Download",
         link: "https://github.com/SierraSoftworks/grey/releases",
         target: "_blank"
@@ -109,6 +118,16 @@ export default defineUserConfig({
             '/validators/contains.md',
             '/validators/equals.md',
             '/validators/one_of.md',
+          ]
+        }
+      ],
+      '/ui/': [
+        {
+          text: "User Interface",
+          children: [
+            '/ui/README.md',
+            '/ui/links.md',
+            '/ui/notices.md',
           ]
         }
       ]

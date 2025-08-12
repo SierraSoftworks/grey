@@ -47,7 +47,23 @@ probes:
       url: https://google.com?q=grey+healthcheck+system
     validators:
       http.status: !OneOf [200]
-      http.header.content-type: !Contains "text/html"
+      http.header.content-type: !Equals "text/html; charset=ISO-8859-1"
+    tags:
+      service: Google
+
+ui:
+  enabled: true
+  listen: 127.0.0.1:3002
+  title: My Status Page
+  logo: https://example.com/logo.png
+  links:
+    - title: GitHub
+      url: https://github.com/SierraSoftworks/grey
+  notices:
+    - title: Example Notice
+      description: This is an example notice message showcasing how you can alert users to something happening on your platform.
+      timestamp: 2025-08-10T19:00:00Z
+      level: ok # ok, warning, error
 ```
 
 
