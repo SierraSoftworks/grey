@@ -83,7 +83,7 @@
           ];
 
           OPENSSL_DIR = pkgs.openssl;
-          OPENSSL_INCLUDE_DIR = pkgs.openssl.dev.include;
+          OPENSSL_INCLUDE_DIR = pkgs.openssl.dev;
         };
 
         # Native packages
