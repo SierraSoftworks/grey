@@ -69,11 +69,9 @@
           inherit src;
           strictDeps = true;
 
-          buildInputs = [
+          nativeBuildInputs = [
             # Add additional build inputs here
             pkgs.pkg-config
-            pkgs.openssl
-            pkgs.protobuf
           ]
           ++ lib.optionals pkgs.stdenv.isDarwin [
             # Additional darwin specific inputs can be set here
@@ -82,8 +80,11 @@
             pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
           ];
 
-          OPENSSL_DIR = pkgs.openssl.dev;
-          OPENSSL_INCLUDE_DIR = pkgs.openssl.dev;
+          buildInputs = [
+            # Add additional build inputs here
+            pkgs.openssl
+            pkgs.protobuf
+          ];
         };
 
         # Native packages
