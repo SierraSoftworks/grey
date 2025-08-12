@@ -110,7 +110,7 @@
         # wasm32 target, so we only build the client.
         wasmArgs = commonArgs // {
           pname = "grey-ui";
-          cargoExtraArgs = "--package=client --features=wasm";
+          cargoExtraArgs = "--package=grey-ui --features=wasm";
           CARGO_BUILD_TARGET = "wasm32-unknown-unknown";
         };
 
