@@ -260,20 +260,6 @@ impl App {
     }
 
     #[cfg(feature = "wasm")]
-    async fn fetch_ui_config() -> Result<grey_api::UiConfig, Box<dyn std::error::Error>> {
-        let response = gloo::net::http::Request::get("/api/v1/user-interface")
-            .send()
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-
-        let config: grey_api::UiConfig = response
-            .json()
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-        Ok(config)
-    }
-
-    #[cfg(feature = "wasm")]
     async fn fetch_notices() -> Result<Vec<grey_api::UiNotice>, Box<dyn std::error::Error>> {
         let response = gloo::net::http::Request::get("/api/v1/notices")
             .send()
