@@ -1,0 +1,33 @@
+[package]
+name = "grey-ui"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "grey-ui"
+path = "./src/main.rs"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+grey-api = { path = "../api" }
+chrono = { version = "0.4.38", features = ["serde", "wasmbind"] }
+circular-buffer = "0.1.7"
+gloo = { version = "0.11", optional = true }
+gloo-console = { version = "0.3", optional = true }
+gloo-net = { version = "0.5", optional = true }
+gloo-timers = { version = "0.3", features = ["futures"], optional = true }
+humantime = "2.1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+yew = { version = "0.21", features = ["ssr", "hydration"] }
+wasm-bindgen = { version = "0.2.100", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+wasm-logger = { version = "0.2", optional = true }
+web-sys = { version = "0.3", optional = true }
+
+[features]
+default = ["ssr"]
+ssr = []
+wasm = ["gloo", "gloo-console", "gloo-net", "gloo-timers", "wasm-bindgen", "wasm-bindgen-futures", "wasm-logger", "web-sys"]

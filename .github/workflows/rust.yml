@@ -1,6 +1,6 @@
 name: Rust
 on:
-  push: {}
+  pull_request: {}
   release:
     types: [published]
 
@@ -31,10 +31,46 @@ jobs:
           name: cargofile
           path: Cargo.toml
 
+  build-ui:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get Rust Stable
+        uses: actions-rs/toolchain@v1.0.7
+        with:
+          toolchain: stable
+          override: true
+          target: wasm32-unknown-unknown
+          components: llvm-tools-preview
+
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+        if: ${{ !matrix.cross }}
+
+      - name: Install trunk (for building web UI)
+        if: ${{ !matrix.cross }}
+        run: |
+          cargo binstall --no-confirm trunk
+          echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Build UI using trunk
+        run: trunk build --release
+
+      - name: Upload build artifacts for use in other build stages
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-build
+          path: ./ui/dist
+
   test:
     name: Test
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    if: github.event_name == 'pull_request'
+    needs:
+      - build-ui
 
     steps:
       - uses: actions/checkout@v4
@@ -57,6 +93,12 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Fetch UI build artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: ui-build
+          path: ./ui/dist
+
       - name: Run tests
         uses: actions-rs/cargo@v1
         with:
@@ -73,12 +115,13 @@ jobs:
         with:
           files: ./lcov.info
 
-  build:
+  build-app:
     name: ${{ matrix.os }}-${{ matrix.arch }}-release
     runs-on: ${{ matrix.run_on }}
 
     needs:
       - version
+      - build-ui
 
     strategy:
       matrix:
@@ -151,6 +194,12 @@ jobs:
         with:
           name: cargofile
 
+      - name: Fetch UI build artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: ui-build
+          path: ./ui/dist
+
       - name: cargo build
         uses: actions-rs/cargo@v1.0.3
         with:
@@ -168,7 +217,7 @@ jobs:
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
-        if: github.event_name == 'push'
+        if: github.event_name == 'pull_request'
         with:
           name: grey-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.extension }}
           path: target/${{ matrix.target }}/release/grey${{ matrix.extension }}

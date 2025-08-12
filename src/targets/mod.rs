@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, sync::atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
 
@@ -10,11 +10,13 @@ mod tcp;
 
 #[async_trait::async_trait]
 pub trait Target: Display {
-    async fn run(&self) -> Result<Sample, Box<dyn std::error::Error>>;
+    async fn run(&self, cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TargetType {
+    #[cfg(test)]
+    Mock,
     Dns(dns::DnsTarget),
     Http(http::HttpTarget),
     Tcp(tcp::TcpTarget),
@@ -23,6 +25,8 @@ pub enum TargetType {
 impl Display for TargetType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            #[cfg(test)]
+            TargetType::Mock => write!(f, "Mock"),
             TargetType::Dns(target) => write!(f, "{}", target),
             TargetType::Http(target) => write!(f, "{}", target),
             TargetType::Tcp(target) => write!(f, "{}", target),
@@ -32,11 +36,13 @@ impl Display for TargetType {
 
 #[async_trait::async_trait]
 impl Target for TargetType {
-    async fn run(&self) -> Result<Sample, Box<dyn std::error::Error>> {
+    async fn run(&self, cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>> {
         match self {
-            TargetType::Dns(target) => target.run().await,
-            TargetType::Http(target) => target.run().await,
-            TargetType::Tcp(target) => target.run().await,
+            #[cfg(test)]
+            TargetType::Mock => Ok(Sample::default()),
+            TargetType::Dns(target) => target.run(cancel).await,
+            TargetType::Http(target) => target.run(cancel).await,
+            TargetType::Tcp(target) => target.run(cancel).await,
         }
     }
 }

@@ -1,4 +1,4 @@
-use std::{fmt::Display, str::FromStr};
+use std::{fmt::Display, str::FromStr, sync::atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
 use trust_dns_resolver::{
@@ -17,7 +17,7 @@ pub struct DnsTarget {
 
 #[async_trait::async_trait]
 impl Target for DnsTarget {
-    async fn run(&self) -> Result<Sample, Box<dyn std::error::Error>> {
+    async fn run(&self, _cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>> {
         let lookup = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default())
             .lookup(
                 self.domain.as_str(),
@@ -59,7 +59,8 @@ mod tests {
             domain: "google.com".to_string(),
             record_type: None,
         };
-        let sample = target.run().await.unwrap();
+        let cancel = AtomicBool::new(false);
+        let sample = target.run(&cancel).await.unwrap();
         assert!(matches!(sample.get("dns.answers"), &SampleValue::List(_)));
     }
 
@@ -69,7 +70,8 @@ mod tests {
             domain: "google.com".to_string(),
             record_type: Some("MX".to_string()),
         };
-        let sample = target.run().await.unwrap();
+        let cancel = AtomicBool::new(false);
+        let sample = target.run(&cancel).await.unwrap();
         assert_eq!(
             sample.get("dns.answers"),
             &SampleValue::List(vec![SampleValue::String("10 smtp.google.com.".into()),])

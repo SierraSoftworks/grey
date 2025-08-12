@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display, str::FromStr};
+use std::{collections::HashMap, fmt::Display, str::FromStr, sync::atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
 use tracing_batteries::prelude::opentelemetry::trace::SpanKind as OpenTelemetrySpanKind;
@@ -39,17 +39,18 @@ pub struct HttpTarget {
 impl Target for HttpTarget {
     #[tracing::instrument(
         "target.http",
-        skip(self), err(Debug), fields(
-        otel.kind=?OpenTelemetrySpanKind::Client,
-        http.url = %self.url,
-        http.method = %self.method,
-        http.request_content_length = self.body.as_ref().map(|b| b.len()).unwrap_or(0),
-        http.status_code = EmptyField,
-        http.response_content_length = EmptyField,
-        http.flavor = EmptyField,
-        cert.no_verify = %self.no_verify,
+        skip(self, _cancel), err(Debug), 
+        fields(
+            otel.kind=?OpenTelemetrySpanKind::Client,
+            http.url = %self.url,
+            http.method = %self.method,
+            http.request_content_length = self.body.as_ref().map(|b| b.len()).unwrap_or(0),
+            http.status_code = EmptyField,
+            http.response_content_length = EmptyField,
+            http.flavor = EmptyField,
+            cert.no_verify = %self.no_verify,
     ))]
-    async fn run(&self) -> Result<Sample, Box<dyn std::error::Error>> {
+    async fn run(&self, _cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>> {
         let method = reqwest::Method::from_str(&self.method)?;
 
         let mut request = if self.no_verify {
@@ -98,5 +99,30 @@ impl Target for HttpTarget {
 impl Display for HttpTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "HTTP {} {}", self.method, self.url)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::SampleValue;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_get() {
+        let target = HttpTarget {
+            url: "https://httpbin.org/get".to_string(),
+            method: "GET".to_string(),
+            headers: HashMap::new(),
+            body: None,
+            no_verify: true,
+        };
+
+        let cancel = AtomicBool::new(false);
+
+        let sample = target.run(&cancel).await.unwrap();
+        assert_eq!(sample.get("http.status"), &200.into());
+        assert_eq!(sample.get("http.version"), &"HTTP/1.1".into());
+        assert!(matches!(sample.get("http.body"), SampleValue::String(s) if !s.is_empty()));
     }
 }
