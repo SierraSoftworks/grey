@@ -2,7 +2,6 @@
 target = "ui/index.html"
 dist = "dist"
 public_url = "/static/"
-locked = true
 minify = "on_release"
 
 [watch]
