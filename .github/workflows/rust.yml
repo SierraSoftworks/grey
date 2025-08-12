@@ -31,59 +31,6 @@ jobs:
           name: cargofile
           path: Cargo.toml
 
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-          components: llvm-tools-preview
-
-      - name: install protoc
-        run: |
-          Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v${env:PROTOC_VERSION}/protoc-${env:PROTOC_VERSION}-linux-x86_64.zip
-          Expand-Archive /tmp/protoc.zip -DestinationPath ../tools
-          Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
-          Get-Content $env:GITHUB_PATH
-        shell: pwsh
-
-      - name: cargo install grcov
-        uses: SierraSoftworks/setup-grcov@v1
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
-
-      - name: Install trunk (for building web UI)
-        run: |
-          cargo binstall --no-confirm trunk
-          echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
-
-      - name: Add wasm32 target (for web UI builds)
-        run: rustup target add wasm32-unknown-unknown
-
-      - name: Run tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --all-features --no-fail-fast
-        env:
-            RUSTFLAGS: -Cinstrument-coverage
-
-      - name: grcov
-        run: grcov . --binary-path target/debug/deps/ -s . -t lcov --ignore-not-existing --ignore '../**' --ignore '/*' --ignore 'C:/' -o ./lcov.info
-
-      - name: codecov upload
-        uses: codecov/codecov-action@v5.4.3
-        with:
-          files: ./lcov.info
-
   build-ui:
     runs-on: ubuntu-latest
 
@@ -117,6 +64,56 @@ jobs:
         with:
           name: ui-build
           path: ./dist
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    needs:
+      - build-ui
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          components: llvm-tools-preview
+
+      - name: install protoc
+        run: |
+          Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v${env:PROTOC_VERSION}/protoc-${env:PROTOC_VERSION}-linux-x86_64.zip
+          Expand-Archive /tmp/protoc.zip -DestinationPath ../tools
+          Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
+          Get-Content $env:GITHUB_PATH
+        shell: pwsh
+
+      - name: cargo install grcov
+        uses: SierraSoftworks/setup-grcov@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch UI build artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: ui-build
+          path: ./dist
+
+      - name: Run tests
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --all-features --no-fail-fast
+        env:
+            RUSTFLAGS: -Cinstrument-coverage
+
+      - name: grcov
+        run: grcov . --binary-path target/debug/deps/ -s . -t lcov --ignore-not-existing --ignore '../**' --ignore '/*' --ignore 'C:/' -o ./lcov.info
+
+      - name: codecov upload
+        uses: codecov/codecov-action@v5.4.3
+        with:
+          files: ./lcov.info
 
   build-app:
     name: ${{ matrix.os }}-${{ matrix.arch }}-release
@@ -201,6 +198,7 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           name: ui-build
+          path: ./dist
 
       - name: cargo build
         uses: actions-rs/cargo@v1.0.3
