@@ -19,7 +19,7 @@ grey-api = { path = "api" }
 actix-web = "4.4"
 async-trait = "0.1"
 clap = { version = "4.5", features = ["derive"] }
-ctrlc = "3.4.5"
+ctrlc = "3.4.7"
 futures = "0.3"
 humantime = "2.2.0"
 include_dir = "0.7"
