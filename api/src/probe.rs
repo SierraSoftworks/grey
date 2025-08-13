@@ -7,9 +7,9 @@ pub struct Probe {
     pub name: String,
     pub policy: Policy,
     pub target: String,
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub tags: HashMap<String, String>,
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub validators: HashMap<String, String>,
     pub availability: f64,
 }
@@ -19,7 +19,7 @@ pub struct Probe {
 pub struct Policy {
     #[serde(with = "serde_duration_millis")]
     pub interval: std::time::Duration,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retries: Option<u8>,
     #[serde(with = "serde_duration_millis")]
     pub timeout: std::time::Duration,
@@ -37,9 +37,9 @@ pub struct ProbeHistory {
     pub state_duration: std::time::Duration,
     pub attempts: u64,
     pub pass: bool,
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub message: String,
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub validations: HashMap<String, ValidationResult>,
     /// Number of samples this entry represents (1 for recent, >1 for compressed)
     pub sample_count: u64,

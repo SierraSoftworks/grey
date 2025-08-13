@@ -75,6 +75,7 @@ impl From<&crate::config::UiConfig> for grey_api::UiConfig {
             title: config.title.clone(),
             logo: config.logo.clone(),
             links: config.links.clone(),
+            reload_interval: config.reload_interval,
         }
     }
 }

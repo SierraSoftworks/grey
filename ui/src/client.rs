@@ -38,7 +38,37 @@ pub struct AppProps {
     pub histories: HashMap<String, Vec<grey_api::ProbeHistory>>,
 }
 
+impl Default for AppProps {
+    fn default() -> Self {
+        Self {
+            config: grey_api::UiConfig::default(),
+            notices: Vec::new(),
+            probes: Vec::new(),
+            histories: HashMap::new(),
+        }
+    }
+}
+
 impl AppProps {
+    #[cfg(feature = "wasm")]
+    pub fn from_dom_minimal() -> Result<Self, Box<dyn std::error::Error>> {
+        use web_sys::window;
+
+        let window = window().ok_or("No window found")?;
+        let document = window.document().ok_or("No document found")?;
+        let app_element = document.get_element_by_id("app").ok_or("#app not found")?;
+        
+        let config_data = app_element.get_attribute("data-config").ok_or("#app[data-config] not found")?;
+        let config: UiConfig = serde_json::from_str(&config_data)?;
+
+        Ok(Self {
+            config,
+            notices: Vec::new(),
+            probes: Vec::new(),
+            histories: HashMap::new(),
+        })
+    }
+
     #[cfg(feature = "wasm")]
     pub fn from_dom() -> Result<Self, Box<dyn std::error::Error>> {
         use web_sys::window;
@@ -85,7 +115,19 @@ impl Component for App {
         };
 
         #[cfg(feature = "wasm")]
-        Self::setup_polling(ctx);
+        if app.probes.is_empty() {
+            // We might not have loaded the un-hydrated context correctly, so let's trigger an immediate refresh
+            ctx.link().send_future(async move {
+                Self::fetch_probes_as_client_msg().await
+            });
+
+            ctx.link().send_future(async move {
+                Self::fetch_notices_as_client_msg().await
+            });
+        } else {
+            Self::schedule_next_probes_poll(ctx);
+            Self::schedule_next_notices_poll(ctx);
+        }
 
         app
     }
@@ -109,7 +151,7 @@ impl Component for App {
                 }
 
                 // Setup next polling cycle
-                Self::setup_probes_polling(ctx);
+                Self::schedule_next_probes_poll(ctx);
                 true
             }
             ClientMsg::UpdateProbeHistory(probe_name, history) => {
@@ -119,7 +161,7 @@ impl Component for App {
             }
             ClientMsg::UpdateNotices(notices) => {
                 self.notices = notices;
-                Self::setup_notices_polling(ctx);
+                Self::schedule_next_notices_poll(ctx);
                 true
             }
             ClientMsg::Error(err) => {
@@ -209,38 +251,38 @@ fn app_content(props: &AppContentProps) -> Html {
     }
 }
 
+#[cfg(feature = "wasm")]
 impl App {
-    #[cfg(feature = "wasm")]
-    fn setup_polling(ctx: &Context<Self>) {
-        Self::setup_probes_polling(ctx);
-        Self::setup_notices_polling(ctx);
-    }
-
-    #[cfg(feature = "wasm")]
-    fn setup_probes_polling(ctx: &Context<Self>) {
+    fn schedule_next_probes_poll(ctx: &Context<Self>) {
+        let reload_interval = ctx.props().config.reload_interval;
         ctx.link().send_future(async move {
-            use std::time::Duration;
-            gloo::timers::future::sleep(Duration::from_secs(120)).await;
-            match Self::fetch_probes().await {
-                Ok(probes) => ClientMsg::UpdateProbes(probes),
-                Err(err) => ClientMsg::Error(format!("Failed to fetch probes: {}", err)),
-            }
+            gloo::timers::future::sleep(reload_interval).await;
+            Self::fetch_probes_as_client_msg().await
         });
     }
 
-    #[cfg(feature = "wasm")]
-    fn setup_notices_polling(ctx: &Context<Self>) {
+    async fn fetch_probes_as_client_msg() -> ClientMsg {
+        match Self::fetch_probes().await {
+            Ok(probes) => ClientMsg::UpdateProbes(probes),
+            Err(err) => ClientMsg::Error(format!("Failed to fetch probes: {}", err)),
+        }
+    }
+
+    fn schedule_next_notices_poll(ctx: &Context<Self>) {
+        let reload_interval = ctx.props().config.reload_interval;
         ctx.link().send_future(async move {
-            use std::time::Duration;
-            gloo::timers::future::sleep(Duration::from_secs(300)).await;
-            match Self::fetch_notices().await {
-                Ok(notices) => ClientMsg::UpdateNotices(notices),
-                Err(err) => ClientMsg::Error(format!("Failed to fetch notices: {}", err)),
-            }
+            gloo::timers::future::sleep(reload_interval).await;
+            Self::fetch_notices_as_client_msg().await
         });
     }
 
-    #[cfg(feature = "wasm")]
+    async fn fetch_notices_as_client_msg() -> ClientMsg {
+        match Self::fetch_notices().await {
+            Ok(notices) => ClientMsg::UpdateNotices(notices),
+            Err(err) => ClientMsg::Error(format!("Failed to fetch notices: {}", err)),
+        }
+    }
+
     async fn fetch_notices() -> Result<Vec<grey_api::UiNotice>, Box<dyn std::error::Error>> {
         let response = gloo::net::http::Request::get("/api/v1/notices")
             .send()
@@ -254,7 +296,6 @@ impl App {
         Ok(notices)
     }
 
-    #[cfg(feature = "wasm")]
     async fn fetch_probes() -> Result<Vec<grey_api::Probe>, Box<dyn std::error::Error>> {
         let response = gloo::net::http::Request::get("/api/v1/probes")
             .send()
@@ -268,7 +309,6 @@ impl App {
         Ok(probes)
     }
 
-    #[cfg(feature = "wasm")]
     async fn fetch_probe_history(
         probe_name: &str,
     ) -> Result<Vec<grey_api::ProbeHistory>, Box<dyn std::error::Error>> {

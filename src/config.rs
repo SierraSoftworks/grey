@@ -117,6 +117,9 @@ pub struct UiConfig {
 
     #[serde(default)]
     pub links: Vec<grey_api::UiLink>,
+
+    #[serde(default = "default_reload_interval")]
+    pub reload_interval: std::time::Duration,
 }
 
 fn default_ui_listen() -> String {
@@ -129,4 +132,8 @@ fn default_ui_title() -> String {
 
 fn default_ui_logo() -> String {
     "https://cdn.sierrasoftworks.com/logos/icon.svg".into()
+}
+
+fn default_reload_interval() -> std::time::Duration {
+    std::time::Duration::from_secs(60)
 }
