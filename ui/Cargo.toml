@@ -28,6 +28,6 @@ wasm-logger = { version = "0.2", optional = true }
 web-sys = { version = "0.3", optional = true }
 
 [features]
-default = ["ssr"]
+default = ["wasm"]
 ssr = []
 wasm = ["gloo", "gloo-console", "gloo-net", "gloo-timers", "wasm-bindgen", "wasm-bindgen-futures", "wasm-logger", "web-sys"]
