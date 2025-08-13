@@ -12,7 +12,7 @@ name = "grey"
 path = "./src/main.rs"
 
 [dependencies]
-grey-ui = { path = "ui" }
+grey-ui = { path = "ui", default-features = false, features = ["ssr"] }
 grey-api = { path = "api" }
 
 # Server dependencies

@@ -5,7 +5,6 @@ use chrono::Datelike;
 use grey_api::UiConfig;
 use yew::prelude::*;
 
-use crate::app_state::AppState;
 use crate::components::status::StatusLevel;
 use crate::contexts::{
     use_probe_history, use_probes, NoticesProvider, ProbeHistoryProvider, ProbesProvider,
@@ -24,15 +23,9 @@ pub enum ClientMsg {
 
 // Main App component that provides all contexts
 pub struct App {
-    #[cfg(feature = "wasm")]
-    config: UiConfig,
-    #[cfg(feature = "wasm")]
     notices: Vec<grey_api::UiNotice>,
-    #[cfg(feature = "wasm")]
     probes: Vec<grey_api::Probe>,
-    #[cfg(feature = "wasm")]
     probe_histories: std::collections::HashMap<String, Vec<grey_api::ProbeHistory>>,
-    #[cfg(feature = "wasm")]
     has_error: bool,
 }
 
@@ -45,38 +38,56 @@ pub struct AppProps {
     pub histories: HashMap<String, Vec<grey_api::ProbeHistory>>,
 }
 
+impl AppProps {
+    #[cfg(feature = "wasm")]
+    pub fn from_dom() -> Result<Self, Box<dyn std::error::Error>> {
+        use web_sys::window;
+
+        let window = window().ok_or("No window found")?;
+        let document = window.document().ok_or("No document found")?;
+        let app_element = document.get_element_by_id("app").ok_or("#app not found")?;
+
+        let config_data = app_element.get_attribute("data-config").ok_or("#app[data-config] not found")?;
+        let notices_data = app_element.get_attribute("data-notices").ok_or("#app[data-notices] not found")?;
+        let probes_data = app_element.get_attribute("data-probes").ok_or("#app[data-probes] not found")?;
+        let histories_data = app_element.get_attribute("data-probe-histories").ok_or("#app[data-probe-histories] not found")?;
+
+        let config: UiConfig = serde_json::from_str(&config_data)?;
+        let notices: Vec<grey_api::UiNotice> = serde_json::from_str(&notices_data)?;
+        let probes: Vec<grey_api::Probe> = serde_json::from_str(&probes_data)?;
+        let histories: HashMap<String, Vec<grey_api::ProbeHistory>> =
+            serde_json::from_str(&histories_data)?;
+
+        Ok(Self {
+            config,
+            notices,
+            probes,
+            histories,
+        })
+    }
+}
+
 impl Component for App {
     #[cfg(feature = "wasm")]
     type Message = ClientMsg;
-    #[cfg(feature = "wasm")]
-    type Properties = ();
-
     #[cfg(not(feature = "wasm"))]
     type Message = ();
-    #[cfg(not(feature = "wasm"))]
+
     type Properties = AppProps;
 
-    #[cfg(feature = "wasm")]
-    fn create(ctx: &Context<Self>) -> Self {
-        // Try to load initial state from DOM data attributes
-        let initial_state = AppState::from_dom().unwrap_or_default();
 
+    fn create(ctx: &Context<Self>) -> Self {
         let app = Self {
-            config: initial_state.config,
-            notices: initial_state.notices,
-            probes: initial_state.probes,
-            probe_histories: initial_state.probe_histories,
+            notices: ctx.props().notices.clone(),
+            probes: ctx.props().probes.clone(),
+            probe_histories: ctx.props().histories.clone(),
             has_error: false,
         };
 
+        #[cfg(feature = "wasm")]
         Self::setup_polling(ctx);
 
         app
-    }
-
-    #[cfg(not(feature = "wasm"))]
-    fn create(_ctx: &Context<Self>) -> Self {
-        Self {}
     }
 
     #[cfg(feature = "wasm")]
@@ -119,44 +130,12 @@ impl Component for App {
         }
     }
 
-    fn view(&self, _ctx: &Context<Self>) -> Html {
-        #[cfg(feature = "wasm")]
-        let (config, notices, probes, probe_histories) = (
-            self.config.clone(),
-            self.notices.clone(),
-            self.probes.clone(),
-            self.probe_histories.clone(),
-        );
-
-        #[cfg(not(feature = "wasm"))]
-        let AppProps {
-            config,
-            notices,
-            probes,
-            histories: probe_histories,
-        } = _ctx.props();
-
-        #[cfg(not(feature = "wasm"))]
-        let (config, notices, probes, probe_histories) = (
-            config.clone(),
-            notices.clone(),
-            probes.clone(),
-            probe_histories.clone(),
-        );
-
-        // Create app state for data attributes
-        let app_state = AppState {
-            config: config.clone(),
-            notices: notices.clone(),
-            probes: probes.clone(),
-            probe_histories: probe_histories.clone(),
-        };
-
-        // Serialize to JSON for data attributes
-        let config_json = serde_json::to_string(&app_state.config).unwrap_or_default();
-        let notices_json = serde_json::to_string(&app_state.notices).unwrap_or_default();
-        let probes_json = serde_json::to_string(&app_state.probes).unwrap_or_default();
-        let histories_json = serde_json::to_string(&app_state.probe_histories).unwrap_or_default();
+    fn view(&self, ctx: &Context<Self>) -> Html {
+        // Serialize to initial JSON for data attributes
+        let config_json = serde_json::to_string(&ctx.props().config).unwrap_or_default();
+        let notices_json = serde_json::to_string(&ctx.props().notices).unwrap_or_default();
+        let probes_json = serde_json::to_string(&ctx.props().probes).unwrap_or_default();
+        let histories_json = serde_json::to_string(&ctx.props().histories).unwrap_or_default();
 
         html! {
             <div id="app"
@@ -165,11 +144,11 @@ impl Component for App {
                 data-probes={probes_json}
                 data-probe-histories={histories_json}
             >
-                <UiConfigProvider config={config.clone()}>
-                    <NoticesProvider notices={notices.clone()}>
-                        <ProbesProvider probes={probes.clone()}>
-                            <ProbeHistoryProvider probe_histories={probe_histories.clone()}>
-                                <AppContent />
+                <UiConfigProvider config={ctx.props().config.clone()}>
+                    <NoticesProvider notices={self.notices.clone()}>
+                        <ProbesProvider probes={self.probes.clone()}>
+                            <ProbeHistoryProvider probe_histories={self.probe_histories.clone()}>
+                                <AppContent has_error={self.has_error} />
                             </ProbeHistoryProvider>
                         </ProbesProvider>
                     </NoticesProvider>
@@ -179,16 +158,16 @@ impl Component for App {
     }
 }
 
+#[derive(Properties, PartialEq)]
+pub struct AppContentProps {
+    has_error: bool,
+}
+
 // Main content component that uses contexts
 #[function_component(AppContent)]
-fn app_content() -> Html {
+fn app_content(props: &AppContentProps) -> Html {
     let probes_ctx = use_probes();
     let history_ctx = use_probe_history();
-
-    #[cfg(feature = "wasm")]
-    let has_error = false; // We can add error state to context later if needed
-    #[cfg(not(feature = "wasm"))]
-    let has_error = false;
 
     let healthy_probes = history_ctx
         .probe_histories
@@ -212,8 +191,8 @@ fn app_content() -> Html {
     html! {
         <>
             <Header
-                status={if has_error { StatusLevel::Error } else { StatusLevel::Good }}
-                status_text={if has_error { "Error" } else { "OK" }}
+                status={if props.has_error { StatusLevel::Error } else { StatusLevel::Good }}
+                status_text={if props.has_error { "Error" } else { "OK" }}
             />
 
             <div class="content">
