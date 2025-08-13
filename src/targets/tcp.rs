@@ -5,7 +5,7 @@ use tokio::net::{lookup_host, TcpSocket};
 
 use crate::{Sample, Target};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TcpTarget {
     pub host: String,
 }

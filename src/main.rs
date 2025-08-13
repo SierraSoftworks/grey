@@ -13,6 +13,7 @@ mod history;
 mod macros;
 mod policy;
 mod probe;
+mod probe_runner;
 mod result;
 mod sample;
 mod targets;
@@ -39,13 +40,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let telemetry = tracing_batteries::Session::new("grey", version!("v"))
         .with_battery(tracing_batteries::OpenTelemetry::new(""))
-        .with_battery(tracing_batteries::Medama::new("https://analytics.sierrasoftworks.com"));
+        .with_battery(tracing_batteries::Medama::new(
+            "https://analytics.sierrasoftworks.com",
+        ));
 
     let config = config::ConfigProvider::from_path(&args.config).await?;
 
-    println!("Starting Grey with {} probes...", config.probes.len());
+    println!("Starting Grey with {} probes...", config.probes().len());
 
-    let engine = Engine::new(config);
+    let engine = Engine::<10>::new(config);
     engine.run(&CANCEL).await?;
 
     telemetry.shutdown();

@@ -13,7 +13,7 @@ pub trait Target: Display {
     async fn run(&self, cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>>;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TargetType {
     #[cfg(test)]
     Mock,

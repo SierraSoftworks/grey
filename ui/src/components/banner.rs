@@ -26,7 +26,7 @@ pub struct BannerProps {
 #[function_component(Banner)]
 pub fn banner(props: &BannerProps) -> Html {
     let kind_str = props.kind.to_string();
-    
+
     html! {
         <div class={format!("section fill {}", kind_str)}>
             <span class={format!("status {}", kind_str)}>{&props.text}</span>

@@ -1,5 +1,5 @@
+use super::History;
 use yew::prelude::*;
-use super::{History};
 
 #[derive(Properties, PartialEq)]
 pub struct ProbeProps {
@@ -9,7 +9,8 @@ pub struct ProbeProps {
 
 #[function_component(Probe)]
 pub fn probe(props: &ProbeProps) -> Html {
-    let recent_availability = props.history.iter().filter(|h| h.pass).count() as f64 / props.history.len() as f64;
+    let recent_availability =
+        props.history.iter().filter(|h| h.pass).count() as f64 / props.history.len() as f64;
     let probe_class = match props.history.last() {
         Some(h) if h.pass => "ok",
         Some(h) if !h.pass && recent_availability > 0.8 => "warn",
@@ -17,10 +18,12 @@ pub fn probe(props: &ProbeProps) -> Html {
         _ => "ok",
     };
 
-    let policy = format!("interval: {}, timeout: {}, retries: {}",
+    let policy = format!(
+        "interval: {}, timeout: {}, retries: {}",
         humantime::format_duration(props.probe.policy.interval),
         humantime::format_duration(props.probe.policy.timeout),
-        props.probe.policy.retries.unwrap_or(0));
+        props.probe.policy.retries.unwrap_or(0)
+    );
 
     html! {
         <div class="probe">

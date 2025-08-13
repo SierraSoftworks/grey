@@ -35,5 +35,7 @@ pub fn ui_config_provider(props: &UiConfigProviderProps) -> Html {
 
 #[hook]
 pub fn use_ui_config() -> UiConfigContext {
-    use_context::<UiConfigContext>().expect("UiConfigContext not found. Make sure to wrap your component with UiConfigProvider.")
+    use_context::<UiConfigContext>().expect(
+        "UiConfigContext not found. Make sure to wrap your component with UiConfigProvider.",
+    )
 }

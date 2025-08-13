@@ -22,7 +22,7 @@ fn default_get() -> String {
     "GET".to_string()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HttpTarget {
     pub url: String,
     #[serde(default = "default_get")]
@@ -39,7 +39,7 @@ pub struct HttpTarget {
 impl Target for HttpTarget {
     #[tracing::instrument(
         "target.http",
-        skip(self, _cancel), err(Debug), 
+        skip(self, _cancel), err(Debug),
         fields(
             otel.kind=?OpenTelemetrySpanKind::Client,
             http.url = %self.url,

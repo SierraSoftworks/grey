@@ -27,5 +27,6 @@ pub fn notices_provider(props: &NoticesProviderProps) -> Html {
 
 #[hook]
 pub fn use_notices() -> NoticesContext {
-    use_context::<NoticesContext>().expect("NoticesContext not found. Make sure to wrap your component with NoticesProvider.")
+    use_context::<NoticesContext>()
+        .expect("NoticesContext not found. Make sure to wrap your component with NoticesProvider.")
 }

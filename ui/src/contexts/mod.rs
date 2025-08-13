@@ -1,9 +1,9 @@
 pub mod config;
 pub mod notices;
-pub mod probes;
 pub mod probe_history;
+pub mod probes;
 
-pub use config::{UiConfigContext, UiConfigProvider, use_ui_config};
-pub use notices::{NoticesContext, NoticesProvider, use_notices};
-pub use probes::{ProbesContext, ProbesProvider, use_probes};
-pub use probe_history::{ProbeHistoryContext, ProbeHistoryProvider, use_probe_history};
+pub use config::{use_ui_config, UiConfigContext, UiConfigProvider};
+pub use notices::{use_notices, NoticesContext, NoticesProvider};
+pub use probe_history::{use_probe_history, ProbeHistoryContext, ProbeHistoryProvider};
+pub use probes::{use_probes, ProbesContext, ProbesProvider};

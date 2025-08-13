@@ -6,7 +6,7 @@ use crate::sample::SampleValue;
 
 use super::Validator;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Contains(SampleValue);
 
 impl Validator for Contains {

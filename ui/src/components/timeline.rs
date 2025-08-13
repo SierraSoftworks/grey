@@ -1,6 +1,6 @@
-use yew::prelude::*;
-use crate::contexts::use_notices;
 use super::Notice;
+use crate::contexts::use_notices;
+use yew::prelude::*;
 
 #[function_component(Timeline)]
 pub fn timeline() -> Html {
