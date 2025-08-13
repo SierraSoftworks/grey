@@ -1,4 +1,5 @@
 /dist
 /target
 /result
+/state
 .direnv

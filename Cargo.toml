@@ -52,6 +52,9 @@ default = []
 pure_tests = []
 openssl_src = ["dep:openssl-sys"]
 
+[dev-dependencies]
+tempfile = "3.8"
+
 [profile.release]
 debug = 1
 strip = "debuginfo"

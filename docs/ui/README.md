@@ -19,6 +19,8 @@ ui:
 @tab Full Configuration
 
 ```yaml
+state: ./state/
+
 ui:
     enabled: true
     listen: 127.0.0.1:3002

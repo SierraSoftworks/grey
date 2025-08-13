@@ -48,7 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Starting Grey with {} probes...", config.probes().len());
 
-    let engine = Engine::<10>::new(config);
+    let engine = Engine::<48>::new(config);
     engine.run(&CANCEL).await?;
 
     telemetry.shutdown();

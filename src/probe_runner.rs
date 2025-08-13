@@ -25,6 +25,19 @@ impl<const N: usize> ProbeRunner<N> {
         }
     }
 
+    pub fn with_snapshot_history<P: Into<std::path::PathBuf>>(
+        config: Probe, 
+        snapshot_path: P
+    ) -> std::io::Result<Self> {
+        let history = ProbeHistory::with_snapshot_file(snapshot_path)?;
+        Ok(Self {
+            probe_name: Arc::new(config.name.clone()),
+            config: Arc::new(RwLock::new(config)),
+            history: Arc::new(history),
+            cancel: Arc::new(AtomicBool::new(false)),
+        })
+    }
+
     pub fn name(&self) -> Arc<String> {
         self.probe_name.clone()
     }
