@@ -16,7 +16,7 @@ grey-ui = { path = "ui" }
 grey-api = { path = "api" }
 
 # Server dependencies
-actix-web = "4.4"
+actix-web = "4.11"
 async-trait = "0.1"
 clap = { version = "4.5", features = ["derive"] }
 ctrlc = "3.4.7"
