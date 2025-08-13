@@ -13,7 +13,7 @@ pub trait Validator: Display {
     fn validate(&self, field: &str, value: &SampleValue) -> Result<(), Box<dyn std::error::Error>>;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ValidatorType {
     Contains(contains::Contains),
     Equals(equals::Equals),

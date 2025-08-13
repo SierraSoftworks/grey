@@ -6,7 +6,7 @@ use crate::SampleValue;
 
 use super::Validator;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OneOf(Vec<SampleValue>);
 
 impl Validator for OneOf {

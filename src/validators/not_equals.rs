@@ -6,7 +6,7 @@ use crate::SampleValue;
 
 use super::Validator;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NotEquals(SampleValue);
 
 impl Validator for NotEquals {

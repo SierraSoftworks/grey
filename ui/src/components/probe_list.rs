@@ -1,7 +1,7 @@
+use super::Probe as ProbeComponent;
+use crate::contexts::{use_probe_history, use_probes};
 use std::collections::HashMap;
 use yew::prelude::*;
-use crate::contexts::{use_probes, use_probe_history};
-use super::Probe as ProbeComponent;
 
 #[function_component(ProbeList)]
 pub fn probe_list() -> Html {
@@ -10,38 +10,37 @@ pub fn probe_list() -> Html {
 
     // Group probes by service tag
     let mut service_groups: HashMap<String, Vec<&grey_api::Probe>> = HashMap::new();
-    
+
     for probe in &probes_ctx.probes {
-        let service = probe.tags
+        let service = probe
+            .tags
             .get("service")
             .cloned()
             .unwrap_or_else(|| "Other".to_string());
-        
+
         service_groups
             .entry(service)
             .or_insert_with(Vec::new)
             .push(probe);
     }
-    
+
     // Sort service names, but put "Other" at the end
     let mut service_names: Vec<String> = service_groups.keys().cloned().collect();
-    service_names.sort_by(|a, b| {
-        match (a.as_str(), b.as_str()) {
-            ("Other", "Other") => std::cmp::Ordering::Equal,
-            ("Other", _) => std::cmp::Ordering::Greater,
-            (_, "Other") => std::cmp::Ordering::Less,
-            _ => a.cmp(b),
-        }
+    service_names.sort_by(|a, b| match (a.as_str(), b.as_str()) {
+        ("Other", "Other") => std::cmp::Ordering::Equal,
+        ("Other", _) => std::cmp::Ordering::Greater,
+        (_, "Other") => std::cmp::Ordering::Less,
+        _ => a.cmp(b),
     });
 
     html! {
         <>
             {for service_names.iter().map(|service_name| {
                 let probes = service_groups.get(service_name).unwrap();
-                
+
                 // Calculate service health and availability
                 let (service_health, service_availability) = calculate_service_health_and_availability(probes, &history_ctx.probe_histories);
-                
+
                 html! {
                     <div class={format!("section service-group {}", service_health)}>
                         <div class="service-title">
@@ -50,9 +49,9 @@ pub fn probe_list() -> Html {
                         </div>
                         {for probes.iter().map(|probe| {
                             html! {
-                                <ProbeComponent 
-                                    probe={(*probe).clone()} 
-                                    history={history_ctx.probe_histories.get(&probe.name).cloned().unwrap_or_default()} 
+                                <ProbeComponent
+                                    probe={(*probe).clone()}
+                                    history={history_ctx.probe_histories.get(&probe.name).cloned().unwrap_or_default()}
                                 />
                             }
                         })}
@@ -70,15 +69,15 @@ fn calculate_service_health_and_availability(
     if probes.is_empty() {
         return ("unknown".to_string(), 0.0);
     }
-    
+
     let mut total_availability = 0.0;
     let mut healthy_probes = 0;
     let mut total_probes = 0;
-    
+
     for probe in probes {
         total_availability += probe.availability;
         total_probes += 1;
-        
+
         // Check if the probe is currently healthy based on recent history
         if let Some(history) = probe_histories.get(&probe.name) {
             if let Some(recent_result) = history.last() {
@@ -88,18 +87,18 @@ fn calculate_service_health_and_availability(
             }
         }
     }
-    
+
     let average_availability = total_availability / total_probes as f64;
-    
+
     // Determine service health based on probe health ratio
     let health_ratio = healthy_probes as f64 / total_probes as f64;
     let service_health = if health_ratio == 1.0 {
         "ok"
     } else if health_ratio >= 0.5 {
-        "warn" 
+        "warn"
     } else {
         "error"
     };
-    
+
     (service_health.to_string(), average_availability)
 }

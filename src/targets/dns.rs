@@ -9,7 +9,7 @@ use trust_dns_resolver::{
 
 use crate::{Sample, Target};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DnsTarget {
     pub domain: String,
     pub record_type: Option<String>,

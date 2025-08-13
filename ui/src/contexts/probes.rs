@@ -27,5 +27,6 @@ pub fn probes_provider(props: &ProbesProviderProps) -> Html {
 
 #[hook]
 pub fn use_probes() -> ProbesContext {
-    use_context::<ProbesContext>().expect("ProbesContext not found. Make sure to wrap your component with ProbesProvider.")
+    use_context::<ProbesContext>()
+        .expect("ProbesContext not found. Make sure to wrap your component with ProbesProvider.")
 }

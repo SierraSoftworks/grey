@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::{collections::HashMap, sync::atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
@@ -14,7 +15,7 @@ use crate::{
     Policy, Target, Validator,
 };
 
-#[derive(Debug, Serialize, Deserialize,)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Probe {
     pub name: String,
     pub policy: Policy,
@@ -23,9 +24,6 @@ pub struct Probe {
     pub tags: HashMap<String, String>,
     #[serde(default)]
     pub validators: HashMap<String, ValidatorType>,
-
-    #[serde(skip)]
-    pub history: ProbeHistory<10>,
 }
 
 impl Probe {
@@ -40,25 +38,29 @@ impl Probe {
         probe.tags=?self.tags,
         probe.attempts=0,
     ))]
-    pub async fn run(&self, cancel: &AtomicBool) -> Result<(), Box<dyn std::error::Error>> {
-        let mut history = ProbeResult::new();
+    pub async fn run<const N: usize>(
+        &self,
+        history: Arc<ProbeHistory<N>>,
+        cancel: &AtomicBool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut sample = ProbeResult::new();
         let total_attempts = self.policy.retries.unwrap_or(2);
 
         let result = tokio::time::timeout(self.policy.timeout, async {
-            while history.attempts < total_attempts
+            while sample.attempts < total_attempts
                 && !cancel.load(std::sync::atomic::Ordering::Relaxed)
             {
-                history.attempts += 1;
+                sample.attempts += 1;
                 debug!(
                     "Running probe attempt {}/{}...",
-                    history.attempts, total_attempts,
+                    sample.attempts, total_attempts,
                 );
-                match self.run_attempt(&mut history, cancel).await {
+                match self.run_attempt(&mut sample, cancel).await {
                     Ok(res) => return Ok(res),
                     Err(err) => {
                         warn!("Probe failed: {}", err);
-                        if history.attempts == total_attempts {
-                            error!("Probe failed after {} attempts: {}", history.attempts, err);
+                        if sample.attempts == total_attempts {
+                            error!("Probe failed after {} attempts: {}", sample.attempts, err);
                             return Err(err);
                         }
                     }
@@ -69,41 +71,40 @@ impl Probe {
         })
         .await;
 
-        history.duration = chrono::Utc::now() - history.start_time;
+        sample.duration = chrono::Utc::now() - sample.start_time;
 
-        Span::current().record("probe.attempts", history.attempts);
+        Span::current().record("probe.attempts", sample.attempts);
 
         let result = match result {
             Ok(Ok(_)) => {
-                history.pass = true;
-                history.message = "Probe completed successfully.".to_owned();
+                sample.pass = true;
+                sample.message = "Probe completed successfully.".to_owned();
                 Ok(())
             }
             Ok(Err(e)) => {
-                history.pass = false;
-                history.message = e.to_string();
+                sample.pass = false;
+                sample.message = e.to_string();
                 Err(e)
             }
             Err(_) => {
-                history.pass = false;
-                history.message = format!(
+                sample.pass = false;
+                sample.message = format!(
                     "Probe timed out after {} milliseconds.",
                     self.policy.timeout.as_millis()
                 );
 
-                Err(history.message.clone().into())
+                Err(sample.message.clone().into())
             }
         };
 
-        self.history.add_sample(history);
+        history.add_sample(sample);
         result
     }
-
 
     #[tracing::instrument(name = "probe.attempt", skip(self), err(Debug), fields(otel.kind=?OpenTelemetrySpanKind::Internal))]
     async fn run_attempt(
         &self,
-        history: &mut ProbeResult,
+        result: &mut ProbeResult,
         cancel: &AtomicBool,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let sample = self.target.run(cancel).await?;
@@ -123,7 +124,7 @@ impl Probe {
             match validator.validate(path, sample.get(path)) {
                 Ok(_) => {
                     span.record("otel.status_code", "Ok");
-                    history
+                    result
                         .validations
                         .insert(path.to_owned(), ValidationResult::pass(validator));
                 }
@@ -131,7 +132,7 @@ impl Probe {
                     span.record("otel.status_code", "Error")
                         .record("otel.status_message", &err.to_string());
                     error!(error = err, "{}", err);
-                    history
+                    result
                         .validations
                         .insert(path.to_owned(), ValidationResult::fail(validator, &err));
                     return Err(err);
@@ -140,9 +141,5 @@ impl Probe {
         }
 
         Ok(())
-    }
-
-    pub fn availability(&self) -> f64 {
-        self.history.availability()
     }
 }

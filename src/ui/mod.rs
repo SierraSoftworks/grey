@@ -1,9 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
-
 use actix_web::{http::header::ContentType, web, App, HttpResponse, HttpServer, Result};
 use include_dir::{include_dir, Dir};
 
-use crate::Probe;
+use crate::history::HistoryProvider;
 
 mod api;
 mod page;
@@ -12,9 +10,15 @@ mod page;
 static ASSETS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/ui/dist");
 
 #[derive(Clone)]
-pub struct AppState {
+pub struct AppState<const N: usize> {
     pub config: crate::config::ConfigProvider,
-    pub probes: HashMap<String, Arc<Probe>>,
+    pub history: HistoryProvider<N>,
+}
+
+impl<const N: usize> AppState<N> {
+    pub fn new(config: crate::config::ConfigProvider, history: HistoryProvider<N>) -> Self {
+        Self { config, history }
+    }
 }
 
 // Custom handler for serving embedded static files
@@ -39,7 +43,7 @@ async fn serve_static(path: web::Path<String>) -> Result<HttpResponse> {
     }
 }
 
-pub fn create_app() -> App<
+pub fn create_app<const N: usize>() -> App<
     impl actix_web::dev::ServiceFactory<
         actix_web::dev::ServiceRequest,
         Config = (),
@@ -49,35 +53,34 @@ pub fn create_app() -> App<
     >,
 > {
     App::new()
-        .route("/", web::get().to(page::index))
-        .route("/api/v1/probes", web::get().to(api::get_probes))
+        .route("/", web::get().to(page::index::<N>))
+        .route("/api/v1/probes", web::get().to(api::get_probes::<N>))
         .route(
             "/api/v1/probes/{probe}/history",
-            web::get().to(api::get_history),
+            web::get().to(api::get_history::<N>),
         )
-        .route("/api/v1/user-interface", web::get().to(api::get_ui_config))
-        .route("/api/v1/notices", web::get().to(api::get_notices))
+        .route(
+            "/api/v1/user-interface",
+            web::get().to(api::get_ui_config::<N>),
+        )
+        .route("/api/v1/notices", web::get().to(api::get_notices::<N>))
         .route("/static/{filename:.*}", web::get().to(serve_static))
 }
 
-pub async fn start_server(
+pub async fn start_server<const N: usize>(
     config: crate::config::ConfigProvider,
-    probes: Vec<Arc<Probe>>,
-) -> std::io::Result<()> {
-    let mut state = AppState {
-        config: config.clone(),
-        probes: HashMap::new(),
-    };
-
-    for probe in probes {
-        state.probes.insert(probe.name.clone(), probe);
-    }
+    history: HistoryProvider<N>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let state = AppState::<N>::new(config.clone(), history);
 
     let listen_addr = config.ui().listen.clone();
 
-    HttpServer::new(move || create_app().app_data(web::Data::new(state.clone())))
-        .workers(1)
-        .bind(&listen_addr)?
-        .run()
-        .await
+    Ok(
+        HttpServer::new(move || create_app::<N>().app_data(web::Data::new(state.clone())))
+            .workers(1)
+            .bind(&listen_addr)?
+            .run()
+            .await
+            .map_err(|e| format!("{}", e))?,
+    )
 }

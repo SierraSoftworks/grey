@@ -1,6 +1,6 @@
 use grey_api::ProbeHistory;
-use yew::prelude::*;
 use std::collections::HashMap;
+use yew::prelude::*;
 
 #[derive(Clone, PartialEq)]
 pub struct ProbeHistoryContext {

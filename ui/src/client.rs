@@ -5,14 +5,14 @@ use chrono::Datelike;
 use grey_api::UiConfig;
 use yew::prelude::*;
 
+use crate::app_state::AppState;
 use crate::components::status::StatusLevel;
 use crate::contexts::{
-    UiConfigProvider, NoticesProvider, ProbesProvider, ProbeHistoryProvider,
-    use_probes, use_probe_history
+    use_probe_history, use_probes, NoticesProvider, ProbeHistoryProvider, ProbesProvider,
+    UiConfigProvider,
 };
-use crate::app_state::AppState;
 
-use super::components::{Banner, BannerKind, Header, Timeline, ProbeList};
+use super::components::{Banner, BannerKind, Header, ProbeList, Timeline};
 
 #[cfg(feature = "wasm")]
 pub enum ClientMsg {
@@ -73,7 +73,7 @@ impl Component for App {
 
         app
     }
-    
+
     #[cfg(not(feature = "wasm"))]
     fn create(_ctx: &Context<Self>) -> Self {
         Self {}
@@ -159,7 +159,7 @@ impl Component for App {
         let histories_json = serde_json::to_string(&app_state.probe_histories).unwrap_or_default();
 
         html! {
-            <div id="app" 
+            <div id="app"
                 data-config={config_json}
                 data-notices={notices_json}
                 data-probes={probes_json}
@@ -190,7 +190,9 @@ fn app_content() -> Html {
     #[cfg(not(feature = "wasm"))]
     let has_error = false;
 
-    let healthy_probes = history_ctx.probe_histories.iter()
+    let healthy_probes = history_ctx
+        .probe_histories
+        .iter()
         .filter_map(|(_, history)| history.last())
         .filter(|entry| entry.pass)
         .count();
@@ -209,9 +211,9 @@ fn app_content() -> Html {
 
     html! {
         <>
-            <Header 
-                status={if has_error { StatusLevel::Error } else { StatusLevel::Good }} 
-                status_text={if has_error { "Error" } else { "OK" }} 
+            <Header
+                status={if has_error { StatusLevel::Error } else { StatusLevel::Good }}
+                status_text={if has_error { "Error" } else { "OK" }}
             />
 
             <div class="content">

@@ -1,37 +1,55 @@
+use std::collections::HashMap;
+use std::sync::RwLock;
 use std::sync::{atomic::AtomicBool, Arc};
 
-use futures::TryFutureExt;
-use tokio::time::Instant;
-use tracing_batteries::prelude::opentelemetry::trace::{
-    SpanKind as OpenTelemetrySpanKind, Status as OpenTelemetryStatus,
-};
+use tracing_batteries::prelude::opentelemetry::trace::SpanKind as OpenTelemetrySpanKind;
 use tracing_batteries::prelude::*;
 
 use crate::config::ConfigProvider;
+use crate::history::HistoryProvider;
+use crate::probe_runner::ProbeRunner;
 use crate::Probe;
 
-pub struct Engine {
+pub struct Engine<const N: usize> {
     config: ConfigProvider,
-    probes: Vec<Arc<Probe>>,
+    probes: Arc<RwLock<HashMap<String, Arc<ProbeRunner<N>>>>>,
+    history: HistoryProvider<N>,
 }
 
-const NO_PARENT: Option<tracing::Id> = None;
-
-impl Engine {
+impl<const N: usize> Engine<N> {
     pub fn new(config: ConfigProvider) -> Self {
-        let probes = config.probes();
+        let probes: HashMap<String, Arc<ProbeRunner<N>>> = config
+            .probes()
+            .iter()
+            .map(|probe| {
+                (
+                    probe.name.clone(),
+                    Arc::new(ProbeRunner::new(probe.clone())),
+                )
+            })
+            .collect();
 
-        Self { config, probes }
+        let history = HistoryProvider::new();
+        for probe in probes.values() {
+            history.init(probe.name(), probe.history());
+        }
+
+        Self {
+            config,
+            probes: Arc::new(RwLock::new(probes)),
+            history,
+        }
     }
 
     #[tracing::instrument(name = "engine", skip(self), fields(otel.kind=?OpenTelemetrySpanKind::Internal), err(Debug))]
     pub async fn run(&self, cancel: &AtomicBool) -> Result<(), Box<dyn std::error::Error>> {
-        let probe_future = futures::future::try_join_all(
-            self.probes
-                .iter()
-                .cloned()
-                .map(|probe| self.schedule(probe, cancel)),
-        );
+        // Start config reload watcher
+        self.start_config_reloader();
+
+        // Start probe runners
+        for probe in self.probes.read().unwrap().values().cloned() {
+            self.start_probe_runner(probe);
+        }
 
         if self.config.ui().enabled {
             eprintln!(
@@ -39,89 +57,95 @@ impl Engine {
                 self.config.ui().listen.as_str()
             );
 
-            let ui_future =
-                crate::ui::start_server(self.config.clone(), self.probes.iter().cloned().collect());
-
             let config = self.config.clone();
-            tokio::spawn(async move {
-                loop {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-                    if let Err(err) = config.reload().await {
-                        error!("Failed to reload config: {}", err);
-                    }
-                }
-            });
+            let history = self.history.clone();
 
-            let ui_future = Box::pin(ui_future.map_err(|e| Box::<dyn std::error::Error>::from(e)));
-            let probe_future = Box::pin(probe_future);
-
-            match futures::future::try_select(ui_future, probe_future).await {
-                Ok(_) => {}
-                Err(e) => {
-                    let (e, _) = e.factor_first();
-                    return Err(e);
-                }
-            }
+            crate::ui::start_server(config, history).await?;
         } else {
-            probe_future.await?;
+            while !cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            }
         }
+
+        self.stop_all_probe_runners();
 
         Ok(())
     }
 
-    #[tracing::instrument(name = "engine.schedule", skip(self, probe), err(Debug), fields(
-        otel.kind=?OpenTelemetrySpanKind::Producer,
-        probe.name=probe.name,
-        otel.status_code=?OpenTelemetryStatus::Unset,
-        error=EmptyField
-    ))]
-    async fn schedule(
-        &self,
-        probe: Arc<Probe>,
-        cancel: &AtomicBool,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        // Calculate a random delay between 0 and the probe interval
-        let start_delay = rand::random::<u128>() % probe.policy.interval.as_millis();
-        let mut next_run_time =
-            Instant::now() + std::time::Duration::from_millis(start_delay as u64);
-
-        let parent_span = Span::current();
-
-        while !cancel.load(std::sync::atomic::Ordering::Relaxed) {
-            let now = Instant::now();
-            let sleep_time = next_run_time - now;
-            if sleep_time > tokio::time::Duration::from_secs(1) {
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                continue;
-            } else if sleep_time > tokio::time::Duration::from_secs(0) {
-                tokio::time::sleep(sleep_time).await;
+    fn start_probe_runner(&self, probe: Arc<ProbeRunner<N>>) {
+        tokio::spawn(async move {
+            if let Err(e) = probe.schedule().await {
+                error!(name: "engine.probe", { probe.name=%probe.name(), action = "schedule", exception = e }, "Failed to schedule probe {}: {}", probe.name(), e);
             }
+        });
+    }
 
-            next_run_time += probe.policy.interval;
-
-            let probe_span = span!(parent: NO_PARENT, tracing::Level::INFO, "engine.probe",
-                %probe.name,
-                otel.name=probe.name,
-                otel.status_code=?OpenTelemetryStatus::Unset,
-                otel.kind=?OpenTelemetrySpanKind::Consumer,
-            );
-
-            probe_span.follows_from(&parent_span);
-
-            debug!("Starting next probing session...");
-            let run_result = probe.run(cancel).instrument(probe_span.clone()).await;
-            match run_result {
-                Ok(_) => {
-                    probe_span.record("otel.status_code", "Ok");
-                }
-                Err(err) => {
-                    probe_span
-                        .record("otel.status_code", "Error")
-                        .record("error", debug(&err));
-                }
-            }
+    fn stop_all_probe_runners(&self) {
+        for probe in self.probes.read().unwrap().values().cloned() {
+            probe.cancel();
         }
+    }
 
-        Ok(())
+    fn start_config_reloader(&self) {
+        let config = self.config.clone();
+        let history = self.history.clone();
+        let probes = self.probes.clone();
+        tokio::spawn(async move {
+            let mut current_probes = config.probes().clone();
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                if let Err(err) = config.reload().await {
+                    error!("Failed to reload config: {}", err);
+                }
+
+                let new_probes = config.probes().clone();
+                if new_probes != current_probes {
+                    let old_probes: HashMap<&str, &Probe> = current_probes
+                        .iter()
+                        .map(|p| (p.name.as_str(), p))
+                        .collect();
+                    let new_probes: HashMap<&str, &Probe> =
+                        new_probes.iter().map(|p| (p.name.as_str(), p)).collect();
+
+                    for (name, old_probe) in old_probes.iter() {
+                        if let Some(new_probe) = new_probes.get(name) {
+                            if old_probe != new_probe {
+                                // Probe configuration has changed
+                                info!(name: "config.reload.probe", { probe.name=name, action = "update" }, "Reloaded configuration for probe {}", name);
+                                probes.read().unwrap().get(*name).map(|p| p.update((*new_probe).clone()));
+                            }
+                        } else {
+                            // Probe has been removed
+                            info!(name: "config.reload.probe", { probe.name=name, action = "remove" }, "Removed configuration for probe {}", name);
+                            probes.read().unwrap().get(*name).map(|p| p.cancel());
+                        }
+                    }
+
+                    for (name, new_probe) in new_probes {
+                        if !old_probes.contains_key(name) {
+                            // New probe has been added
+                            let name = name.to_string();
+                            info!(name: "config.reload.probe", { probe.name=name, action = "add" }, "Added configuration for probe {}", name);
+                            let probe = Arc::new(ProbeRunner::new(new_probe.clone()));
+
+                            history.init(probe.name().as_str(), probe.history());
+
+                            probes.write().unwrap().insert(
+                                name.to_string(),
+                                probe.clone(),
+                            );
+
+                            tokio::spawn(async move {
+                                if let Err(e) = probe.schedule().await {
+                                    error!(name: "config.reload.probe", { probe.name=name, action = "schedule", exception = e }, "Failed to schedule probe {}: {}", name, e);
+                                }
+                            });
+                        }
+                    }
+                }
+
+                current_probes = new_probes;
+            }
+        });
     }
 }

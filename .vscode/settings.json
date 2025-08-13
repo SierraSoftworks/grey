@@ -11,8 +11,15 @@
         "!Tcp mapping",
     ],
     "cSpell.words": [
+        "actix",
+        "behaviour",
+        "cachix",
         "chrono",
         "Csvg",
-        "gloo"
+        "gloo",
+        "nixos",
+        "nixpkgs",
+        "sierrasoftworks",
+        "Softworks"
     ]
 }

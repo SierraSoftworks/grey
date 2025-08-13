@@ -1,13 +1,13 @@
-mod components;
-mod client;
-mod contexts;
 mod app_state;
+mod client;
+mod components;
+mod contexts;
 
 // Export components for both SSR and WASM usage
-pub use components::*;
-pub use client::{App, AppProps};
-pub use contexts::*;
 pub use app_state::AppState;
+pub use client::{App, AppProps};
+pub use components::*;
+pub use contexts::*;
 
 // Main entry point for trunk
 #[allow(dead_code)]

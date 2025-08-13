@@ -1,5 +1,5 @@
-use grey_api::{UiConfig, UiNotice, Probe, ProbeHistory};
-use serde::{Serialize, Deserialize};
+use grey_api::{Probe, ProbeHistory, UiConfig, UiNotice};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -37,7 +37,7 @@ impl AppState {
         let window = window()?;
         let document = window.document()?;
         let app_element = document.get_element_by_id("app")?;
-        
+
         let config_data = app_element.get_attribute("data-config")?;
         let notices_data = app_element.get_attribute("data-notices")?;
         let probes_data = app_element.get_attribute("data-probes")?;
@@ -46,7 +46,8 @@ impl AppState {
         let config: UiConfig = serde_json::from_str(&config_data).ok()?;
         let notices: Vec<UiNotice> = serde_json::from_str(&notices_data).ok()?;
         let probes: Vec<Probe> = serde_json::from_str(&probes_data).ok()?;
-        let probe_histories: HashMap<String, Vec<ProbeHistory>> = serde_json::from_str(&histories_data).ok()?;
+        let probe_histories: HashMap<String, Vec<ProbeHistory>> =
+            serde_json::from_str(&histories_data).ok()?;
 
         Some(Self {
             config,
