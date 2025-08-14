@@ -46,9 +46,6 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Setup Cache
-        uses: Swatinem/rust-cache@v2
-
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@main
         if: ${{ !matrix.cross }}
@@ -58,6 +55,9 @@ jobs:
         run: |
           cargo binstall --no-confirm trunk
           echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Setup Cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Build UI using trunk
         run: trunk build --release
@@ -83,9 +83,6 @@ jobs:
           override: true
           components: llvm-tools-preview
 
-      - name: Setup Cache
-        uses: Swatinem/rust-cache@v2
-
       - name: install protoc
         run: |
           Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v${env:PROTOC_VERSION}/protoc-${env:PROTOC_VERSION}-linux-x86_64.zip
@@ -104,6 +101,9 @@ jobs:
         with:
           name: ui-build
           path: ./ui/dist
+
+      - name: Setup Cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Run tests
         uses: actions-rs/cargo@v1
@@ -200,14 +200,14 @@ jobs:
         with:
           name: cargofile
 
-      - name: Setup Cache
-        uses: Swatinem/rust-cache@v2
-
       - name: Fetch UI build artifacts
         uses: actions/download-artifact@v5
         with:
           name: ui-build
           path: ./ui/dist
+
+      - name: Setup Cache
+        uses: Swatinem/rust-cache@v2
 
       - name: cargo build
         uses: actions-rs/cargo@v1.0.3
