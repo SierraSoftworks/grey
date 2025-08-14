@@ -22,8 +22,8 @@ ui:
 probes:
   - name: example.healthy
     policy:
-      interval: 500
-      timeout: 2000
+      interval: 500ms
+      timeout: 2s
       retries: 3
     target: !Dns
       domain: google.com
@@ -34,8 +34,8 @@ probes:
       service: internet
   - name: example.unhealthy
     policy:
-      interval: 2000
-      timeout: 2000
+      interval: 2s
+      timeout: 2s
       retries: 1
     target: !Tcp
       host: example.com:443
