@@ -24,7 +24,7 @@ impl<const N: usize> Engine<N> {
             .map(|probe| {
                 (
                     probe.name.clone(),
-                    Arc::new(ProbeRunner::new(probe.clone())),
+                    Self::build_probe_runner(&config, probe),
                 )
             })
             .collect();
@@ -43,6 +43,11 @@ impl<const N: usize> Engine<N> {
 
     #[tracing::instrument(name = "engine", skip(self), fields(otel.kind=?OpenTelemetrySpanKind::Internal), err(Debug))]
     pub async fn run(&self, cancel: &AtomicBool) -> Result<(), Box<dyn std::error::Error>> {
+        // Ensure that the state directory is created (if specified)
+        if let Some(state_dir) = self.config.state_dir() {
+            std::fs::create_dir_all(state_dir)?;
+        }
+
         // Start config reload watcher
         self.start_config_reloader();
 
@@ -70,6 +75,21 @@ impl<const N: usize> Engine<N> {
         self.stop_all_probe_runners();
 
         Ok(())
+    }
+
+    fn build_probe_runner(config: &ConfigProvider, probe: &Probe) -> Arc<ProbeRunner<N>> {
+        if let Some(state_dir) = config.state_dir() {
+            // If a state directory is configured, use it
+            match ProbeRunner::with_snapshot_history(probe.clone(), state_dir.join(format!("{}.dat", probe.name))) {
+                Ok(runner) => Arc::new(runner),
+                Err(e) => {
+                    warn!("Failed to create probe runner with snapshot history for '{}': {}. Using default state (no history).", probe.name, e);
+                    Arc::new(ProbeRunner::new(probe.clone()))
+                }
+            }
+        } else {
+            Arc::new(ProbeRunner::new(probe.clone()))
+        }
     }
 
     fn start_probe_runner(&self, probe: Arc<ProbeRunner<N>>) {
@@ -126,7 +146,7 @@ impl<const N: usize> Engine<N> {
                             // New probe has been added
                             let name = name.to_string();
                             info!(name: "config.reload.probe", { probe.name=name, action = "add" }, "Added configuration for probe {}", name);
-                            let probe = Arc::new(ProbeRunner::new(new_probe.clone()));
+                            let probe = Self::build_probe_runner(&config, new_probe);
 
                             history.init(probe.name().as_str(), probe.history());
 

@@ -1,4 +1,5 @@
 use actix_web::{web, HttpResponse, Result};
+use grey_api::Probe;
 use grey_ui::{App, AppProps};
 use yew::ServerRenderer;
 
@@ -12,6 +13,10 @@ pub async fn index<const N: usize>(data: web::Data<AppState<N>>) -> Result<HttpR
         .probes()
         .iter()
         .map(|probe| probe.into())
+        .map(|mut probe: Probe| {
+            probe.availability = data.history.get(&probe.name).map(|h| h.availability()).unwrap_or(100.0);
+            probe
+        })
         .collect::<Vec<grey_api::Probe>>();
     let histories = probes
         .iter()

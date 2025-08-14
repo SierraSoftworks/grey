@@ -1,9 +1,12 @@
 use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, RwLock,
 };
+use tokio::time::Instant;
 
 use crate::result::{ProbeResult, ValidationResult};
 
@@ -38,7 +41,7 @@ impl<const N: usize> HistoryProvider<N> {
 }
 
 /// Represents a state that the probe can be in
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProbeState {
     pub pass: bool,
     pub message: String,
@@ -57,7 +60,7 @@ impl ProbeState {
 }
 
 /// Represents an aggregated state bucket with timing and success information
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateBucket {
     /// The state this bucket represents
     pub state: ProbeState,
@@ -68,13 +71,12 @@ pub struct StateBucket {
     /// Total number of attempts in this state
     pub total_attempts: u64,
     /// Total duration of all samples in this state
+    #[serde(with = "crate::serializers::chrono_duration_humantime")]
     pub total_latency: Duration,
     /// Number of successful samples in this state bucket
     pub successful_samples: u64,
     /// Total number of samples in this state bucket
     pub total_samples: u64,
-    /// Average latency for samples in this state
-    pub average_latency: Duration,
 }
 
 impl StateBucket {
@@ -88,7 +90,6 @@ impl StateBucket {
             total_latency: result.duration,
             successful_samples: if result.pass { 1 } else { 0 },
             total_samples: 1,
-            average_latency: result.duration,
         }
     }
 
@@ -100,9 +101,6 @@ impl StateBucket {
         if result.pass {
             self.successful_samples += 1;
         }
-        self.average_latency = Duration::milliseconds(
-            self.total_latency.num_milliseconds() / self.total_samples as i64,
-        );
     }
 
     /// Finalize this state bucket when transitioning to a new state
@@ -139,6 +137,20 @@ pub struct ProbeHistory<const MAX_STATES: usize> {
     state_buckets: std::sync::RwLock<circular_buffer::CircularBuffer<MAX_STATES, StateBucket>>,
     /// Maximum age for a state bucket before it's forced to finalize
     max_state_age: Duration,
+    /// Optional path for snapshot file
+    snapshot_file: Option<PathBuf>,
+    /// Last time a snapshot was written to disk
+    last_snapshot_time: Arc<RwLock<Option<Instant>>>,
+}
+
+/// Serializable representation of probe history for disk snapshots
+#[derive(Debug, Serialize, Deserialize)]
+struct ProbeHistorySnapshot {
+    sample_count_total: u64,
+    sample_count_healthy: u64,
+    state_buckets: Vec<StateBucket>,
+    #[serde(with = "crate::serializers::chrono_duration_humantime")]
+    max_state_age: Duration,
 }
 
 impl<const MAX_STATES: usize> Default for ProbeHistory<MAX_STATES> {
@@ -160,7 +172,45 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
             sample_count_healthy: AtomicU64::new(0),
             state_buckets: std::sync::RwLock::new(circular_buffer::CircularBuffer::new()),
             max_state_age,
+            snapshot_file: None,
+            last_snapshot_time: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Creates a new probe history with snapshotting enabled
+    pub fn with_snapshot_file<P: Into<PathBuf>>(path: P) -> std::io::Result<Self> {
+        let snapshot_file = path.into();
+        
+        // Try to load existing snapshot
+        let snapshot = if snapshot_file.exists() {
+            let content = std::fs::read_to_string(&snapshot_file)?;
+            serde_json::from_str::<ProbeHistorySnapshot>(&content).ok()
+        } else {
+            None
+        };
+
+        let mut history = Self {
+            sample_count_total: AtomicU64::new(0),
+            sample_count_healthy: AtomicU64::new(0),
+            state_buckets: std::sync::RwLock::new(circular_buffer::CircularBuffer::new()),
+            max_state_age: Duration::hours(1),
+            snapshot_file: Some(snapshot_file),
+            last_snapshot_time: Arc::new(RwLock::new(None)),
+        };
+
+        // Restore from snapshot if available
+        if let Some(snapshot) = snapshot {
+            history.sample_count_total.store(snapshot.sample_count_total, Ordering::Relaxed);
+            history.sample_count_healthy.store(snapshot.sample_count_healthy, Ordering::Relaxed);
+            history.max_state_age = snapshot.max_state_age;
+            
+            let mut buckets = history.state_buckets.write().unwrap();
+            for bucket in snapshot.state_buckets {
+                buckets.push_back(bucket);
+            }
+        }
+
+        Ok(history)
     }
 
     /// Calculate the aligned start time for a state based on the max age
@@ -195,25 +245,99 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
         }
 
         let new_state = ProbeState::from_result(&result);
-        let mut buckets = self.state_buckets.write().unwrap();
+        {
+            let mut buckets = self.state_buckets.write().unwrap();
 
-        // Check if we can add to the current state bucket or need to create a new one
-        if let Some(current_bucket) = buckets.back_mut() {
-            let same_state = current_bucket.state == new_state;
-            let age_exceeded = self.should_finalize_for_age(current_bucket, result.start_time);
+            // Check if we can add to the current state bucket or need to create a new one
+            if let Some(current_bucket) = buckets.back_mut() {
+                let same_state = current_bucket.state == new_state;
+                let age_exceeded = self.should_finalize_for_age(current_bucket, result.start_time);
 
-            if same_state && !age_exceeded {
-                // Same state and within age limit, add to current bucket
-                current_bucket.add_sample(&result);
-                return;
-            } else {
-                // State transition or age exceeded, finalize the current bucket
-                current_bucket.finalize(result.start_time);
+                if same_state && !age_exceeded {
+                    // Same state and within age limit, add to current bucket
+                    current_bucket.add_sample(&result);
+                    return;
+                } else {
+                    // State transition or age exceeded, finalize the current bucket
+                    current_bucket.finalize(result.start_time);
+                }
+            }
+
+            let new_bucket = StateBucket::new(&result);
+            buckets.push_back(new_bucket);
+        }
+        self.maybe_trigger_snapshot();
+    }
+
+    /// Triggers a snapshot if one hasn't been written in the last 60 seconds
+    fn maybe_trigger_snapshot(&self) {
+        if let Some(snapshot_file) = &self.snapshot_file {
+            let now = Instant::now();
+            let should_snapshot = {
+                let last_snapshot = self.last_snapshot_time.read().unwrap();
+                match *last_snapshot {
+                    Some(last_time) => now.duration_since(last_time).as_secs() >= 60,
+                    None => true,
+                }
+            };
+
+            if should_snapshot {
+                let snapshot_file = snapshot_file.clone();
+                let snapshot_data = self.create_snapshot();
+                let last_snapshot_time = Arc::clone(&self.last_snapshot_time);
+
+                tokio::spawn(async move {
+                    if let Err(e) = Self::write_snapshot_async(&snapshot_file, snapshot_data).await {
+                        tracing::warn!("Failed to write probe history snapshot: {}", e);
+                    } else {
+                        *last_snapshot_time.write().unwrap() = Some(now);
+                    }
+                });
             }
         }
+    }
 
-        let new_bucket = StateBucket::new(&result);
-        buckets.push_back(new_bucket);
+    /// Creates a snapshot of the current state
+    fn create_snapshot(&self) -> ProbeHistorySnapshot {
+        let buckets = self.state_buckets.read().unwrap();
+        ProbeHistorySnapshot {
+            sample_count_total: self.sample_count_total.load(Ordering::Relaxed),
+            sample_count_healthy: self.sample_count_healthy.load(Ordering::Relaxed),
+            state_buckets: buckets.iter().cloned().collect(),
+            max_state_age: self.max_state_age,
+        }
+    }
+
+    /// Writes a snapshot to disk asynchronously
+    async fn write_snapshot_async(
+        snapshot_file: &Path,
+        snapshot: ProbeHistorySnapshot,
+    ) -> std::io::Result<()> {
+        // Try to create the parent directory if needed
+        if let Some(parent) = snapshot_file.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
+        let json_data = serde_json::to_string_pretty(&snapshot)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        
+        // Write to a temporary file first, then atomically rename
+        let temp_file = snapshot_file.with_extension("tmp");
+        tokio::fs::write(&temp_file, json_data).await?;
+        tokio::fs::rename(&temp_file, &snapshot_file).await?;
+        
+        Ok(())
+    }
+
+    /// Manually trigger a snapshot (useful for shutdown)
+    #[cfg(test)]
+    pub async fn force_snapshot(&self) -> std::io::Result<()> {
+        if let Some(snapshot_file) = &self.snapshot_file {
+            let snapshot = self.create_snapshot();
+            Self::write_snapshot_async(&snapshot_file, snapshot).await?;
+            *self.last_snapshot_time.write().unwrap() = Some(Instant::now());
+        }
+        Ok(())
     }
 
     /// Calculates the current availability percentage
@@ -230,11 +354,13 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
     }
 
     /// Returns the total number of samples recorded
+    #[cfg(test)]
     pub fn total_samples(&self) -> u64 {
         self.sample_count_total.load(Ordering::Relaxed)
     }
 
     /// Returns the number of healthy samples recorded
+    #[cfg(test)]
     pub fn healthy_samples(&self) -> u64 {
         self.sample_count_healthy.load(Ordering::Relaxed)
     }
@@ -245,16 +371,19 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
     }
 
     /// Returns the number of state buckets currently stored
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.state_buckets.read().unwrap().len()
     }
 
     /// Returns the maximum number of state transitions that can be stored
+    #[cfg(test)]
     pub const fn max_states(&self) -> usize {
         MAX_STATES
     }
 
     /// Returns the maximum state age configuration
+    #[cfg(test)]
     pub fn max_state_age(&self) -> Duration {
         self.max_state_age
     }
@@ -411,7 +540,6 @@ mod tests {
         assert_eq!(bucket.total_samples, 2);
         assert_eq!(bucket.successful_samples, 1); // Still only 1 successful
         assert_eq!(bucket.availability(), 50.0);
-        assert_eq!(bucket.average_latency, Duration::milliseconds(150)); // Average of 100 and 200
     }
 
     #[test]
@@ -557,5 +685,106 @@ mod tests {
         let buckets = history.get_state_buckets();
         assert!(buckets[0].end_time.is_some()); // First bucket should be finalized
         assert!(buckets[1].end_time.is_none()); // Second bucket should be current
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_creation_and_restore() {
+        use tempfile::NamedTempFile;
+
+        // Create a temporary file for testing
+        let temp_file = NamedTempFile::new().unwrap();
+        let temp_path = temp_file.path().to_path_buf();
+        drop(temp_file); // Close the file so we can write to it
+
+        // Create history with some data
+        let history = ProbeHistory::<10>::with_snapshot_file(&temp_path).unwrap();
+        
+        // Add some sample data
+        let mut result1 = ProbeResult::new();
+        result1.pass = true;
+        result1.message = "Test message 1".to_string();
+        history.add_sample(result1);
+
+        let mut result2 = ProbeResult::new();
+        result2.pass = false;
+        result2.message = "Test message 2".to_string();
+        history.add_sample(result2);
+
+        // Force a snapshot
+        history.force_snapshot().await.unwrap();
+
+        // Verify snapshot file exists and contains data
+        assert!(temp_path.exists());
+        let snapshot_content = tokio::fs::read_to_string(&temp_path).await.unwrap();
+        assert!(snapshot_content.contains("Test message 1"));
+        assert!(snapshot_content.contains("Test message 2"));
+
+        // Create a new history from the snapshot
+        let restored_history = ProbeHistory::<10>::with_snapshot_file(&temp_path).unwrap();
+
+        // Verify data was restored correctly
+        assert_eq!(restored_history.total_samples(), history.total_samples());
+        assert_eq!(restored_history.healthy_samples(), history.healthy_samples());
+        assert_eq!(restored_history.availability(), history.availability());
+        assert_eq!(restored_history.len(), history.len());
+
+        let original_buckets = history.get_state_buckets();
+        let restored_buckets = restored_history.get_state_buckets();
+        assert_eq!(original_buckets.len(), restored_buckets.len());
+        
+        for (orig, rest) in original_buckets.iter().zip(restored_buckets.iter()) {
+            assert_eq!(orig.state.pass, rest.state.pass);
+            assert_eq!(orig.state.message, rest.state.message);
+            assert_eq!(orig.total_samples, rest.total_samples);
+            assert_eq!(orig.successful_samples, rest.successful_samples);
+        }
+
+        // Clean up
+        let _ = tokio::fs::remove_file(&temp_path).await;
+    }
+
+    #[test]
+    fn test_snapshot_file_does_not_exist() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let non_existent_path = temp_dir.path().join("non_existent.json");
+
+        // Should create new history without error when file doesn't exist
+        let history = ProbeHistory::<10>::with_snapshot_file(&non_existent_path).unwrap();
+        
+        assert_eq!(history.total_samples(), 0);
+        assert_eq!(history.healthy_samples(), 0);
+        assert_eq!(history.availability(), 100.0);
+        assert_eq!(history.len(), 0);
+    }
+
+    #[test]
+    fn test_default_constructor_no_snapshots() {
+        let history: ProbeHistory<10> = ProbeHistory::default();
+        
+        // Add some data
+        let mut result = ProbeResult::new();
+        result.pass = true;
+        history.add_sample(result);
+
+        // Should work normally but without snapshot functionality
+        assert_eq!(history.total_samples(), 1);
+        assert_eq!(history.healthy_samples(), 1);
+        assert_eq!(history.availability(), 100.0);
+        assert_eq!(history.len(), 1);
+    }
+
+    #[test]
+    fn test_serde_duration_module() {
+        use serde_json;
+        
+        let duration = Duration::milliseconds(5000);
+        let serialized = serde_json::to_string(&duration.num_milliseconds()).unwrap();
+        assert_eq!(serialized, "5000");
+        
+        let deserialized: i64 = serde_json::from_str(&serialized).unwrap();
+        let restored_duration = Duration::milliseconds(deserialized);
+        assert_eq!(restored_duration, duration);
     }
 }

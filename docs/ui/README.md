@@ -19,6 +19,8 @@ ui:
 @tab Full Configuration
 
 ```yaml
+state: ./state/
+
 ui:
     enabled: true
     listen: 127.0.0.1:3002
@@ -36,7 +38,53 @@ ui:
 
 :::
 
+## State Persistence
+
+Grey supports persisting probe execution state across application restarts by configuring a state directory. This ensures that probe history, availability metrics, and state transitions are maintained when the application is restarted.
+
+```yaml
+state: ./state/
+```
+
+When a state directory is configured:
+
+- **Probe History Preservation**: All probe execution history, including state transitions, availability metrics, and timing data, is automatically saved to disk
+- **Automatic Snapshots**: Probe state is written to disk asynchronously after each probe execution (throttled to once every 60 seconds per probe)
+- **Seamless Recovery**: On startup, Grey automatically loads the previous state from disk, allowing for uninterrupted monitoring
+
+This is primarily used in conjunction with the `ui` configuration options to allow you to restart Grey without
+losing your historical status page data.
+
+### Usage
+
+Simply specify a directory path where Grey should store state files:
+
+```yaml
+# Relative path (recommended for development)
+state: ./state/
+
+# Absolute path (recommended for production)
+state: /var/lib/grey/state/
+
+# Windows path
+state: C:\ProgramData\Grey\state\
+```
+
+The directory will be created automatically if it doesn't exist. Ensure the Grey process has read/write permissions to the specified directory.
+
 ## Configuration Options
+
+### state <Badge text="optional"/>
+
+Directory path where Grey should store probe execution state for persistence across restarts. When configured, probe history, availability metrics, and state transitions are automatically saved to disk and restored on startup.
+
+```yaml
+state: ./state/  # Relative path
+state: /var/lib/grey/state/  # Absolute path (Linux)
+state: C:\ProgramData\Grey\state\  # Windows path
+```
+
+If not specified, probe state will only be kept in memory and will be lost when the application restarts.
 
 ### enabled <Badge text="required" type="danger"/>
 

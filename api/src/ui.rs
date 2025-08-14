@@ -7,6 +7,8 @@ pub struct UiConfig {
     #[serde(default = "default_ui_logo")]
     pub logo: String,
     pub links: Vec<UiLink>,
+    #[serde(default = "default_reload_interval")]
+    pub reload_interval: std::time::Duration,
 }
 
 impl Default for UiConfig {
@@ -15,6 +17,7 @@ impl Default for UiConfig {
             title: default_ui_title(),
             logo: default_ui_logo(),
             links: Vec::new(),
+            reload_interval: default_reload_interval(),
         }
     }
 }
@@ -49,4 +52,8 @@ fn default_ui_title() -> String {
 
 fn default_ui_logo() -> String {
     "https://cdn.sierrasoftworks.com/logos/icon.svg".into()
+}
+
+fn default_reload_interval() -> std::time::Duration {
+    std::time::Duration::from_secs(60)
 }

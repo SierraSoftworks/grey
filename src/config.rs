@@ -12,6 +12,7 @@ use crate::Probe;
 
 #[derive(Clone)]
 pub struct ConfigProvider {
+    state_directory: Option<PathBuf>,
     probes: Arc<RwLock<Arc<Vec<Probe>>>>,
     ui: Arc<RwLock<UiConfig>>,
     last_modified: Arc<Mutex<std::time::SystemTime>>,
@@ -27,6 +28,7 @@ impl ConfigProvider {
         let config_path = Some(path.into());
         Ok(Self {
             config_path,
+            state_directory: config.state_directory,
             probes: Arc::new(RwLock::new(Arc::new(config.probes))),
             ui: Arc::new(RwLock::new(config.ui)),
             last_modified: Arc::new(Mutex::new(last_modified)),
@@ -52,6 +54,10 @@ impl ConfigProvider {
         *self.last_modified.lock().unwrap() = last_modified;
 
         Ok(())
+    }
+
+    pub fn state_dir(&self) -> Option<PathBuf> {
+        self.state_directory.clone()
     }
 
     pub fn probes(&self) -> Arc<Vec<Probe>> {
@@ -89,6 +95,9 @@ pub struct Config {
     pub probes: Vec<Probe>,
 
     pub ui: UiConfig,
+
+    #[serde(rename = "state")]
+    pub state_directory: Option<PathBuf>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -108,6 +117,9 @@ pub struct UiConfig {
 
     #[serde(default)]
     pub links: Vec<grey_api::UiLink>,
+
+    #[serde(default = "default_reload_interval")]
+    pub reload_interval: std::time::Duration,
 }
 
 fn default_ui_listen() -> String {
@@ -120,4 +132,8 @@ fn default_ui_title() -> String {
 
 fn default_ui_logo() -> String {
     "https://cdn.sierrasoftworks.com/logos/icon.svg".into()
+}
+
+fn default_reload_interval() -> std::time::Duration {
+    std::time::Duration::from_secs(60)
 }

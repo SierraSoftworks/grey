@@ -41,7 +41,8 @@ impl From<&crate::history::StateBucket> for grey_api::ProbeHistory {
         grey_api::ProbeHistory {
             start_time: bucket.start_time,
             latency: std::time::Duration::from_millis(
-                bucket.average_latency.num_milliseconds() as u64
+                bucket.total_latency.num_milliseconds() as u64
+                / bucket.total_samples
             ),
             state_duration,
             attempts: bucket.total_attempts,
@@ -74,6 +75,7 @@ impl From<&crate::config::UiConfig> for grey_api::UiConfig {
             title: config.title.clone(),
             logo: config.logo.clone(),
             links: config.links.clone(),
+            reload_interval: config.reload_interval,
         }
     }
 }

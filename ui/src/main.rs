@@ -13,5 +13,11 @@ fn main() {
     #[cfg(target_arch = "wasm32")]
     wasm_logger::init(wasm_logger::Config::default());
     #[cfg(feature = "wasm")]
-    yew::Renderer::<App>::with_props(AppProps::from_dom().unwrap()).hydrate();
+    if let Ok(props) = AppProps::from_dom() {
+        yew::Renderer::<App>::with_props(props).hydrate();
+    } else if let Ok(props) = AppProps::from_dom_minimal() {
+        yew::Renderer::<App>::with_props(props).render();
+    } else {
+        yew::Renderer::<App>::with_props(AppProps::default()).render();
+    }
 }

@@ -37,6 +37,9 @@ ratios.
 ## Example
 
 ```yaml
+# Directory to store probe state for persistence across restarts
+state: ./state/
+
 probes:
   - name: google.search
     policy:
