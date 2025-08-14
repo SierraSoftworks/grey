@@ -330,6 +330,7 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
     }
 
     /// Manually trigger a snapshot (useful for shutdown)
+    #[cfg(test)]
     pub async fn force_snapshot(&self) -> std::io::Result<()> {
         if let Some(snapshot_file) = &self.snapshot_file {
             let snapshot = self.create_snapshot();
@@ -353,11 +354,13 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
     }
 
     /// Returns the total number of samples recorded
+    #[cfg(test)]
     pub fn total_samples(&self) -> u64 {
         self.sample_count_total.load(Ordering::Relaxed)
     }
 
     /// Returns the number of healthy samples recorded
+    #[cfg(test)]
     pub fn healthy_samples(&self) -> u64 {
         self.sample_count_healthy.load(Ordering::Relaxed)
     }
@@ -368,16 +371,19 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
     }
 
     /// Returns the number of state buckets currently stored
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.state_buckets.read().unwrap().len()
     }
 
     /// Returns the maximum number of state transitions that can be stored
+    #[cfg(test)]
     pub const fn max_states(&self) -> usize {
         MAX_STATES
     }
 
     /// Returns the maximum state age configuration
+    #[cfg(test)]
     pub fn max_state_age(&self) -> Duration {
         self.max_state_age
     }
