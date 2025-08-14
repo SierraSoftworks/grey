@@ -38,7 +38,7 @@ fn calculate_ui_weights(samples: &[ProbeHistory]) -> Vec<f64> {
         .iter()
         .map(|sample| {
             let duration_seconds = sample.state_duration.as_secs().max(1) as f64;
-            duration_seconds.log10().max(0.01) // Minimum weight to ensure visibility
+            duration_seconds
         })
         .collect();
 
