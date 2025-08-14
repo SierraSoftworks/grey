@@ -1,7 +1,7 @@
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, RwLock,
@@ -287,7 +287,7 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
                 let last_snapshot_time = Arc::clone(&self.last_snapshot_time);
 
                 tokio::spawn(async move {
-                    if let Err(e) = Self::write_snapshot_async(snapshot_file, snapshot_data).await {
+                    if let Err(e) = Self::write_snapshot_async(&snapshot_file, snapshot_data).await {
                         tracing::warn!("Failed to write probe history snapshot: {}", e);
                     } else {
                         *last_snapshot_time.write().unwrap() = Some(now);
@@ -310,9 +310,14 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
 
     /// Writes a snapshot to disk asynchronously
     async fn write_snapshot_async(
-        snapshot_file: PathBuf,
+        snapshot_file: &Path,
         snapshot: ProbeHistorySnapshot,
     ) -> std::io::Result<()> {
+        // Try to create the parent directory if needed
+        if let Some(parent) = snapshot_file.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
         let json_data = serde_json::to_string_pretty(&snapshot)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         
@@ -328,7 +333,7 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
     pub async fn force_snapshot(&self) -> std::io::Result<()> {
         if let Some(snapshot_file) = &self.snapshot_file {
             let snapshot = self.create_snapshot();
-            Self::write_snapshot_async(snapshot_file.clone(), snapshot).await?;
+            Self::write_snapshot_async(&snapshot_file, snapshot).await?;
             *self.last_snapshot_time.write().unwrap() = Some(Instant::now());
         }
         Ok(())
