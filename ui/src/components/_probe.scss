@@ -1,0 +1,122 @@
+@use '../styles/variables' as *;
+
+// Probe component styles
+.probe {
+    padding: 1.5rem 0rem 1.5rem 2rem;
+    border-bottom: solid 1px $color-separator;
+
+    &:last-child {
+        border-bottom: none;
+    }
+}
+
+.probe-title {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.probe-name-section {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.probe-name {
+    font-weight: inherit;
+    margin: 0;
+}
+
+.service-group {
+    margin-bottom: 0;
+
+    &:last-child {
+        margin-bottom: 0;
+    }
+}
+
+.service-title {
+    margin: 0;
+    color: $color-text;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.service-name {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 200;
+}
+
+.service-availability {
+    font-weight: 100;
+    font-size: 1.2rem;
+}
+
+.probe-config {
+    margin: 0.5rem 0;
+    font-size: 0.8rem;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+
+    @media only screen and (max-width: $mobile) {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
+
+
+.probe-target {
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: pre;
+}
+
+.probe-policy {
+    color: $color-text-muted;
+    overflow: hidden;
+    white-space: pre;
+}
+
+.probe-validators {
+    display: none;
+    /* Hidden for now */
+}
+
+.availability {
+    float: right;
+    clear: both;
+}
+
+// Probe tags
+.probe-tags {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0 0.5rem;
+    vertical-align: text-bottom;
+}
+
+.probe-tag {
+    display: flex;
+    align-items: center;
+    padding: 0.2rem 0.6rem;
+    background-color: $background-base;
+    border-radius: $border-radius-small;
+    border: 1px solid $color-separator;
+    color: $color-text;
+    font-size: 0.75rem;
+    font-weight: 400;
+    gap: 0.25rem;
+
+    .tag-name {
+        color: $color-text-muted;
+    }
+
+    .tag-value {
+        font-weight: 600;
+    }
+}

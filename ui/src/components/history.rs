@@ -202,11 +202,11 @@ fn render_tooltip(probe_result: &grey_api::ProbeHistory) -> Html {
             </div>
             <div class="tooltip-details">
                 <div class="tooltip-row">
-                    <span class="tooltip-label">{"Time:"}</span>
+                    <span class="tooltip-label">{"Start:"}</span>
                     <span>{timestamp}</span>
                 </div>
                 <div class="tooltip-row">
-                    <span class="tooltip-label">{"State Duration:"}</span>
+                    <span class="tooltip-label">{"Duration:"}</span>
                     <span>{state_duration_text}</span>
                 </div>
                 <div class="tooltip-row">

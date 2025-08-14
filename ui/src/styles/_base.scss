@@ -1,0 +1,46 @@
+@use 'variables' as *;
+
+// Base HTML and typography styles
+html {
+    font-family: sans-serif;
+}
+
+body {
+    background-color: $background-base;
+    color: $color-text;
+    margin: 0;
+}
+
+h1,
+h2,
+h3,
+h4 {
+    font-weight: 100;
+
+    strong {
+        font-weight: 700;
+    }
+}
+
+h1 {
+    font-size: 2rem;
+}
+
+// Loading state
+.loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 2rem;
+    font-size: 1.2rem;
+    opacity: 0.7;
+}
+
+// Footer
+footer {
+    padding: 1rem;
+    text-align: center;
+    font-size: 0.8rem;
+    color: $color-text-muted;
+    max-width: $tablet;
+}

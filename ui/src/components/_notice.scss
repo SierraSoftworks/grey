@@ -1,0 +1,22 @@
+@use '../styles/variables' as *;
+
+// Notice component styles
+.notice-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 0.5rem;
+
+    h3 {
+        margin: 0;
+        flex: 1;
+    }
+}
+
+.notice-timestamp {
+    font-size: 0.8rem;
+    color: $color-text-muted;
+    font-weight: normal;
+    white-space: pre;
+    margin-left: 1rem;
+}
