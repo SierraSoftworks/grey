@@ -689,12 +689,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_snapshot_creation_and_restore() {
-        use tempfile::NamedTempFile;
+        use tempfile::TempDir;
 
-        // Create a temporary file for testing
-        let temp_file = NamedTempFile::new().unwrap();
-        let temp_path = temp_file.path().to_path_buf();
-        drop(temp_file); // Close the file so we can write to it
+        // Create a temporary directory for testing
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path().join("snapshot.json");
 
         // Create history with some data
         let history = ProbeHistory::<10>::with_snapshot_file(&temp_path).unwrap();
