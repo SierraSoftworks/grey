@@ -27,8 +27,8 @@ how timeouts and retries should be handled.
 probes:
     - name: example
       policy:
-        interval: 5000
-        timeout: 2000
+        interval: 5s
+        timeout: 2s
         retries: 3
       target: !Http
         url: https://example.com

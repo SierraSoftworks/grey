@@ -28,8 +28,8 @@ To get started, let's define a simple probe that will check the status of a webs
 probes:
   - name: google.search
     policy:
-      interval: 5000
-      timeout: 2000
+      interval: 5s
+      timeout: 2s
       retries: 3
     target: !Http
       url: https://google.com?q=grey+healthcheck+system
