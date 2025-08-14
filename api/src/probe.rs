@@ -17,11 +17,11 @@ pub struct Probe {
 /// Probe policy information
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct Policy {
-    #[serde(with = "serde_duration_millis")]
+    #[serde(with = "humantime_serde")]
     pub interval: std::time::Duration,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retries: Option<u8>,
-    #[serde(with = "serde_duration_millis")]
+    #[serde(with = "humantime_serde")]
     pub timeout: std::time::Duration,
 }
 
@@ -30,10 +30,10 @@ pub struct Policy {
 pub struct ProbeHistory {
     #[serde(with = "chrono::serde::ts_seconds")]
     pub start_time: chrono::DateTime<chrono::Utc>,
-    #[serde(with = "serde_duration_millis")]
+    #[serde(with = "crate::serializers::duration_ms")]
     pub latency: std::time::Duration,
     /// Duration this state was active (for UI weighting)
-    #[serde(with = "serde_duration_millis")]
+    #[serde(with = "humantime_serde")]
     pub state_duration: std::time::Duration,
     pub attempts: u64,
     pub pass: bool,
@@ -74,24 +74,4 @@ pub struct ValidationResult {
     pub pass: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-}
-
-mod serde_duration_millis {
-    use serde::{Deserialize, Deserializer, Serializer};
-    use std::time::Duration;
-
-    pub fn serialize<S>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_u64(duration.as_millis() as u64)
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let millis = u64::deserialize(deserializer)?;
-        Ok(Duration::from_millis(millis))
-    }
 }

@@ -71,7 +71,7 @@ pub struct StateBucket {
     /// Total number of attempts in this state
     pub total_attempts: u64,
     /// Total duration of all samples in this state
-    #[serde(with = "serde_duration")]
+    #[serde(with = "crate::serializers::chrono_duration_humantime")]
     pub total_latency: Duration,
     /// Number of successful samples in this state bucket
     pub successful_samples: u64,
@@ -149,7 +149,7 @@ struct ProbeHistorySnapshot {
     sample_count_total: u64,
     sample_count_healthy: u64,
     state_buckets: Vec<StateBucket>,
-    #[serde(with = "serde_duration")]
+    #[serde(with = "crate::serializers::chrono_duration_humantime")]
     max_state_age: Duration,
 }
 
@@ -380,26 +380,6 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
     /// Returns the maximum state age configuration
     pub fn max_state_age(&self) -> Duration {
         self.max_state_age
-    }
-}
-
-mod serde_duration {
-    use chrono::Duration;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<S>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        duration.num_milliseconds().serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let millis = i64::deserialize(deserializer)?;
-        Ok(Duration::milliseconds(millis))
     }
 }
 

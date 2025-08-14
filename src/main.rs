@@ -16,6 +16,7 @@ mod probe;
 mod probe_runner;
 mod result;
 mod sample;
+mod serializers;
 mod targets;
 mod ui;
 mod validators;
