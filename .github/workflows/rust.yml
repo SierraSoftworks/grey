@@ -44,7 +44,7 @@ jobs:
           components: llvm-tools-preview
 
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@main
