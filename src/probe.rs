@@ -46,29 +46,42 @@ impl Probe {
         let mut sample = ProbeResult::new();
         let total_attempts = self.policy.retries.unwrap_or(2);
 
-        let result = tokio::time::timeout(self.policy.timeout, async {
+        let result = async {
             while sample.attempts < total_attempts
                 && !cancel.load(std::sync::atomic::Ordering::Relaxed)
             {
+                sample.start_time = chrono::Utc::now();
                 sample.attempts += 1;
                 debug!(
                     "Running probe attempt {}/{}...",
                     sample.attempts, total_attempts,
                 );
-                match self.run_attempt(&mut sample, cancel).await {
-                    Ok(res) => return Ok(res),
-                    Err(err) => {
-                        warn!("Probe failed: {}", err);
+                match tokio::time::timeout(self.policy.timeout, self.run_attempt(&mut sample, cancel)).await {
+                    Ok(Ok(res)) => return Ok(res),
+                    Ok(Err(err)) => {
+                        debug!("Probe failed: {}", err);
                         if sample.attempts == total_attempts {
-                            error!("Probe failed after {} attempts: {}", sample.attempts, err);
+                            warn!("Probe failed after {} attempts: {}", sample.attempts, err);
+                            sample.message = err.to_string();
                             return Err(err);
+                        }
+                    },
+                    Err(_) => {
+                        debug!("Probe timed out");
+                        if sample.attempts == total_attempts {
+                            warn!("Probe timed out after {} attempts", sample.attempts);
+                            sample.message = format!(
+                                "Probe timed out after {} milliseconds.",
+                                self.policy.timeout.as_millis()
+                            );
+                            return Err(sample.message.clone().into());
                         }
                     }
                 }
             }
 
             Ok(())
-        })
+        }
         .await;
 
         sample.duration = chrono::Utc::now() - sample.start_time;
@@ -76,24 +89,14 @@ impl Probe {
         Span::current().record("probe.attempts", sample.attempts);
 
         let result = match result {
-            Ok(Ok(_)) => {
+            Ok(_) => {
                 sample.pass = true;
                 sample.message = "Probe completed successfully.".to_owned();
                 Ok(())
             }
-            Ok(Err(e)) => {
+            Err(e) => {
                 sample.pass = false;
-                sample.message = e.to_string();
                 Err(e)
-            }
-            Err(_) => {
-                sample.pass = false;
-                sample.message = format!(
-                    "Probe timed out after {} milliseconds.",
-                    self.policy.timeout.as_millis()
-                );
-
-                Err(sample.message.clone().into())
             }
         };
 
