@@ -35,6 +35,7 @@ jobs:
           path: Cargo.toml
 
   build-ui:
+    name: Build User Interface
     runs-on: ubuntu-latest
 
     steps:
