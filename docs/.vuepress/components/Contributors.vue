@@ -36,7 +36,7 @@ export default defineComponent({
     },
 
     setup(props) {
-        const contributors = ref([])
+        const contributors = ref([] as Contributor[])
         const error = ref(null)
         const hasContributors = computed(() => !!contributors.value?.length)
 

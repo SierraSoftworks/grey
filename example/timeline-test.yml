@@ -1,0 +1,66 @@
+---
+ui:
+  enabled: true
+  listen: 127.0.0.1:3002
+
+  notices:
+    - title: Scheduled Maintenance Complete
+      description: All systems have been successfully updated during the scheduled maintenance window. Performance improvements and security patches have been applied.
+      timestamp: 2025-08-11T10:00:00Z
+      level: ok
+    - title: Increased Latency Detected
+      description: We are currently investigating reports of increased response times across our API endpoints. Our engineering team is working to identify and resolve the issue.
+      timestamp: 2025-08-11T08:30:00Z
+      level: warning
+    - title: Database Connectivity Issues Resolved
+      description: The database connectivity issues that affected some users between 06:00-07:15 UTC have been fully resolved. All services are now operating normally.
+      timestamp: 2025-08-11T07:15:00Z
+      level: ok
+    - title: Service Degradation - Investigation Ongoing
+      description: We are experiencing service degradation affecting approximately 15% of our users. Our team is actively investigating the root cause and working on a resolution.
+      timestamp: 2025-08-11T06:45:00Z
+      level: error
+    - title: New Feature Deployment
+      description: We have successfully deployed new monitoring capabilities that will help us detect and resolve issues more quickly. These improvements are now live across all regions.
+      timestamp: 2025-08-10T14:00:00Z
+      level: ok
+
+probes:
+  - name: google.search
+    policy:
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    target: !Http
+      url: https://google.com?q=grey+healthcheck+system
+    validators:
+      http.status: !OneOf [200]
+      http.header.content-type: !Equals "text/html; charset=ISO-8859-1"
+    tags:
+      domain: google.com
+      service: Search
+  - name: bing.search
+    policy:
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    target: !Http
+      url: https://www.bing.com
+    validators:
+      http.status: !OneOf [200]
+      http.header.content-type: !Equals "text/html; charset=utf-8"
+    tags:
+      domain: bing.com
+      service: Search
+  - name: github.repo
+    policy:
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    target: !Http
+      url: https://github.com/SierraSoftworks/grey
+    validators:
+      http.status: !OneOf [200]
+    tags:
+      domain: github.com
+      service: Coding

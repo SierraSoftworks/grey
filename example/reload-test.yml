@@ -1,0 +1,54 @@
+---
+ui:
+  enabled: true
+  listen: 127.0.0.1:3002
+
+  notices:
+    - title: System Maintenance Complete
+      description: All scheduled maintenance has been completed successfully. All systems are now operating at full capacity.
+      timestamp: 2025-08-11T11:00:00Z
+      level: ok
+    - title: Performance Upgrade Deployed
+      description: We've deployed performance improvements that should result in faster response times across all services.
+      timestamp: 2025-08-11T09:00:00Z
+      level: ok
+
+probes:
+  - name: google.search
+    policy:
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    target: !Http
+      url: https://google.com?q=grey+healthcheck+system
+    validators:
+      http.status: !OneOf [200]
+      http.header.content-type: !Equals "text/html; charset=ISO-8859-1"
+    tags:
+      domain: google.com
+      service: Search
+  - name: bing.search
+    policy:
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    target: !Http
+      url: https://www.bing.com
+    validators:
+      http.status: !OneOf [200]
+      http.header.content-type: !Equals "text/html; charset=utf-8"
+    tags:
+      domain: bing.com
+      service: Search
+  - name: github.repo
+    policy:
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    target: !Http
+      url: https://github.com/SierraSoftworks/grey
+    validators:
+      http.status: !OneOf [200]
+    tags:
+      domain: github.com
+      service: Coding

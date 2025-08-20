@@ -1,0 +1,199 @@
+@use '../styles/variables' as *;
+
+// History and tooltip styles
+.history {
+    height: 1.2rem;
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    align-content: center;
+}
+
+.history-sample {
+    flex: 1;
+    position: relative;
+    cursor: pointer;
+
+    &:first-child {
+        border-top-left-radius: $border-radius-small;
+        border-bottom-left-radius: $border-radius-small;
+    }
+
+    &:last-child {
+        border-top-right-radius: $border-radius-small;
+        border-bottom-right-radius: $border-radius-small;
+    }
+
+    &.ok {
+        background-color: $color-status-ok;
+    }
+
+    &.warn {
+        background-color: $color-status-warn;
+    }
+
+    &.error {
+        background-color: $color-status-error;
+    }
+
+    &.unknown {
+        background-color: $color-status-unknown;
+    }
+
+    &.tooltip-target .tooltip {
+        opacity: 1;
+        visibility: visible;
+    }
+}
+
+// Tooltip styles
+.tooltip {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: $background-box;
+    color: $color-text;
+    padding: 0.75rem;
+    border-radius: $border-radius-medium;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    font-size: 0.75rem;
+    line-height: 1.4;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s, visibility 0.2s;
+    border: 1px solid $color-separator;
+    min-width: 200px;
+    max-width: 40vw;
+    pointer-events: none;
+    margin-bottom: 8px;
+
+    &.visible {
+        opacity: 1;
+        visibility: visible;
+    }
+
+    &::after {
+        content: '';
+        position: absolute;
+        top: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 6px solid transparent;
+        border-top-color: $background-box;
+    }
+}
+
+.tooltip-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+}
+
+.tooltip-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+
+    &.ok {
+        background-color: $color-status-ok;
+    }
+
+    &.warn {
+        background-color: $color-status-warn;
+    }
+
+    &.error {
+        background-color: $color-status-error;
+    }
+
+    &.unknown {
+        background-color: $color-status-unknown;
+    }
+}
+
+.tooltip-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.tooltip-row {
+    display: flex;
+    justify-content: space-between;
+
+    span:not(.tooltip-label) { 
+        overflow: hidden;
+        white-space: pre;
+        text-overflow: ellipsis;
+    }
+}
+
+.tooltip-label {
+    color: $color-text-muted;
+}
+
+.tooltip-section {
+    margin-top: 0.75rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid $color-separator;
+}
+
+.tooltip-section-title {
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: $color-text;
+}
+
+.tooltip-validation {
+    margin-bottom: 0.5rem;
+
+    &:last-child {
+        margin-bottom: 0;
+    }
+}
+
+.tooltip-validation-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.tooltip-validation-name {
+    font-weight: 600;
+    color: $color-text;
+    font-size: 0.7rem;
+}
+
+.tooltip-validation-message {
+    font-family: monospace;
+    background-color: $background-base;
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.65rem;
+    color: $color-text;
+    flex: 1;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: pre;
+}
+
+.tooltip-validation-details {
+    margin-left: 1.3rem;
+}
+
+.tooltip-validation-extra {
+    font-style: italic;
+    color: $color-text-muted;
+    font-size: 0.65rem;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: pre;
+}

@@ -1,31 +1,75 @@
 ---
+ui:
+  enabled: true
+  listen: 127.0.0.1:3002
+
+  notices:
+    - title: Example Notice
+      description: This is an example notice message showcasing how you can alert users to something happening on your platform.
+      timestamp: 2025-08-10T19:00:00Z
+
 probes:
   - name: google.search
     policy:
-      interval: 5000
-      timeout: 2000
+      interval: 5s
+      timeout: 2s
       retries: 3
     target: !Http
       url: https://google.com?q=grey+healthcheck+system
     validators:
       http.status: !OneOf [200]
       http.header.content-type: !Equals "text/html; charset=ISO-8859-1"
-  - name: twitter.homepage
+    tags:
+      domain: google.com
+      service: Search
+  - name: bing.search
     policy:
-      interval: 5000
-      timeout: 2000
+      interval: 5s
+      timeout: 2s
       retries: 3
     target: !Http
-      url: https://www.twitter.com
+      url: https://www.bing.com
     validators:
       http.status: !OneOf [200]
       http.header.content-type: !Equals "text/html; charset=utf-8"
+    tags:
+      domain: bing.com
+      service: Search
   - name: github.repo
     policy:
-      interval: 5000
-      timeout: 2000
+      interval: 5s
+      timeout: 2s
       retries: 3
     target: !Http
       url: https://github.com/SierraSoftworks/grey
     validators:
       http.status: !OneOf [200]
+    tags:
+      domain: github.com
+      service: Coding
+  - name: bender.production.script
+    policy:
+      interval: 60000
+      timeout: 5000
+      retries: 2
+    target: !Script
+      args:
+        - https://bender.sierrasoftworks.com
+      code: |
+        const resp = await fetch(`${Deno.args[0]}/api/v1/quote/bender`, {
+          headers: {
+            "Accept": "application/json",
+            ...getTraceHeaders()
+          }
+        })
+
+        setOutput("http.status", resp.status)
+
+        if (resp.ok) {
+          const quote = await resp.json()
+          setOutput("quote.who", quote.who)
+        }
+
+    validators:
+      http.status: !Equals 200
+      quote.who: !Equals "Bender"

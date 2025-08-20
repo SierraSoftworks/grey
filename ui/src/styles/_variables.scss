@@ -1,0 +1,41 @@
+// CSS Variables
+:root {
+    --background-base: #f8fafc;
+    --background-box: #fff;
+    --color-base: #333;
+    --color-box: #222;
+
+    --color-text: #333;
+    --color-text-muted: #666;
+
+    --color-separator: #eee;
+
+    --color-status-text: #fff;
+    --color-status-ok: #28a745;
+    --color-status-warn: #e67e22;
+    --color-status-error: #e74c3c;
+    --color-status-unknown: #3498db;
+}
+
+// SCSS Variables for easier use
+$background-base: var(--background-base);
+$background-box: var(--background-box);
+$color-base: var(--color-base);
+$color-box: var(--color-box);
+$color-text: var(--color-text);
+$color-text-muted: var(--color-text-muted);
+$color-separator: var(--color-separator);
+$color-status-text: var(--color-status-text);
+$color-status-ok: var(--color-status-ok);
+$color-status-warn: var(--color-status-warn);
+$color-status-error: var(--color-status-error);
+$color-status-unknown: var(--color-status-unknown);
+
+// Breakpoints
+$mobile: 600px;
+$tablet: 980px;
+
+// Common measurements
+$border-radius: 5px;
+$border-radius-small: 4px;
+$border-radius-medium: 8px;

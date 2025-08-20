@@ -1,138 +1,187 @@
 {
   description = "A lightweight, OpenTelemetry native, external synthetic probing agent.";
 
-  outputs = { self, nixpkgs }:
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+
+    crane.url = "github:ipetkov/crane";
+
+    flake-utils.url = "github:numtide/flake-utils";
+
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs =
     {
-      devShells = nixpkgs.lib.genAttrs ["aarch64-darwin" "aarch64-linux" "x86_64-darwin" "x86_64-linux"] (system:
-        let
-          pkgs = nixpkgs.legacyPackages.${system};
-          lib = pkgs.lib;
-          stdenv = pkgs.stdenv;
-          librusty_v8 = pkgs.callPackage ./librusty_v8.nix { };
-          libtcc = pkgs.tinycc.overrideAttrs (oa: {
-            makeFlags = [ "libtcc.a" ];
-            # tests want tcc binary
-            doCheck = false;
-            outputs = [ "out" ];
-            installPhase = ''
-              mkdir -p $out/lib/
-              mv libtcc.a $out/lib/
-            '';
-            # building the whole of tcc on darwin is broken in nixpkgs
-            # but just building libtcc.a works fine so mark this as unbroken
-            meta.broken = false;
-          });
-        in
-        {
-          default = stdenv.mkDerivation {
-            name = "grey-shell-${system}";
-            system = system;
-            nativeBuildInputs = [
-              pkgs.rustc
-              pkgs.cargo
-              pkgs.nodejs
-              pkgs.protobuf
-              pkgs.tinycc
-              pkgs.pkg-config
-            ] ++ lib.optionals stdenv.isDarwin [
-              pkgs.darwin.apple_sdk.frameworks.Security
-            ];
+      self,
+      nixpkgs,
+      crane,
+      flake-utils,
+      rust-overlay,
+      ...
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
+      let
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ (import rust-overlay) ];
+        };
 
-            buildInputs = [
-              pkgs.libiconv
-              pkgs.openssl
-            ];
+        inherit (pkgs) lib;
 
-            PROTOC = "${pkgs.protobuf}/bin/protoc";
-
-            # The v8 package will try to download a `librusty_v8.a` release at build time to our read-only filesystem
-            # To avoid this we pre-download the file and export it via RUSTY_V8_ARCHIVE
-            RUSTY_V8_ARCHIVE = librusty_v8;
-
-            # The deno_ffi package currently needs libtcc.a on linux and macos and will try to compile it at build time
-            # To avoid this we point it to our copy (dir)
-            # In the future tinycc will be replaced with asm
-            TCC_PATH = "${libtcc}/lib";
+        rustToolchainFor =
+          p:
+          p.rust-bin.stable.latest.default.override {
+            # Set the build targets supported by the toolchain,
+            # wasm32-unknown-unknown is required for trunk.
+            targets = [ "wasm32-unknown-unknown" ];
           };
-        }
-      );
+        craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchainFor;
 
-      packages = nixpkgs.lib.genAttrs ["aarch64-darwin" "aarch64-linux" "x86_64-darwin" "x86_64-linux"] (system:
-        let
-          pkgs = nixpkgs.legacyPackages.${system};
-          lib = pkgs.lib;
-          rustPlatform = pkgs.rustPlatform;
-          librusty_v8 = pkgs.callPackage ./librusty_v8.nix { };
-          libtcc = pkgs.tinycc.overrideAttrs (oa: {
-            makeFlags = [ "libtcc.a" ];
-            # tests want tcc binary
-            doCheck = false;
-            outputs = [ "out" ];
-            installPhase = ''
-              mkdir -p $out/lib/
-              mv libtcc.a $out/lib/
+        # When filtering sources, we want to allow assets other than .rs files
+        unfilteredRoot = ./.; # The original, unfiltered source
+        src = lib.fileset.toSource {
+          root = unfilteredRoot;
+          fileset = lib.fileset.unions [
+            # Default files from crane (Rust and cargo files)
+            (craneLib.fileset.commonCargoSources unfilteredRoot)
+            (lib.fileset.fileFilter (
+              file:
+              lib.any file.hasExt [
+                "html"
+                "css"
+                "scss"
+              ]
+            ) unfilteredRoot)
+            # Example of a folder for images, icons, etc
+            (lib.fileset.maybeMissing ./public)
+          ];
+        };
+
+        # Arguments to be used by both the client and the server
+        # When building a workspace with crane, it's a good idea
+        # to set "pname" and "version".
+        commonArgs = {
+          inherit src;
+          strictDeps = true;
+
+          nativeBuildInputs = [
+            # Add additional build inputs here
+            pkgs.pkg-config
+          ]
+          ++ lib.optionals pkgs.stdenv.isDarwin [
+            # Additional darwin specific inputs can be set here
+            pkgs.libiconv
+            pkgs.darwin.apple_sdk.frameworks.Security
+            pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
+          ];
+
+          buildInputs = [
+            # Add additional build inputs here
+            pkgs.openssl
+            pkgs.protobuf
+          ];
+        };
+
+        # Native packages
+
+        nativeArgs = commonArgs // {
+          pname = "grey";
+        };
+
+        # Build *just* the cargo dependencies, so we can reuse
+        # all of that work (e.g. via cachix) when running in CI
+        cargoArtifacts = craneLib.buildDepsOnly nativeArgs;
+
+        # Simple JSON API that can be queried by the client
+        grey = craneLib.buildPackage (
+          nativeArgs
+          // {
+            inherit cargoArtifacts;
+            # The server needs to know where the client's dist dir is to
+            # serve it, so we pass it as an environment variable at build time
+            CLIENT_DIST = grey-ui;
+            preBuild = ''
+              cp -r $CLIENT_DIST ./ui/dist
             '';
-            # building the whole of tcc on darwin is broken in nixpkgs
-            # but just building libtcc.a works fine so mark this as unbroken
-            meta.broken = false;
-          });
-        in
-        {
-          grey = rustPlatform.buildRustPackage rec {
-            name = "grey-${system}";
-            pname = "grey";
-
-            src = pkgs.nix-gitignore.gitignoreSourcePure ''
-            /example
-            /target
-            /result
-            *.nix
-            '' ./.;
-
             doCheck = false;
+          }
+        );
 
-            nativeBuildInputs = [
-              pkgs.protobuf
-              pkgs.tinycc
-              pkgs.pkg-config
-            ];
+        # Wasm packages
 
-            buildInputs = [pkgs.openssl]
-              ++ lib.optionals pkgs.stdenv.isDarwin [pkgs.darwin.apple_sdk.frameworks.Security];
+        # it's not possible to build the server on the
+        # wasm32 target, so we only build the client.
+        wasmArgs = commonArgs // {
+          pname = "grey-ui";
+          cargoExtraArgs = "--package=grey-ui --features=wasm";
+          CARGO_BUILD_TARGET = "wasm32-unknown-unknown";
+        };
 
-            PROTOC = "${pkgs.protobuf}/bin/protoc";
+        cargoArtifactsWasm = craneLib.buildDepsOnly (
+          wasmArgs
+          // {
+            doCheck = false;
+          }
+        );
 
-            # The v8 package will try to download a `librusty_v8.a` release at build time to our read-only filesystem
-            # To avoid this we pre-download the file and export it via RUSTY_V8_ARCHIVE
-            RUSTY_V8_ARCHIVE = librusty_v8;
+        # Build the frontend of the application.
+        # This derivation is a directory you can put on a webserver.
+        grey-ui = craneLib.buildTrunkPackage (
+          wasmArgs
+          // {
+            pname = "grey-ui";
+            cargoArtifacts = cargoArtifactsWasm;
+            trunkIndexPath = "./ui/index.html";
+            # The version of wasm-bindgen-cli here must match the one from Cargo.lock.
+            # When updating to a new version replace the hash values with lib.fakeHash,
+            # then try to do a build, which will fail but will print out the correct value
+            # for `hash`. Replace the value and then repeat the process but this time the
+            # printed value will be for the second `hash` below
+            wasm-bindgen-cli = pkgs.buildWasmBindgenCli rec {
+              src = pkgs.fetchCrate {
+                pname = "wasm-bindgen-cli";
+                version = "0.2.100";
+                hash = "sha256-3RJzK7mkYFrs7C/WkhW9Rr4LdP5ofb2FdYGz1P7Uxog=";
+                # hash = lib.fakeHash;
+              };
 
-            # The deno_ffi package currently needs libtcc.a on linux and macos and will try to compile it at build time
-            # To avoid this we point it to our copy (dir)
-            # In the future tinycc will be replaced with asm
-            TCC_PATH = "${libtcc}/lib";
-
-            cargoLock = {
-              lockFile = ./Cargo.lock;
-
-              outputHashes = {
-                  "tracing-0.2.0" = "sha256-AWRx6P6slEusJbDrxMSxAkz4biQZH4iqVrdV09Olnc8=";
+              cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
+                inherit src;
+                inherit (src) pname version;
+                hash = "sha256-qsO12332HSjWCVKtf1cUePWWb9IdYUmT+8OPj/XP2WE=";
+                # hash = lib.fakeHash;
               };
             };
+          }
+        );
+      in
+      {
+        checks = {
+          # Build the crate as part of `nix flake check` for convenience
+          inherit grey grey-ui;
+        };
 
-            meta = with lib; {
-              description = "A lightweight, OpenTelemetry native, external synthetic probing agent.";
-              homepage = "https://github.com/SierraSoftworks/grey";
-              license = licenses.mit;
-              maintainers = [
-                {
-                  name = "Benjamin Pannell";
-                  email = "contact@sierrasoftworks.com";
-                }
-              ];
-            };
-          };
-          default = self.packages.${system}.grey;
-        }
-      );
-    };
+        apps.default = flake-utils.lib.mkApp {
+          name = "grey";
+          drv = grey;
+        };
+
+        packages.default = grey;
+
+        devShells.default = craneLib.devShell {
+          # Inherit inputs from checks.
+          checks = self.checks.${system};
+
+          # Extra inputs can be added here; cargo and rustc are provided by default.
+          packages = [
+            pkgs.nodejs
+          ];
+        };
+      }
+    );
 }

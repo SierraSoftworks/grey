@@ -11,5 +11,16 @@
         "!Script mapping",
         "!Tcp mapping",
     ],
-    "rust-analyzer.showUnlinkedFileNotification": false
+    "cSpell.words": [
+        "actix",
+        "behaviour",
+        "cachix",
+        "chrono",
+        "Csvg",
+        "gloo",
+        "nixos",
+        "nixpkgs",
+        "sierrasoftworks",
+        "Softworks"
+    ]
 }

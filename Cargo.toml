@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "ui", "api"]
+
 [package]
 name = "grey"
 version = "0.1.0"
@@ -9,29 +12,62 @@ name = "grey"
 path = "./src/main.rs"
 
 [dependencies]
+grey-ui = { path = "ui", default-features = false, features = ["ssr"] }
+grey-api = { path = "api" }
+
+# Server dependencies
+actix-web = "4.11"
 async-trait = "0.1"
-clap = { version = "4.2", features = ["derive"] }
-deno_core = { version = "0.181" }
-deno_runtime = { version = "0.107", features = ["snapshot_from_snapshot"] }
+clap = { version = "4.5", features = ["derive"] }
+ctrlc = "3.4.7"
+deno_core = { version = "0.355.0", optional = true }
+deno_runtime = { version = "0.221.0", features = [], optional = true }
 futures = "0.3"
-lazy_static = "1.4"
-opentelemetry = { version = "0.18", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.11", features = ["tls-roots"] }
-rand = "0.8"
-reqwest = { version = "0.11", features = ["rustls-tls-webpki-roots"] }
-serde = { version = "1.0", features = ["derive"] }
+humantime = "2.2.0"
+humantime-serde = "1.1.1"
+include_dir = "0.7"
+lazy_static = "1.5"
+openssl-sys = { version = "0.9", features = ["vendored"], optional = true }
+rand = "0.9"
+reqwest = { version = "0.12", features = ["rustls-tls-webpki-roots"] }
 serde_yaml = "0.9"
-tokio = { version = "1", features = ["fs", "macros", "net", "rt", "time", "tracing"] }
-tonic = { version = "0.8.2", features = ["tls-roots"] }
-tracing = { git="https://github.com/SierraSoftworks/tracing.git" , features = ["log"] }
-tracing-attributes = { git="https://github.com/SierraSoftworks/tracing.git" }
-tracing-futures = { git="https://github.com/SierraSoftworks/tracing.git" , features = ["futures-03"] }
-tracing-opentelemetry = { git="https://github.com/SierraSoftworks/tracing.git" }
-tracing-subscriber = { git="https://github.com/SierraSoftworks/tracing.git" , features = ["tracing-log"] }
-trust-dns-resolver = { version = "0.22", features = ["tokio-runtime"] }
+tokio = { version = "1", features = [
+  "fs",
+  "macros",
+  "net",
+  "rt",
+  "time",
+  "tracing",
+] }
+tracing = "0.1.41"
+tracing-batteries = { git = "https://github.com/sierrasoftworks/tracing-batteries-rs.git", features = ["medama", "opentelemetry"] }
+trust-dns-resolver = { version = "0.23", features = ["tokio-runtime"] }
+
+# Shared dependencies
+chrono = { version = "0.4.38", features = ["serde"] }
+circular-buffer = "1.1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+yew = { version = "0.21", features = ["ssr", "hydration"] }
+
+[features]
+default = ["scripts"]
+pure_tests = []
+scripts = ["dep:deno_core", "dep:deno_runtime"]
+openssl_src = ["dep:openssl-sys"]
 
 [build-dependencies]
-deno_core = { version = "0.181" }
-deno_runtime = { version = "0.107", features = ["snapshot_from_snapshot", "include_js_files_for_snapshotting"] }
+deno_core = { version = "0.355" }
+deno_runtime = { version = "0.221", features = ["include_js_files_for_snapshotting"] }
 futures = "0.3"
 tokio = { version = "1", features = ["fs", "macros", "net", "rt", "time", "tracing"] }
+
+[dev-dependencies]
+tempfile = "3.21"
+
+[profile.release]
+debug = 1
+strip = "debuginfo"
+opt-level = "z"
+lto = true
+

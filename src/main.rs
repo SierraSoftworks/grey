@@ -1,19 +1,25 @@
 #[macro_use]
 extern crate lazy_static;
-#[macro_use]
-extern crate tracing;
+extern crate tracing_batteries;
+
+use std::sync::atomic::AtomicBool;
 
 use clap::Parser;
 
 mod config;
 mod deno;
 mod engine;
-#[macro_use] mod macros;
+mod history;
+#[macro_use]
+mod macros;
 mod policy;
 mod probe;
+mod probe_runner;
+mod result;
 mod sample;
+mod serializers;
 mod targets;
-mod telemetry;
+mod ui;
 mod validators;
 
 pub use config::Config;
@@ -23,20 +29,30 @@ pub use probe::Probe;
 pub use sample::{Sample, SampleValue};
 pub use validators::Validator;
 
+static CANCEL: AtomicBool = AtomicBool::new(false);
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // ctrlc::set_handler(|| {
+    //     CANCEL.store(true, std::sync::atomic::Ordering::Relaxed);
+    // })?;
+
     let args = Args::parse();
 
-    telemetry::setup();
+    let telemetry = tracing_batteries::Session::new("grey", version!("v"))
+        .with_battery(tracing_batteries::OpenTelemetry::new(""))
+        .with_battery(tracing_batteries::Medama::new(
+            "https://analytics.sierrasoftworks.com",
+        ));
 
-    let config = config::load_config(&args.config).await?;
+    let config = config::ConfigProvider::from_path(&args.config).await?;
 
-    println!("Starting Grey with {} probes...", config.probes.len());
+    println!("Starting Grey with {} probes...", config.probes().len());
 
-    let engine = Engine::new(config);
-    engine.run().await?;
+    let engine = Engine::<48>::new(config);
+    engine.run(&CANCEL).await?;
 
-    opentelemetry::global::shutdown_tracer_provider();
+    telemetry.shutdown();
 
     Ok(())
 }

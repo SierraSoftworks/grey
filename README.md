@@ -20,14 +20,20 @@ configuration file as its only input. The configuration file looks like this:
 probes:
   - name: google.search
     policy:
-      interval: 5000
-      timeout: 2000
+      interval: 5s
+      timeout: 2s
       retries: 3
     target: !Http
       url: https://google.com?q=grey+healthcheck+system
     validators:
       http.status: !OneOf [200]
       http.header.content-type: !Equals "text/html; charset=ISO-8859-1"
+    tags:
+      service: Google
+
+ui:
+  enabled: true
+  listen: 127.0.0.1:3002
 ```
 
 ## Targets
@@ -87,7 +93,7 @@ provided value. If both the field and the provided value are a string, it will
 perform a string contains check, while if the field is a list, it will perform
 a list contains check.
 
-### OpenTelemetry
+## OpenTelemetry
 Grey uses OpenTelemetry to export trace information about each of the probes that
 it has executed. This can be emitted to any gRPC compatible OpenTelemetry endpoint
 by configuring the `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable. For example,
@@ -106,4 +112,32 @@ API key, you would run:
 OTEL_EXPORTER_OTLP_ENDPOINT="https://api.honeycomb.io" \
 OTEL_EXPORTER_OTLP_HEADERS="x-honeycomb-team=YOUR_API_KEY" \
     grey --config config.yaml
+```
+
+## Status Page
+Grey also includes support for sharing a status page with your customers. This can be
+useful for providing updates on the health of your infrastructure to customers. The UI
+is disabled by default, and can be configured with your own company logo and title, as
+well as links and customer notices.
+
+To enable the user interface, you'll need to set `ui.enabled` to `true` in your
+configuration file. But you can easily configure additional options as you see fit.
+
+```yaml
+ui:
+  enabled: true
+  listen: 127.0.0.1:3002
+
+  title: My Status Page
+  logo: https://example.com/logo.png
+
+  links:
+    - title: GitHub
+      url: https://github.com/SierraSoftworks/grey
+
+  notices:
+    - title: Example Notice
+      description: This is an example notice message showcasing how you can alert users to something happening on your platform.
+      timestamp: 2025-08-10T19:00:00Z
+      level: ok # ok, warning, error
 ```

@@ -3,6 +3,20 @@ Grey uses a YAML configuration file to define probes and control how they are ex
 This guide is intended to walk you through the various configuration options available
 and how to use them to configure your probes.
 
+## Top-Level Configuration
+
+### State Directory
+The `state` option configures a directory where Grey will store probe execution state
+for persistence across application restarts. When configured, probe history, availability 
+metrics, and state transitions are automatically saved to disk.
+
+```yaml
+state: ./state/
+```
+
+If not specified, probe state will only be kept in memory and will be lost when the
+application restarts.
+
 ## Probes
 Probes are the core of Grey's configuration. Each probe defines a single target and a set
 of validators that will be used to assert that the target is healthy. In addition to these
@@ -13,8 +27,8 @@ how timeouts and retries should be handled.
 probes:
     - name: example
       policy:
-        interval: 5000
-        timeout: 2000
+        interval: 5s
+        timeout: 2s
         retries: 3
       target: !Http
         url: https://example.com

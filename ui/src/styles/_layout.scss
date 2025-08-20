@@ -1,0 +1,120 @@
+@use 'variables' as *;
+
+// App layout and content containers
+#app {
+    width: 100vw;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.content {
+    width: 100%;
+    max-width: $tablet;
+    margin: 2rem auto;
+    border-radius: $border-radius;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+    background-color: $background-box;
+    color: $color-box;
+
+    @media screen and (max-width: $tablet) {
+        border-radius: 0;
+        box-shadow: none;
+        margin: 0;
+    }
+}
+
+// Section styling
+.section {
+    padding: 2rem;
+
+    // First and last child rounded corners
+    &:first-child {
+        border-top-left-radius: $border-radius;
+        border-top-right-radius: $border-radius;
+
+        @media screen and (max-width: $tablet) {
+            border-top-left-radius: 0;
+            border-top-right-radius: 0;
+        }
+    }
+
+    &:last-child {
+        border-bottom-left-radius: $border-radius;
+        border-bottom-right-radius: $border-radius;
+
+        @media screen and (max-width: $tablet) {
+            border-bottom-left-radius: 0;
+            border-bottom-right-radius: 0;
+        }
+    }
+
+    // Separator between sections
+    &:not(:first-child) {
+        border-bottom: solid 1px $color-separator;
+    }
+
+    // Status-based left borders
+    &.ok {
+        border-left: solid 10px $color-status-ok;
+    }
+
+    &.warn {
+        border-left: solid 10px $color-status-warn;
+    }
+
+    &.error {
+        border-left: solid 10px $color-status-error;
+    }
+
+    &.unknown {
+        border-left: solid 5px $color-status-unknown;
+    }
+
+    // Fill variants with status colors
+    &.fill {
+        &.ok {
+            color: $color-status-text;
+            background-color: $color-status-ok;
+        }
+
+        &.warn {
+            color: $color-status-text;
+            background-color: $color-status-warn;
+        }
+
+        &.error {
+            color: $color-status-text;
+            background-color: $color-status-error;
+        }
+
+        &.unknown {
+            color: $color-status-text;
+            background-color: $color-status-unknown;
+        }
+    }
+
+    &.probe {
+        border-bottom: none;
+    }
+
+    // Notice-specific styling
+    &.notice {
+        &.warning {
+            border-left-color: $color-status-warn;
+        }
+
+        &.error {
+            border-left-color: $color-status-error;
+        }
+    }
+}
+
+// Mobile layout adjustments
+@media screen and (max-width: $tablet) {
+    body {
+        background-color: $background-box;
+    }
+}

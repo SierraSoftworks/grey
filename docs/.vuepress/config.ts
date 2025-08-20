@@ -1,7 +1,8 @@
-import { defineUserConfig, PageHeader, defaultTheme } from 'vuepress-vite'
+import { defineUserConfig, PageHeader } from 'vuepress'
+import { viteBundler } from "@vuepress/bundler-vite";
+import { defaultTheme } from "@vuepress/theme-default";
 import { path } from '@vuepress/utils'
 
-import { googleAnalyticsPlugin } from '@vuepress/plugin-google-analytics'
 import { registerComponentsPlugin } from '@vuepress/plugin-register-components'
 
 function htmlDecode(input: string): string {
@@ -20,13 +21,19 @@ export default defineUserConfig({
 
   head: [
     ['meta', { name: "description", content: "Documentation for Grey, a lightweight health probing agent with native OpenTelemetry integration." }],
-    ['link', { rel: 'icon', href: '/favicon.ico' }]
+    ['link', { rel: 'icon', href: '/favicon.ico' }],
+    ["script", {
+        defer: "",
+        src: "https://analytics.sierrasoftworks.com/script.js",
+    }],
   ],
 
   extendsPage(page, app) {
     const fixedHeaders = page.headers || []
     fixedHeaders.forEach(header => fixPageHeader(header))
   },
+
+  bundler: viteBundler(),
 
   theme: defaultTheme({
     logo: 'https://cdn.sierrasoftworks.com/logos/icon.png',
@@ -59,6 +66,15 @@ export default defineUserConfig({
           '/validators/contains.md',
           '/validators/equals.md',
           '/validators/one_of.md',
+        ]
+      },
+      {
+        text: "User Interface",
+        link: "/ui/",
+        children: [
+          '/ui/README.md',
+          '/ui/links.md',
+          '/ui/notices.md',
         ]
       },
       {
@@ -107,12 +123,21 @@ export default defineUserConfig({
             '/validators/one_of.md',
           ]
         }
+      ],
+      '/ui/': [
+        {
+          text: "User Interface",
+          children: [
+            '/ui/README.md',
+            '/ui/links.md',
+            '/ui/notices.md',
+          ]
+        }
       ]
     }
   }),
 
   plugins: [
-    googleAnalyticsPlugin({ id: "G-WJQ1PVYVH0" }),
     registerComponentsPlugin({
       componentsDir: path.resolve(__dirname, './components'),
     })

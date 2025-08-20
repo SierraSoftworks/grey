@@ -1,0 +1,182 @@
+@use '../styles/variables' as *;
+
+// Header component styles
+header {
+    margin: 0;
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    background-color: $background-box;
+    border-bottom: 1px solid $color-separator;
+
+    @media only screen and (max-width: $mobile) {
+        flex-direction: column;
+        align-items: stretch;
+        position: sticky;
+        top: 0;
+        z-index: 1000;
+
+        // Create a top row for brand and controls
+        .header-brand,
+        .header-controls {
+            display: flex;
+        }
+
+        // On mobile, position brand and controls in a row
+        .header-brand {
+            flex: 1;
+        }
+
+        .header-menu {
+            align-items: center;
+        }
+
+        &.menu-open {
+            .header-nav {
+                max-height: 300px;
+                opacity: 1;
+                visibility: visible;
+            }
+
+            .menu-toggle .hamburger span:nth-child(1) {
+                transform: rotate(45deg) translate(5px, 5px);
+            }
+
+            .menu-toggle .hamburger span:nth-child(2) {
+                opacity: 0;
+            }
+
+            .menu-toggle .hamburger span:nth-child(3) {
+                transform: rotate(-45deg) translate(7px, -6px);
+            }
+        }
+    }
+}
+
+.header-brand {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 1rem;
+    margin-right: auto;
+
+    @media only screen and (max-width: $mobile) {
+        flex: none;
+    }
+
+    img {
+        height: 2rem;
+        aspect-ratio: 1/1;
+        margin: 0 1rem 0 0;
+    }
+
+    .title {
+        font-size: 1.2rem;
+        font-weight: 500;
+    }
+}
+
+.header-nav {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 1rem;
+
+
+    .nav-link {
+        color: $color-base;
+        text-decoration: none;
+        padding: 1rem;
+        line-height: 2rem;
+        transition: background-color 0.2s ease;
+
+        &:hover {
+            background-color: $color-separator;
+            text-decoration: none;
+        }
+    }
+
+    @media only screen and (max-width: $mobile) {
+        flex-direction: column;
+        max-height: 0;
+        opacity: 0;
+        visibility: hidden;
+        overflow: hidden;
+        transition: max-height 0.3s ease-in-out, opacity 0.3s ease-in-out, visibility 0.3s ease-in-out;
+        background-color: $background-box;
+        border-top: 1px solid $color-separator;
+        order: 3; // Move below everything else on mobile
+        align-items: stretch;
+
+        .nav-link {
+            padding: 1rem 2rem;
+            border-bottom: 1px solid $color-separator;
+
+            &:last-child {
+                border-bottom: none;
+            }
+        }
+    }
+}
+
+.header-controls {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 1rem;
+
+    @media only screen and (max-width: $mobile) {
+        gap: 0.5rem;
+        position: absolute;
+        top: 0;
+        right: 0;
+        padding: 1rem;
+        align-items: flex-start;
+    }
+}
+
+.menu-toggle {
+    display: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.5rem;
+
+    @media only screen and (max-width: $mobile) {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+}
+
+.hamburger {
+    width: 24px;
+    height: 18px;
+    position: relative;
+
+    span {
+        display: block;
+        position: absolute;
+        height: 2px;
+        width: 100%;
+        background: $color-text;
+        border-radius: 1px;
+        opacity: 1;
+        left: 0;
+        transition: 0.25s ease-in-out;
+
+        &:nth-child(1) {
+            top: 0px;
+        }
+
+        &:nth-child(2) {
+            top: 8px;
+        }
+
+        &:nth-child(3) {
+            top: 16px;
+        }
+    }
+}
