@@ -22,6 +22,6 @@ mod tests {
         let output = run_probe_script("console.log('we have console.log!!!');", Vec::new())
             .await
             .expect("script should run successfully");
-        assert_eq!(output.get("exit_code"), &SampleValue::Int(0));
+        assert_eq!(output.get("script.exit_code"), &SampleValue::Int(0));
     }
 }
