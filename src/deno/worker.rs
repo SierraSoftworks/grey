@@ -62,7 +62,7 @@ pub async fn run_probe_script(code: &str, args: Vec<String>) -> Result<Sample, A
     let sample: Sample = sample
         .borrow()
         .clone()
-        .with("exit_code", worker.exit_code());
+        .with("script.exit_code", worker.exit_code());
 
     Ok(sample)
 }

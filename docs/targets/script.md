@@ -59,7 +59,7 @@ probes:
 ## Inputs
 
 ### code <Badge text="required" type="danger" />
-The `code` property is used to specify the JavaScript code which should be 
+The `code` property is used to specify the JavaScript code which should be
 executed as part of your probe.
 
 ::: warning
@@ -73,13 +73,32 @@ The `args` property can be used to provide customizable arguments to your
 script. These arguments should appear as a list of strings in your probe
 definition and may be accessed through the
 [`Deno.args`](https://examples.deno.land/command-line-arguments)
-array in your code.
+array in your code. Conceptually, these are the same as command line arguments
+and can be paired with YAML's ability to leverage references to re-use scripts
+across multiple probes.
 
-## Outputs
+```yaml
+probes:
+  - name: script.example
+    target: !Script
+      code: &myScript |
+        // Your script code here
+      args:
+        - "--foo"
+        - "bar"
+    # ...
 
-### script.exit_code
+  - name: script.example2
+    target: !Script
+      code: *myScript
+      args:
+        - "--baz"
+        - "qux"
+    # ...
+```
+
 The `script.exit_code` value will be set to the process exit code associated
-with your script execution, this will usually be `0` if the script ran 
+with your script execution, this will usually be `0` if the script ran
 successfully and non-zero if it failed.
 
 ### Custom Outputs
@@ -115,10 +134,17 @@ directive to import additional scripts either from the local filesystem or
 from remote endpoints.
 :::
 
-### `setOutput(key: string, value: string): never`
+### `setOutput(key: string, value: any): never`
 This method allows you to emit a new output value from your probe which
 can then be interrogated by the [validators](../validators/README.md)
 that you have defined in your Grey configuration.
+
+```js
+const resp = await fetch("https://example.com")
+
+setOutput('http.status_code', resp.status)
+setOutput('http.body', await resp.text())
+```
 
 ### `getTraceId(): string`
 This method retrieves the current OpenTelemetry Trace ID for your probe

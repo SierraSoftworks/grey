@@ -12,12 +12,12 @@ find that Jaeger's [all-in-one](https://www.jaegertracing.io/docs/1.38/getting-s
 setup is a great place to start.
 :::
 
-#### Step #1: Installation
+## Step #1: Installation
 You can download the latest version of Grey from our [GitHub releases][release] page.
 We include pre-compiled binaries for many different platforms, including Windows, Linux,
 and MacOS in both `amd64` and `arm64` variants.
 
-#### Step #2: Configuration
+## Step #2: Configuration
 Grey is configured using a YAML file that you can specify using the `-c` command line
 flag. The configuration file contains a list of probes which will be scheduled and
 executed by Grey. You can read more about configuring Grey in the [configuration guide](./configuration.md).
@@ -38,7 +38,7 @@ probes:
       http.header.content-type: !Contains "text/html"
 ```
 
-#### Step #3: Telemetry
+## Step #3: Telemetry
 Grey is designed to record the health of your services through the use of OpenTelemetry tracing
 data. This allows you to use the tools you're already familiar with to understand the behaviour
 of your services and to leverage distributed tracing to understand failures more rapidly.
@@ -54,7 +54,7 @@ machine.
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 ```
 
-#### Step #4: Execution
+## Step #4: Execution
 Once you're done configuring your environment, you can start Grey.
 
 ```bash
@@ -62,4 +62,3 @@ grey -c config.yaml
 ```
 
 [release]: https://github.com/SierraSoftworks/grey/releases
-[new-issue]: https://github.com/SierraSoftworks/grey/issues/new
