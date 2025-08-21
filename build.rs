@@ -22,7 +22,11 @@ mod runtime {
     );
 
     #[op2]
-    fn op_set_output(_state: &mut OpState, #[string] _name: String, #[serde] _value: Option<AnyValue>) {
+    fn op_set_output(
+        _state: &mut OpState,
+        #[string] _name: String,
+        #[serde] _value: Option<AnyValue>,
+    ) {
         // Implementation for setting output
     }
 
@@ -33,9 +37,11 @@ mod runtime {
     }
 
     pub fn create_deno_snapshot(snapshot_path: PathBuf) {
-        deno_runtime::snapshot::create_runtime_snapshot(snapshot_path, SnapshotOptions::default(), vec![
-            grey_extension::init()
-        ]);
+        deno_runtime::snapshot::create_runtime_snapshot(
+            snapshot_path,
+            SnapshotOptions::default(),
+            vec![grey_extension::init()],
+        );
     }
 }
 

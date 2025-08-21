@@ -40,7 +40,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // })?;
 
     #[cfg(feature = "scripts")]
-    deno_runtime::deno_tls::rustls::crypto::aws_lc_rs::default_provider().install_default().expect("Failed to initialize crypto subsystem");
+    deno_runtime::deno_tls::rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("Failed to initialize crypto subsystem");
 
     let args = Args::parse();
 

@@ -1,4 +1,4 @@
-use std::{rc::Rc, sync::Arc, cell::RefCell};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use deno_core::{error::AnyError, *};
 use deno_runtime::deno_permissions::{Permissions, PermissionsContainer, UnaryPermission};
@@ -29,7 +29,10 @@ pub async fn run_probe_script(code: &str, args: Vec<String>) -> Result<Sample, A
             module_loader: Rc::new(MemoryModuleLoader::new(code)),
             blob_store: Default::default(),
             broadcast_channel: Default::default(),
-            permissions: PermissionsContainer::new(Arc::new(RuntimePermissionDescriptorParser::new(RealSys::default())), get_permissions()),
+            permissions: PermissionsContainer::new(
+                Arc::new(RuntimePermissionDescriptorParser::new(RealSys::default())),
+                get_permissions(),
+            ),
             feature_checker: Default::default(),
             node_services: Default::default(),
             npm_process_state_provider: Default::default(),
@@ -50,13 +53,16 @@ pub async fn run_probe_script(code: &str, args: Vec<String>) -> Result<Sample, A
             startup_snapshot: Some(runtime_snapshot()),
             extensions: vec![crate::deno::grey_extension::init(sample.clone())],
             ..Default::default()
-        }
+        },
     );
 
     worker.execute_main_module(&module).await?;
     worker.run_event_loop(false).await?;
 
-    let sample: Sample = sample.borrow().clone().with("exit_code", worker.exit_code());
+    let sample: Sample = sample
+        .borrow()
+        .clone()
+        .with("exit_code", worker.exit_code());
 
     Ok(sample)
 }

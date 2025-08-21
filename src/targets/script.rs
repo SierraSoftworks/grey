@@ -26,12 +26,13 @@ impl Target for ScriptTarget {
                     .build()
                 {
                     Ok(rt) => {
-                        let result = rt.block_on(async move {
-                            crate::deno::run_probe_script(&code, args).await
-                        });
+                        let result =
+                            rt.block_on(
+                                async move { crate::deno::run_probe_script(&code, args).await },
+                            );
 
                         send.send(result).ok();
-                    },
+                    }
                     Err(err) => {
                         send.send(Err(err.into())).ok();
                     }
@@ -45,7 +46,15 @@ impl Target for ScriptTarget {
 
 impl Display for ScriptTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "probe.script({})", self.args.iter().map(|a| serde_json::to_string(a).unwrap_or_else(|_| format!("\"{a}\""))).collect::<Vec<_>>().join(", "))
+        write!(
+            f,
+            "probe.script({})",
+            self.args
+                .iter()
+                .map(|a| serde_json::to_string(a).unwrap_or_else(|_| format!("\"{a}\"")))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
     }
 }
 
@@ -94,7 +103,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_script_fetch() {
-        deno_runtime::deno_tls::rustls::crypto::aws_lc_rs::default_provider().install_default().expect("Failed to initialize crypto subsystem");
+        deno_runtime::deno_tls::rustls::crypto::aws_lc_rs::default_provider()
+            .install_default()
+            .expect("Failed to initialize crypto subsystem");
 
         let target = ScriptTarget {
             code: r#"

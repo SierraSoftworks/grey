@@ -19,8 +19,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_runtime_snapshot() {
-
-        let output = run_probe_script("console.log('we have console.log!!!');", Vec::new()).await.expect("script should run successfully");
+        let output = run_probe_script("console.log('we have console.log!!!');", Vec::new())
+            .await
+            .expect("script should run successfully");
         assert_eq!(output.get("exit_code"), &SampleValue::Int(0));
     }
 }

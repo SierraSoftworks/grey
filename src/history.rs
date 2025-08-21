@@ -286,12 +286,16 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
 
     /// Triggers a snapshot if one hasn't been written in the last 60 seconds
     fn maybe_trigger_snapshot(&self) {
-        if let (Some(snapshot_file), Some(interval)) = (&self.snapshot_file, &self.snapshot_interval) {
+        if let (Some(snapshot_file), Some(interval)) =
+            (&self.snapshot_file, &self.snapshot_interval)
+        {
             let now = Instant::now();
             let should_snapshot = {
                 let last_snapshot = self.last_snapshot_time.read().unwrap();
                 match *last_snapshot {
-                    Some(last_time) => now.duration_since(last_time).as_secs() as i64 >= interval.num_seconds(),
+                    Some(last_time) => {
+                        now.duration_since(last_time).as_secs() as i64 >= interval.num_seconds()
+                    }
                     _ => true,
                 }
             };
@@ -621,7 +625,8 @@ mod tests {
         assert_eq!(aligned_1d, expected_1d);
 
         // Test sub-second duration (no alignment)
-        let history_500ms = ProbeHistory::<10>::new().with_max_state_age(Duration::milliseconds(500));
+        let history_500ms =
+            ProbeHistory::<10>::new().with_max_state_age(Duration::milliseconds(500));
         let aligned_500ms = history_500ms.align_start_time(test_timestamp);
         assert_eq!(aligned_500ms, test_timestamp); // Should be unchanged
     }
@@ -705,7 +710,9 @@ mod tests {
         let temp_path = temp_dir.path().join("snapshot.json");
 
         // Create history with some data
-        let history = ProbeHistory::<10>::new().with_snapshot_file(&temp_path).unwrap();
+        let history = ProbeHistory::<10>::new()
+            .with_snapshot_file(&temp_path)
+            .unwrap();
 
         // Add some sample data
         let mut result1 = ProbeResult::new();
@@ -728,7 +735,9 @@ mod tests {
         assert!(snapshot_content.contains("Test message 2"));
 
         // Create a new history from the snapshot
-        let restored_history = ProbeHistory::<10>::new().with_snapshot_file(&temp_path).unwrap();
+        let restored_history = ProbeHistory::<10>::new()
+            .with_snapshot_file(&temp_path)
+            .unwrap();
 
         // Verify data was restored correctly
         assert_eq!(restored_history.total_samples(), history.total_samples());
@@ -762,7 +771,9 @@ mod tests {
         let non_existent_path = temp_dir.path().join("non_existent.json");
 
         // Should create new history without error when file doesn't exist
-        let history = ProbeHistory::<10>::new().with_snapshot_file(&non_existent_path).unwrap();
+        let history = ProbeHistory::<10>::new()
+            .with_snapshot_file(&non_existent_path)
+            .unwrap();
 
         assert_eq!(history.total_samples(), 0);
         assert_eq!(history.healthy_samples(), 0);
