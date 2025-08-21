@@ -35,14 +35,6 @@ impl ModuleLoader for MemoryModuleLoader {
                     Err(ModuleResolutionError::ImportPrefixMissing { .. }) => Err(ModuleLoaderError::new("ImportPrefixMissing", format!("You have not provided a valid prefix for your module import (got specifier = {specifier}, referrer = {referrer}).")))
                 }
             },
-            ResolutionKind::Import if specifier == "grey:runtime" => {
-                match resolve_url(specifier) {
-                    Ok(specifier) => Ok(specifier),
-                    Err(ModuleResolutionError::InvalidUrl(e)) => Err(ModuleLoaderError::new("InvalidUrl", format!("{e}"))),
-                    Err(ModuleResolutionError::InvalidBaseUrl(e)) => Err(ModuleLoaderError::new("InvalidBaseUrl", format!("{e}"))),
-                    Err(ModuleResolutionError::ImportPrefixMissing { .. }) => Err(ModuleLoaderError::new("ImportPrefixMissing", format!("You have not provided a valid prefix for your module import (got specifier = {specifier}, referrer = {referrer}).")))
-                }
-            },
             _ => Err(ModuleLoaderError::new("ForeignModuleImport", "importing foreign modules is not supported in probe scripts"))
         }
     }

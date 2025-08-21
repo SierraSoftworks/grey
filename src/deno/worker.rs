@@ -1,9 +1,7 @@
 use std::{rc::Rc, sync::Arc, cell::RefCell};
 
 use deno_core::{error::AnyError, *};
-
-use deno_runtime::deno_fs::RealFs;
-use deno_runtime::deno_permissions::PermissionsContainer;
+use deno_runtime::deno_permissions::{Permissions, PermissionsContainer, UnaryPermission};
 use deno_runtime::permissions::RuntimePermissionDescriptorParser;
 use deno_runtime::worker::{MainWorker, WorkerOptions, WorkerServiceOptions};
 use deno_runtime::BootstrapOptions;
@@ -31,7 +29,7 @@ pub async fn run_probe_script(code: &str, args: Vec<String>) -> Result<Sample, A
             module_loader: Rc::new(MemoryModuleLoader::new(code)),
             blob_store: Default::default(),
             broadcast_channel: Default::default(),
-            permissions: PermissionsContainer::allow_all(Arc::new(RuntimePermissionDescriptorParser::new(RealSys::default()))),
+            permissions: PermissionsContainer::new(Arc::new(RuntimePermissionDescriptorParser::new(RealSys::default())), get_permissions()),
             feature_checker: Default::default(),
             node_services: Default::default(),
             npm_process_state_provider: Default::default(),
@@ -41,22 +39,12 @@ pub async fn run_probe_script(code: &str, args: Vec<String>) -> Result<Sample, A
             compiled_wasm_module_store: Default::default(),
             v8_code_cache: Default::default(),
             deno_rt_native_addon_loader: Default::default(),
-            fs: Arc::new(RealFs::default()),
+            fs: Arc::new(crate::deno::fake_fs::NoOpFs),
         },
         WorkerOptions {
             bootstrap: BootstrapOptions {
                 user_agent: version!("SierraSoftworks/grey@v"),
                 args,
-                // otel_config: deno_runtime::deno_telemetry::OtelConfig {
-                //     tracing_enabled: true,
-                //     console: deno_runtime::deno_telemetry::OtelConsoleConfig::Capture,
-                //     propagators: {
-                //         let mut propagators = std::collections::HashSet::new();
-                //         propagators.insert(deno_runtime::deno_telemetry::OtelPropagators::TraceContext);
-                //         propagators
-                //     },
-                //     ..Default::default()
-                // },
                 ..Default::default()
             },
             startup_snapshot: Some(runtime_snapshot()),
@@ -73,6 +61,11 @@ pub async fn run_probe_script(code: &str, args: Vec<String>) -> Result<Sample, A
     Ok(sample)
 }
 
+fn get_permissions() -> Permissions {
+    let mut perms = Permissions::none_without_prompt();
+    perms.net = UnaryPermission::allow_all();
+    perms
+}
 
 #[cfg(test)]
 mod tests {

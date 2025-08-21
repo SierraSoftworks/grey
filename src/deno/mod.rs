@@ -1,10 +1,10 @@
 mod exts;
+mod fake_fs;
 mod module_loader;
 mod worker;
 
 pub use exts::grey_extension;
 pub use worker::run_probe_script;
-//pub use worker::{Worker, WorkerContext};
 
 static RUNTIME_SNAPSHOT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/RUNTIME_SNAPSHOT.bin"));
 
