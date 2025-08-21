@@ -31,7 +31,7 @@ impl From<&crate::history::StateBucket> for grey_api::ProbeHistory {
             Some(end_time) => std::time::Duration::from_secs(
                 (end_time - bucket.start_time).num_seconds().max(1) as u64,
             ),
-            None => std::time::Duration::from_secs(
+            _ => std::time::Duration::from_secs(
                 (chrono::Utc::now() - bucket.start_time)
                     .num_seconds()
                     .max(1) as u64,
@@ -41,8 +41,7 @@ impl From<&crate::history::StateBucket> for grey_api::ProbeHistory {
         grey_api::ProbeHistory {
             start_time: bucket.start_time,
             latency: std::time::Duration::from_millis(
-                bucket.total_latency.num_milliseconds() as u64
-                / bucket.total_samples
+                bucket.total_latency.num_milliseconds() as u64 / bucket.total_samples,
             ),
             state_duration,
             attempts: bucket.total_attempts,
@@ -80,11 +79,6 @@ impl From<&crate::config::UiConfig> for grey_api::UiConfig {
     }
 }
 
-pub async fn get_ui_config<const N: usize>(data: web::Data<AppState<N>>) -> Result<HttpResponse> {
-    let api_config: grey_api::UiConfig = (&data.config.ui()).into();
-    Ok(HttpResponse::Ok().json(api_config))
-}
-
 pub async fn get_notices<const N: usize>(data: web::Data<AppState<N>>) -> Result<HttpResponse> {
     let api_notices: Vec<grey_api::UiNotice> = data
         .config
@@ -105,7 +99,11 @@ pub async fn get_probes<const N: usize>(data: web::Data<AppState<N>>) -> Result<
         .collect();
 
     for probe in api_probes.iter_mut() {
-        probe.availability = data.history.get(&probe.name).map(|h| h.availability()).unwrap_or(100.0);
+        probe.availability = data
+            .history
+            .get(&probe.name)
+            .map(|h| h.availability())
+            .unwrap_or(100.0);
     }
 
     Ok(HttpResponse::Ok().json(api_probes))

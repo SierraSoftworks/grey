@@ -1,27 +1,20 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
-use deno_core::{ModuleLoader, ResolutionKind, resolve_url, ModuleType};
+use deno_core::{
+    error::ModuleLoaderError, resolve_url, ModuleLoader, ModuleResolutionError, ModuleType,
+    ResolutionKind,
+};
 
-static MEMORY_SCRIPT_SPECIFIER: &str = "memory:main_module.js";
+pub static MEMORY_SCRIPT_SPECIFIER: &str = "memory:probe.js";
 
 pub struct MemoryModuleLoader {
-    code: String,
-    loader: Option<Rc<dyn ModuleLoader>>
+    code: Arc<String>,
 }
 
 impl MemoryModuleLoader {
     pub fn new<S: Into<String>>(code: S) -> Self {
         Self {
-            code: code.into(),
-            loader: None
-        }
-    }
-
-    #[allow(unused)]
-    pub fn with_fallback(self, loader: Rc<dyn ModuleLoader>) -> Self {
-        Self {
-            code: self.code,
-            loader: Some(loader)
+            code: Arc::new(code.into()),
         }
     }
 }
@@ -31,45 +24,57 @@ impl ModuleLoader for MemoryModuleLoader {
         &self,
         specifier: &str,
         referrer: &str,
-        kind: deno_core::ResolutionKind,
-    ) -> Result<deno_core::ModuleSpecifier, deno_core::anyhow::Error> {
+        kind: ResolutionKind,
+    ) -> Result<deno_core::ModuleSpecifier, deno_core::error::ModuleLoaderError> {
         match kind {
             ResolutionKind::MainModule => {
-                Ok(resolve_url(MEMORY_SCRIPT_SPECIFIER)?)
+                match resolve_url(MEMORY_SCRIPT_SPECIFIER) {
+                    Ok(specifier) => Ok(specifier),
+                    Err(ModuleResolutionError::InvalidUrl(e)) => Err(ModuleLoaderError::new("InvalidUrl", format!("{e}"))),
+                    Err(ModuleResolutionError::InvalidBaseUrl(e)) => Err(ModuleLoaderError::new("InvalidBaseUrl", format!("{e}"))),
+                    Err(ModuleResolutionError::ImportPrefixMissing { .. }) => Err(ModuleLoaderError::new("ImportPrefixMissing", format!("You have not provided a valid prefix for your module import (got specifier = {specifier}, referrer = {referrer}).")))
+                }
             },
-            _ => match self.loader.clone() {
-                Some(loader) => loader.resolve(specifier, referrer, kind),
-                _ => deno_core::anyhow::bail!("importing foreign modules is not supported in probe scripts")
-            }
+            ResolutionKind::Import if specifier == "grey:runtime" => {
+                match resolve_url(specifier) {
+                    Ok(specifier) => Ok(specifier),
+                    Err(ModuleResolutionError::InvalidUrl(e)) => Err(ModuleLoaderError::new("InvalidUrl", format!("{e}"))),
+                    Err(ModuleResolutionError::InvalidBaseUrl(e)) => Err(ModuleLoaderError::new("InvalidBaseUrl", format!("{e}"))),
+                    Err(ModuleResolutionError::ImportPrefixMissing { .. }) => Err(ModuleLoaderError::new("ImportPrefixMissing", format!("You have not provided a valid prefix for your module import (got specifier = {specifier}, referrer = {referrer}).")))
+                }
+            },
+            _ => Err(ModuleLoaderError::new("ForeignModuleImport", "importing foreign modules is not supported in probe scripts"))
         }
     }
 
     fn load(
         &self,
         module_specifier: &deno_core::ModuleSpecifier,
-        maybe_referrer: Option<&deno_core::ModuleSpecifier>,
-        is_dyn_import: bool,
-    ) -> std::pin::Pin<Box<deno_core::ModuleSourceFuture>> {
-        if module_specifier.as_str() == MEMORY_SCRIPT_SPECIFIER {
-            let module_specifier = module_specifier.to_owned();
-            let code = format!("{}", self.code).into();
-            Box::pin(async move {
-                if is_dyn_import {
-                    deno_core::anyhow::bail!("importing the main module again is not supported")
-                } else {
-                    Ok(deno_core::ModuleSource::new(
-                        ModuleType::JavaScript,
-                        code,
-                        &module_specifier,
-                    ))
-                }
-            })
-        } else if let Some(loader) = self.loader.clone() {
-            loader.load(module_specifier, maybe_referrer, is_dyn_import)
+        _maybe_referrer: Option<&deno_core::ModuleSpecifier>,
+        _is_dyn_import: bool,
+        requested_module_type: deno_core::RequestedModuleType,
+    ) -> deno_core::ModuleLoadResponse {
+        if matches!(requested_module_type, deno_core::RequestedModuleType::None)
+            && module_specifier.as_str() == MEMORY_SCRIPT_SPECIFIER
+        {
+            deno_core::ModuleLoadResponse::Sync(Ok(deno_core::ModuleSource::new(
+                ModuleType::JavaScript,
+                deno_core::ModuleSourceCode::String(self.code.as_str().to_string().into()),
+                &module_specifier,
+                None,
+            )))
         } else {
-            Box::pin(async {
-                deno_core::anyhow::bail!("loading external modules is not supported in this environment")
-            })
+            deno_core::ModuleLoadResponse::Sync(Err(ModuleLoaderError::new(
+                "ForeignModuleImport",
+                "importing foreign modules is not supported in probe scripts",
+            )))
         }
     }
 }
+
+use ::deno_error::js_error_wrapper;
+js_error_wrapper!(
+    deno_core::ModuleResolutionError,
+    JsModuleResolutionError,
+    "ModuleResolutionError"
+);

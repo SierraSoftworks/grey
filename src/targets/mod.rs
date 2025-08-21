@@ -20,17 +20,21 @@ pub enum TargetType {
     Mock,
     Dns(dns::DnsTarget),
     Http(http::HttpTarget),
+    #[cfg(feature = "scripts")]
     Script(script::ScriptTarget),
     Tcp(tcp::TcpTarget),
 }
 
 impl TargetType {
-    pub async fn run(&self) -> Result<Sample, Box<dyn std::error::Error>> {
+    pub async fn run(&self, cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>> {
         match self {
-            TargetType::Dns(target) => target.run().await,
-            TargetType::Http(target) => target.run().await,
-            TargetType::Script(target) => target.run().await,
-            TargetType::Tcp(target) => target.run().await,
+            #[cfg(test)]
+            TargetType::Mock => Ok(Sample::default()),
+            TargetType::Dns(target) => target.run(cancel).await,
+            TargetType::Http(target) => target.run(cancel).await,
+            #[cfg(feature = "scripts")]
+            TargetType::Script(target) => target.run(cancel).await,
+            TargetType::Tcp(target) => target.run(cancel).await,
         }
     }
 }
@@ -42,10 +46,12 @@ impl Display for TargetType {
             TargetType::Mock => write!(f, "Mock"),
             TargetType::Dns(target) => write!(f, "{}", target),
             TargetType::Http(target) => write!(f, "{}", target),
+            #[cfg(feature = "scripts")]
             TargetType::Script(target) => write!(f, "{}", target),
             TargetType::Tcp(target) => write!(f, "{}", target),
         }
     }
+}
 
 #[async_trait::async_trait]
 impl Target for TargetType {
@@ -55,8 +61,9 @@ impl Target for TargetType {
             TargetType::Mock => Ok(Sample::default()),
             TargetType::Dns(target) => target.run(cancel).await,
             TargetType::Http(target) => target.run(cancel).await,
-            TargetType::Tcp(target) => target.run(cancel).await,
+            #[cfg(feature = "scripts")]
             TargetType::Script(target) => target.run(cancel).await,
+            TargetType::Tcp(target) => target.run(cancel).await,
         }
     }
 }

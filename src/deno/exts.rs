@@ -1,50 +1,49 @@
-use std::{cell::RefCell, sync::Arc, collections::HashMap};
+use std::{collections::HashMap, rc::Rc, cell::RefCell};
 
-use deno_core::{*, serde_v8::AnyValue};
+use deno_core::{serde_v8::AnyValue, *};
 use tracing::Span;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
+use tracing_batteries::prelude::*;
 
 use crate::{Sample, SampleValue};
 
 extension!(
-    grey,
+    grey_extension,
     ops = [
         op_set_output,
         op_get_trace_headers,
     ],
-    esm = [dir "js", "40_output.js"],
     options = {
-        sample: Arc<RefCell<Sample>>,
+        sample: Rc<RefCell<Sample>>,
     },
     state = |state, config| {
         state.put(config.sample);
     },
-    customizer = |ext: &mut deno_core::ExtensionBuilder| {
-        ext.force_op_registration();
-    }
 );
 
-#[op]
-fn op_set_output(state: &mut OpState, name: String, value: Option<AnyValue>) {
-    let sample_ref: &mut Arc<RefCell<Sample>> = state.borrow_mut();
+#[op2]
+fn op_set_output(state: &mut OpState, #[string] name: String, #[serde] value: Option<AnyValue>) {
+    let sample_ref: &Rc<RefCell<Sample>> = state.borrow();
 
     let value = match value {
-        None => SampleValue::None,
         Some(AnyValue::Bool(val)) => val.into(),
         Some(AnyValue::Number(val)) if val.floor() == val => SampleValue::Int(val as i64),
         Some(AnyValue::Number(val)) => SampleValue::Double(val),
         Some(AnyValue::String(val)) => val.into(),
-        _ => SampleValue::None
+        _ => SampleValue::None,
     };
 
-    sample_ref.replace_with(|old| old.clone().with(name, value));
+    // Now exchange the value within sample_ref with a new one
+    let mut sample = sample_ref.borrow_mut();
+    let new_sample = sample.clone().with(name, value);
+    *sample = new_sample;
 }
 
-#[op]
+#[op2]
+#[serde]
 fn op_get_trace_headers() -> HashMap<String, String> {
     let mut headers = HashMap::new();
 
-    opentelemetry::global::get_text_map_propagator(|p| {
+    tracing_batteries::prelude::opentelemetry::global::get_text_map_propagator(|p| {
         p.inject_context(&Span::current().context(), &mut headers)
     });
 

@@ -74,7 +74,7 @@ impl ConfigProvider {
             let err: Box<dyn std::error::Error> = format!("Failed to load configuration file from {}: {}", path.display(), e).into();
             err
         })?;
-        
+
         let config: Config = serde_yaml::from_str(&config)?;
         Ok(config)
     }

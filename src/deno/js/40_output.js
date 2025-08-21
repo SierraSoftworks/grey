@@ -1,7 +1,6 @@
-const core = globalThis.Deno.core;
-const ops = core.ops;
+import { op_set_output, op_get_trace_headers } from "ext:core/ops";
 
-globalThis.setOutput = function setOutput(name, value) {
+export function setOutput(name, value) {
     const supportedTypes = [
         "string",
         "boolean",
@@ -14,11 +13,11 @@ globalThis.setOutput = function setOutput(name, value) {
         value = JSON.stringify(value)
     }
 
-    ops.op_set_output(`${name}`, value)
+    op_set_output(`${name}`, value)
 }
 
-globalThis.getTraceHeaders = function getTraceHeaders() {
-    const headers = ops.op_get_trace_headers()
+export function getTraceHeaders() {
+    const headers = op_get_trace_headers()
 
     return {
         traceparent: headers.traceparent,
@@ -26,6 +25,10 @@ globalThis.getTraceHeaders = function getTraceHeaders() {
     }
 }
 
-globalThis.getTraceId = function getTraceId() {
-    return ops.op_get_trace_headers().traceparent
+export function getTraceId() {
+    return op_get_trace_headers().traceparent
 }
+
+globalThis.setOutput = setOutput;
+globalThis.getTraceHeaders = getTraceHeaders;
+globalThis.getTraceId = getTraceId;

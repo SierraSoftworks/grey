@@ -1,16 +1,13 @@
-use std::{fmt::Display, sync::atomic::AtomicBool};
-
-use opentelemetry::trace::SpanKind;
 use serde::{Deserialize, Serialize};
+use std::{fmt::Display, sync::atomic::AtomicBool};
 use tokio::net::{lookup_host, TcpSocket};
 
-use crate::Sample;
+use crate::{Sample, Target};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TcpTarget {
     pub host: String,
 }
-
 
 #[async_trait::async_trait]
 impl Target for TcpTarget {

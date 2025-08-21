@@ -57,8 +57,10 @@ impl AppProps {
         let window = window().ok_or("No window found")?;
         let document = window.document().ok_or("No document found")?;
         let app_element = document.get_element_by_id("app").ok_or("#app not found")?;
-        
-        let config_data = app_element.get_attribute("data-config").ok_or("#app[data-config] not found")?;
+
+        let config_data = app_element
+            .get_attribute("data-config")
+            .ok_or("#app[data-config] not found")?;
         let config: UiConfig = serde_json::from_str(&config_data)?;
 
         Ok(Self {
@@ -77,10 +79,18 @@ impl AppProps {
         let document = window.document().ok_or("No document found")?;
         let app_element = document.get_element_by_id("app").ok_or("#app not found")?;
 
-        let config_data = app_element.get_attribute("data-config").ok_or("#app[data-config] not found")?;
-        let notices_data = app_element.get_attribute("data-notices").ok_or("#app[data-notices] not found")?;
-        let probes_data = app_element.get_attribute("data-probes").ok_or("#app[data-probes] not found")?;
-        let histories_data = app_element.get_attribute("data-probe-histories").ok_or("#app[data-probe-histories] not found")?;
+        let config_data = app_element
+            .get_attribute("data-config")
+            .ok_or("#app[data-config] not found")?;
+        let notices_data = app_element
+            .get_attribute("data-notices")
+            .ok_or("#app[data-notices] not found")?;
+        let probes_data = app_element
+            .get_attribute("data-probes")
+            .ok_or("#app[data-probes] not found")?;
+        let histories_data = app_element
+            .get_attribute("data-probe-histories")
+            .ok_or("#app[data-probe-histories] not found")?;
 
         let config: UiConfig = serde_json::from_str(&config_data)?;
         let notices: Vec<grey_api::UiNotice> = serde_json::from_str(&notices_data)?;
@@ -105,7 +115,6 @@ impl Component for App {
 
     type Properties = AppProps;
 
-
     fn create(ctx: &Context<Self>) -> Self {
         let app = Self {
             notices: ctx.props().notices.clone(),
@@ -117,13 +126,11 @@ impl Component for App {
         #[cfg(feature = "wasm")]
         if app.probes.is_empty() {
             // We might not have loaded the un-hydrated context correctly, so let's trigger an immediate refresh
-            ctx.link().send_future(async move {
-                Self::fetch_probes_as_client_msg().await
-            });
+            ctx.link()
+                .send_future(async move { Self::fetch_probes_as_client_msg().await });
 
-            ctx.link().send_future(async move {
-                Self::fetch_notices_as_client_msg().await
-            });
+            ctx.link()
+                .send_future(async move { Self::fetch_notices_as_client_msg().await });
         } else {
             Self::schedule_next_probes_poll(ctx);
             Self::schedule_next_notices_poll(ctx);

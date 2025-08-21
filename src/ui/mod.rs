@@ -59,10 +59,6 @@ pub fn create_app<const N: usize>() -> App<
             "/api/v1/probes/{probe}/history",
             web::get().to(api::get_history::<N>),
         )
-        .route(
-            "/api/v1/user-interface",
-            web::get().to(api::get_ui_config::<N>),
-        )
         .route("/api/v1/notices", web::get().to(api::get_notices::<N>))
         .route("/static/{filename:.*}", web::get().to(serve_static))
 }

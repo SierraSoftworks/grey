@@ -14,7 +14,11 @@ pub async fn index<const N: usize>(data: web::Data<AppState<N>>) -> Result<HttpR
         .iter()
         .map(|probe| probe.into())
         .map(|mut probe: Probe| {
-            probe.availability = data.history.get(&probe.name).map(|h| h.availability()).unwrap_or(100.0);
+            probe.availability = data
+                .history
+                .get(&probe.name)
+                .map(|h| h.availability())
+                .unwrap_or(100.0);
             probe
         })
         .collect::<Vec<grey_api::Probe>>();

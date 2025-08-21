@@ -1,6 +1,5 @@
 use std::{fmt::Display, str::FromStr, sync::atomic::AtomicBool};
 
-use opentelemetry::trace::SpanKind;
 use serde::{Deserialize, Serialize};
 use trust_dns_resolver::{
     config::{ResolverConfig, ResolverOpts},
@@ -8,7 +7,7 @@ use trust_dns_resolver::{
     TokioAsyncResolver,
 };
 
-use crate::Sample;
+use crate::{Sample, Target};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DnsTarget {
