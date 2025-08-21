@@ -99,7 +99,7 @@ impl<const N: usize> Engine<N> {
     }
 
     fn stop_all_probe_runners(&self) {
-        for probe in self.probes.read().unwrap().values().cloned() {
+        for probe in self.probes.read().unwrap().values() {
             probe.cancel();
         }
     }
@@ -130,16 +130,16 @@ impl<const N: usize> Engine<N> {
                             if old_probe != new_probe {
                                 // Probe configuration has changed
                                 info!(name: "config.reload.probe", { probe.name=name, action = "update" }, "Reloaded configuration for probe {}", name);
-                                probes
-                                    .read()
-                                    .unwrap()
-                                    .get(*name)
-                                    .map(|p| p.update((*new_probe).clone()));
+                                if let Some(p) = probes.read().unwrap().get(*name) {
+                                    p.update((*new_probe).clone())
+                                }
                             }
                         } else {
                             // Probe has been removed
                             info!(name: "config.reload.probe", { probe.name=name, action = "remove" }, "Removed configuration for probe {}", name);
-                            probes.read().unwrap().get(*name).map(|p| p.cancel());
+                            if let Some(p) = probes.read().unwrap().get(*name) {
+                                p.cancel()
+                            }
                         }
                     }
 

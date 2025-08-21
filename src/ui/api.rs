@@ -1,5 +1,4 @@
 use actix_web::{web, HttpResponse, Result};
-use grey_api;
 
 use super::AppState;
 
@@ -80,13 +79,7 @@ impl From<&crate::config::UiConfig> for grey_api::UiConfig {
 }
 
 pub async fn get_notices<const N: usize>(data: web::Data<AppState<N>>) -> Result<HttpResponse> {
-    let api_notices: Vec<grey_api::UiNotice> = data
-        .config
-        .ui()
-        .notices
-        .iter()
-        .map(|notice| notice.clone().into())
-        .collect();
+    let api_notices: Vec<grey_api::UiNotice> = data.config.ui().notices.iter().cloned().collect();
     Ok(HttpResponse::Ok().json(api_notices))
 }
 

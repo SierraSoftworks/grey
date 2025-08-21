@@ -24,348 +24,350 @@ impl FileSystem for NoOpFs {
         self.no_op_fs_error()
     }
 
-    fn chdir(&self, path: &CheckedPath) -> FsResult<()> {
+    fn chdir(&self, _path: &CheckedPath) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    fn umask(&self, mask: Option<u32>) -> FsResult<u32> {
+    fn umask(&self, _mask: Option<u32>) -> FsResult<u32> {
         self.no_op_fs_error()
     }
 
-    fn open_sync(&self, path: &CheckedPath, options: OpenOptions) -> FsResult<Rc<dyn File>> {
+    fn open_sync(&self, _path: &CheckedPath, _options: OpenOptions) -> FsResult<Rc<dyn File>> {
         self.no_op_fs_error()
     }
 
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
     async fn open_async(
         &self,
-        path: CheckedPathBuf,
-        options: OpenOptions,
+        _path: CheckedPathBuf,
+        _options: OpenOptions,
     ) -> FsResult<Rc<dyn File>> {
         self.no_op_fs_error()
     }
 
-    fn mkdir_sync(&self, path: &CheckedPath, recursive: bool, mode: Option<u32>) -> FsResult<()> {
+    fn mkdir_sync(
+        &self,
+        _path: &CheckedPath,
+        _recursive: bool,
+        _mode: Option<u32>,
+    ) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
     async fn mkdir_async(
         &self,
-        path: CheckedPathBuf,
-        recursive: bool,
-        mode: Option<u32>,
+        _path: CheckedPathBuf,
+        _recursive: bool,
+        _mode: Option<u32>,
     ) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    fn chmod_sync(&self, path: &CheckedPath, mode: u32) -> FsResult<()> {
+    fn chmod_sync(&self, _path: &CheckedPath, _mode: u32) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
-    async fn chmod_async(&self, path: CheckedPathBuf, mode: u32) -> FsResult<()> {
+    async fn chmod_async(&self, _path: CheckedPathBuf, _mode: u32) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    fn chown_sync(&self, path: &CheckedPath, uid: Option<u32>, gid: Option<u32>) -> FsResult<()> {
+    fn chown_sync(
+        &self,
+        _path: &CheckedPath,
+        _uid: Option<u32>,
+        _gid: Option<u32>,
+    ) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    #[must_use]
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
     async fn chown_async(
         &self,
-        path: CheckedPathBuf,
-        uid: Option<u32>,
-        gid: Option<u32>,
+        _path: CheckedPathBuf,
+        _uid: Option<u32>,
+        _gid: Option<u32>,
     ) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    fn lchmod_sync(&self, path: &CheckedPath, mode: u32) -> FsResult<()> {
+    fn lchmod_sync(&self, _path: &CheckedPath, _mode: u32) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    #[must_use]
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
-    async fn lchmod_async(&self, path: CheckedPathBuf, mode: u32) -> FsResult<()> {
+    async fn lchmod_async(&self, _path: CheckedPathBuf, _mode: u32) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    fn lchown_sync(&self, path: &CheckedPath, uid: Option<u32>, gid: Option<u32>) -> FsResult<()> {
+    fn lchown_sync(
+        &self,
+        _path: &CheckedPath,
+        _uid: Option<u32>,
+        _gid: Option<u32>,
+    ) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    #[must_use]
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
     async fn lchown_async(
         &self,
-        path: CheckedPathBuf,
-        uid: Option<u32>,
-        gid: Option<u32>,
+        _path: CheckedPathBuf,
+        _uid: Option<u32>,
+        _gid: Option<u32>,
     ) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    fn remove_sync(&self, path: &CheckedPath, recursive: bool) -> FsResult<()> {
+    fn remove_sync(&self, _path: &CheckedPath, _recursive: bool) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    #[must_use]
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
-    async fn remove_async(&self, path: CheckedPathBuf, recursive: bool) -> FsResult<()> {
+    async fn remove_async(&self, _path: CheckedPathBuf, _recursive: bool) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    fn copy_file_sync(&self, oldpath: &CheckedPath, newpath: &CheckedPath) -> FsResult<()> {
+    fn copy_file_sync(&self, _oldpath: &CheckedPath, _newpath: &CheckedPath) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    #[must_use]
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
     async fn copy_file_async(
         &self,
-        oldpath: CheckedPathBuf,
-        newpath: CheckedPathBuf,
+        _oldpath: CheckedPathBuf,
+        _newpath: CheckedPathBuf,
     ) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    fn cp_sync(&self, path: &CheckedPath, new_path: &CheckedPath) -> FsResult<()> {
+    fn cp_sync(&self, _path: &CheckedPath, _new_path: &CheckedPath) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    #[must_use]
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
-    async fn cp_async(&self, path: CheckedPathBuf, new_path: CheckedPathBuf) -> FsResult<()> {
+    async fn cp_async(&self, _path: CheckedPathBuf, _new_path: CheckedPathBuf) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    fn stat_sync(&self, path: &CheckedPath) -> FsResult<FsStat> {
+    fn stat_sync(&self, _path: &CheckedPath) -> FsResult<FsStat> {
         self.no_op_fs_error()
     }
 
-    #[must_use]
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
-    async fn stat_async(&self, path: CheckedPathBuf) -> FsResult<FsStat> {
+    async fn stat_async(&self, _path: CheckedPathBuf) -> FsResult<FsStat> {
         self.no_op_fs_error()
     }
 
-    fn lstat_sync(&self, path: &CheckedPath) -> FsResult<FsStat> {
+    fn lstat_sync(&self, _path: &CheckedPath) -> FsResult<FsStat> {
         self.no_op_fs_error()
     }
 
-    #[must_use]
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
-    async fn lstat_async(&self, path: CheckedPathBuf) -> FsResult<FsStat> {
+    async fn lstat_async(&self, _path: CheckedPathBuf) -> FsResult<FsStat> {
         self.no_op_fs_error()
     }
 
-    fn realpath_sync(&self, path: &CheckedPath) -> FsResult<PathBuf> {
+    fn realpath_sync(&self, _path: &CheckedPath) -> FsResult<PathBuf> {
         self.no_op_fs_error()
     }
 
-    #[must_use]
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
-    async fn realpath_async(&self, path: CheckedPathBuf) -> FsResult<PathBuf> {
+    async fn realpath_async(&self, _path: CheckedPathBuf) -> FsResult<PathBuf> {
         self.no_op_fs_error()
     }
 
-    fn read_dir_sync(&self, path: &CheckedPath) -> FsResult<Vec<FsDirEntry>> {
+    fn read_dir_sync(&self, _path: &CheckedPath) -> FsResult<Vec<FsDirEntry>> {
         self.no_op_fs_error()
     }
 
-    #[must_use]
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
-    async fn read_dir_async(&self, path: CheckedPathBuf) -> FsResult<Vec<FsDirEntry>> {
+    async fn read_dir_async(&self, _path: CheckedPathBuf) -> FsResult<Vec<FsDirEntry>> {
         self.no_op_fs_error()
     }
 
-    fn rename_sync(&self, oldpath: &CheckedPath, newpath: &CheckedPath) -> FsResult<()> {
+    fn rename_sync(&self, _oldpath: &CheckedPath, _newpath: &CheckedPath) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    #[must_use]
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
-    async fn rename_async(&self, oldpath: CheckedPathBuf, newpath: CheckedPathBuf) -> FsResult<()> {
+    async fn rename_async(
+        &self,
+        _oldpath: CheckedPathBuf,
+        _newpath: CheckedPathBuf,
+    ) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    fn link_sync(&self, oldpath: &CheckedPath, newpath: &CheckedPath) -> FsResult<()> {
+    fn link_sync(&self, _oldpath: &CheckedPath, _newpath: &CheckedPath) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    #[must_use]
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
-    async fn link_async(&self, oldpath: CheckedPathBuf, newpath: CheckedPathBuf) -> FsResult<()> {
+    async fn link_async(&self, _oldpath: CheckedPathBuf, _newpath: CheckedPathBuf) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
     fn symlink_sync(
         &self,
-        oldpath: &CheckedPath,
-        newpath: &CheckedPath,
-        file_type: Option<FsFileType>,
+        _oldpath: &CheckedPath,
+        _newpath: &CheckedPath,
+        _file_type: Option<FsFileType>,
     ) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    #[must_use]
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
     async fn symlink_async(
         &self,
-        oldpath: CheckedPathBuf,
-        newpath: CheckedPathBuf,
-        file_type: Option<FsFileType>,
+        _oldpath: CheckedPathBuf,
+        _newpath: CheckedPathBuf,
+        _file_type: Option<FsFileType>,
     ) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    fn read_link_sync(&self, path: &CheckedPath) -> FsResult<PathBuf> {
+    fn read_link_sync(&self, _path: &CheckedPath) -> FsResult<PathBuf> {
         self.no_op_fs_error()
     }
 
-    #[must_use]
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
-    async fn read_link_async(&self, path: CheckedPathBuf) -> FsResult<PathBuf> {
+    async fn read_link_async(&self, _path: CheckedPathBuf) -> FsResult<PathBuf> {
         self.no_op_fs_error()
     }
 
-    fn truncate_sync(&self, path: &CheckedPath, len: u64) -> FsResult<()> {
+    fn truncate_sync(&self, _path: &CheckedPath, _len: u64) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    #[must_use]
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
-    async fn truncate_async(&self, path: CheckedPathBuf, len: u64) -> FsResult<()> {
+    async fn truncate_async(&self, _path: CheckedPathBuf, _len: u64) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
     fn utime_sync(
         &self,
-        path: &CheckedPath,
-        atime_secs: i64,
-        atime_nanos: u32,
-        mtime_secs: i64,
-        mtime_nanos: u32,
+        _path: &CheckedPath,
+        _atime_secs: i64,
+        _atime_nanos: u32,
+        _mtime_secs: i64,
+        _mtime_nanos: u32,
     ) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    #[must_use]
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
     async fn utime_async(
         &self,
-        path: CheckedPathBuf,
-        atime_secs: i64,
-        atime_nanos: u32,
-        mtime_secs: i64,
-        mtime_nanos: u32,
+        _path: CheckedPathBuf,
+        _atime_secs: i64,
+        _atime_nanos: u32,
+        _mtime_secs: i64,
+        _mtime_nanos: u32,
     ) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
     fn lutime_sync(
         &self,
-        path: &CheckedPath,
-        atime_secs: i64,
-        atime_nanos: u32,
-        mtime_secs: i64,
-        mtime_nanos: u32,
+        _path: &CheckedPath,
+        _atime_secs: i64,
+        _atime_nanos: u32,
+        _mtime_secs: i64,
+        _mtime_nanos: u32,
     ) -> FsResult<()> {
         self.no_op_fs_error()
     }
 
-    #[must_use]
     #[allow(
-        elided_named_lifetimes,
+        mismatched_lifetime_syntaxes,
         clippy::type_complexity,
         clippy::type_repetition_in_bounds
     )]
     async fn lutime_async(
         &self,
-        path: CheckedPathBuf,
-        atime_secs: i64,
-        atime_nanos: u32,
-        mtime_secs: i64,
-        mtime_nanos: u32,
+        __path: CheckedPathBuf,
+        __atime_secs: i64,
+        __atime_nanos: u32,
+        __mtime_secs: i64,
+        __mtime_nanos: u32,
     ) -> FsResult<()> {
         self.no_op_fs_error()
     }

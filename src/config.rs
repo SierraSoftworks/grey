@@ -25,7 +25,7 @@ impl ConfigProvider {
         let path = path.into();
         let config = Self::load_from_path(&path).await?;
         let last_modified = Self::get_last_modified(&path)?;
-        let config_path = Some(path.into());
+        let config_path = Some(path);
         Ok(Self {
             config_path,
             state_directory: config.state_directory,
@@ -42,8 +42,8 @@ impl ConfigProvider {
             .as_ref()
             .ok_or("No config path set for reloading")?;
 
-        let last_modified = Self::get_last_modified(&config_path)?;
-        let last_read = self.last_modified.lock().unwrap().clone();
+        let last_modified = Self::get_last_modified(config_path)?;
+        let last_read = *self.last_modified.lock().unwrap();
         if last_read >= last_modified {
             return Ok(());
         }

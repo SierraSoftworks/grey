@@ -30,7 +30,7 @@ pub async fn run_probe_script(code: &str, args: Vec<String>) -> Result<Sample, A
             blob_store: Default::default(),
             broadcast_channel: Default::default(),
             permissions: PermissionsContainer::new(
-                Arc::new(RuntimePermissionDescriptorParser::new(RealSys::default())),
+                Arc::new(RuntimePermissionDescriptorParser::new(RealSys)),
                 get_permissions(),
             ),
             feature_checker: Default::default(),

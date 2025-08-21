@@ -20,7 +20,7 @@ pub fn probe_list() -> Html {
 
         service_groups
             .entry(service)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(probe);
     }
 

@@ -30,23 +30,12 @@ pub struct App {
 }
 
 // SSR-compatible version that just takes props
-#[derive(Properties, PartialEq)]
+#[derive(Default, Properties, PartialEq)]
 pub struct AppProps {
     pub config: grey_api::UiConfig,
     pub notices: Vec<grey_api::UiNotice>,
     pub probes: Vec<grey_api::Probe>,
     pub histories: HashMap<String, Vec<grey_api::ProbeHistory>>,
-}
-
-impl Default for AppProps {
-    fn default() -> Self {
-        Self {
-            config: grey_api::UiConfig::default(),
-            notices: Vec::new(),
-            probes: Vec::new(),
-            histories: HashMap::new(),
-        }
-    }
 }
 
 impl AppProps {

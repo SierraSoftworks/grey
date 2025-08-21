@@ -15,21 +15,11 @@ pub struct HistoryProps {
     pub samples: Vec<ProbeHistory>,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 struct TooltipData {
     pub visible: bool,
     pub element_index: usize,
     pub probe_result: Option<grey_api::ProbeHistory>,
-}
-
-impl Default for TooltipData {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            element_index: 0,
-            probe_result: None,
-        }
-    }
 }
 
 /// Calculate normalized logarithmic weights for UI display (percentages that sum to 100%)
@@ -37,8 +27,7 @@ fn calculate_ui_weights(samples: &[ProbeHistory]) -> Vec<f64> {
     let log_weights: Vec<f64> = samples
         .iter()
         .map(|sample| {
-            let duration_seconds = sample.state_duration.as_secs().max(1) as f64;
-            duration_seconds
+            sample.state_duration.as_secs().max(1) as f64
         })
         .collect();
 

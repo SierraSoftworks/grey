@@ -244,7 +244,7 @@ impl<const N: usize> ProbeRunner<N> {
                 }
                 Err(err) => {
                     span.record("otel.status_code", "Error")
-                        .record("otel.status_message", &err.to_string());
+                        .record("otel.status_message", err.to_string());
                     error!(error = err, "{}", err);
                     result
                         .validations

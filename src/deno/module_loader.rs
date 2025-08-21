@@ -52,7 +52,7 @@ impl ModuleLoader for MemoryModuleLoader {
             deno_core::ModuleLoadResponse::Sync(Ok(deno_core::ModuleSource::new(
                 ModuleType::JavaScript,
                 deno_core::ModuleSourceCode::String(self.code.as_str().to_string().into()),
-                &module_specifier,
+                module_specifier,
                 None,
             )))
         } else {

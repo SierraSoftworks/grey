@@ -331,8 +331,7 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
         snapshot_file: &Path,
         snapshot: ProbeHistorySnapshot,
     ) -> std::io::Result<()> {
-        let json_data = serde_json::to_string_pretty(&snapshot)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let json_data = serde_json::to_string_pretty(&snapshot).map_err(std::io::Error::other)?;
 
         // Write to a temporary file first, then atomically rename
         let temp_file = snapshot_file.with_extension("tmp");
