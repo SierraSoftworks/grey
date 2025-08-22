@@ -7,7 +7,7 @@ and how to use them to configure your probes.
 
 ### State Directory
 The `state` option configures a directory where Grey will store probe execution state
-for persistence across application restarts. When configured, probe history, availability 
+for persistence across application restarts. When configured, probe history, availability
 metrics, and state transitions are automatically saved to disk.
 
 ```yaml

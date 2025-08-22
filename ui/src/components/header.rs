@@ -12,9 +12,9 @@ pub struct HeaderProps {
 pub fn header(props: &HeaderProps) -> Html {
     let config_ctx = use_ui_config();
     let menu_open = use_state(|| false);
-    
+
     let has_links = !config_ctx.config.links.is_empty();
-    
+
     let toggle_menu = {
         let menu_open = menu_open.clone();
         Callback::from(move |_| {

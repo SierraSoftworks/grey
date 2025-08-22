@@ -12,6 +12,7 @@ pub use contexts::*;
 fn main() {
     #[cfg(target_arch = "wasm32")]
     wasm_logger::init(wasm_logger::Config::default());
+
     #[cfg(feature = "wasm")]
     if let Ok(props) = AppProps::from_dom() {
         yew::Renderer::<App>::with_props(props).hydrate();

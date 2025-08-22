@@ -1,6 +1,8 @@
 # Links
 
-Links allow you to add navigation items to your status page, providing quick access to relevant resources such as support documentation, contact information, or related services.
+Links allow you to add navigation items to your status page, providing
+quick access to relevant resources such as support documentation,
+contact information, or related services.
 
 ::: tip
 Links open in a new tab by default, and are marked with `rel="noopener noreferrer"` to prevent

@@ -112,7 +112,7 @@ impl StateBucket {
     pub fn duration(&self) -> Duration {
         match self.end_time {
             Some(end) => end - self.start_time,
-            None => Utc::now() - self.start_time,
+            _ => Utc::now() - self.start_time,
         }
     }
 
@@ -137,6 +137,8 @@ pub struct ProbeHistory<const MAX_STATES: usize> {
     state_buckets: std::sync::RwLock<circular_buffer::CircularBuffer<MAX_STATES, StateBucket>>,
     /// Maximum age for a state bucket before it's forced to finalize
     max_state_age: Duration,
+    /// The minimum amount of time between snapshots
+    snapshot_interval: Option<Duration>,
     /// Optional path for snapshot file
     snapshot_file: Option<PathBuf>,
     /// Last time a snapshot was written to disk
@@ -162,25 +164,36 @@ impl<const MAX_STATES: usize> Default for ProbeHistory<MAX_STATES> {
 impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
     /// Creates a new probe history with default settings (1 hour max state age)
     pub fn new() -> Self {
-        Self::with_max_state_age(Duration::hours(1))
-    }
-
-    /// Creates a new probe history with the specified maximum state age
-    pub fn with_max_state_age(max_state_age: Duration) -> Self {
         Self {
             sample_count_total: AtomicU64::new(0),
             sample_count_healthy: AtomicU64::new(0),
             state_buckets: std::sync::RwLock::new(circular_buffer::CircularBuffer::new()),
-            max_state_age,
+            max_state_age: Duration::hours(1),
             snapshot_file: None,
+            snapshot_interval: None,
             last_snapshot_time: Arc::new(RwLock::new(None)),
         }
     }
 
+    /// Creates a new probe history with the specified maximum state age
+    pub fn with_max_state_age(self, max_state_age: Duration) -> Self {
+        Self {
+            max_state_age,
+            ..self
+        }
+    }
+
+    pub fn with_snapshot_interval(self, interval: Duration) -> Self {
+        Self {
+            snapshot_interval: Some(interval),
+            ..self
+        }
+    }
+
     /// Creates a new probe history with snapshotting enabled
-    pub fn with_snapshot_file<P: Into<PathBuf>>(path: P) -> std::io::Result<Self> {
+    pub fn with_snapshot_file<P: Into<PathBuf>>(self, path: P) -> std::io::Result<Self> {
         let snapshot_file = path.into();
-        
+
         // Try to load existing snapshot
         let snapshot = if snapshot_file.exists() {
             let content = std::fs::read_to_string(&snapshot_file)?;
@@ -190,20 +203,21 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
         };
 
         let mut history = Self {
-            sample_count_total: AtomicU64::new(0),
-            sample_count_healthy: AtomicU64::new(0),
-            state_buckets: std::sync::RwLock::new(circular_buffer::CircularBuffer::new()),
-            max_state_age: Duration::hours(1),
             snapshot_file: Some(snapshot_file),
             last_snapshot_time: Arc::new(RwLock::new(None)),
+            ..self
         };
 
         // Restore from snapshot if available
         if let Some(snapshot) = snapshot {
-            history.sample_count_total.store(snapshot.sample_count_total, Ordering::Relaxed);
-            history.sample_count_healthy.store(snapshot.sample_count_healthy, Ordering::Relaxed);
+            history
+                .sample_count_total
+                .store(snapshot.sample_count_total, Ordering::Relaxed);
+            history
+                .sample_count_healthy
+                .store(snapshot.sample_count_healthy, Ordering::Relaxed);
             history.max_state_age = snapshot.max_state_age;
-            
+
             let mut buckets = history.state_buckets.write().unwrap();
             for bucket in snapshot.state_buckets {
                 buckets.push_back(bucket);
@@ -266,31 +280,35 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
             let new_bucket = StateBucket::new(&result);
             buckets.push_back(new_bucket);
         }
+
         self.maybe_trigger_snapshot();
     }
 
     /// Triggers a snapshot if one hasn't been written in the last 60 seconds
     fn maybe_trigger_snapshot(&self) {
-        if let Some(snapshot_file) = &self.snapshot_file {
+        if let (Some(snapshot_file), Some(interval)) =
+            (&self.snapshot_file, &self.snapshot_interval)
+        {
             let now = Instant::now();
             let should_snapshot = {
                 let last_snapshot = self.last_snapshot_time.read().unwrap();
                 match *last_snapshot {
-                    Some(last_time) => now.duration_since(last_time).as_secs() >= 60,
-                    None => true,
+                    Some(last_time) => {
+                        now.duration_since(last_time).as_secs() as i64 >= interval.num_seconds()
+                    }
+                    _ => true,
                 }
             };
 
             if should_snapshot {
                 let snapshot_file = snapshot_file.clone();
                 let snapshot_data = self.create_snapshot();
-                let last_snapshot_time = Arc::clone(&self.last_snapshot_time);
+                *self.last_snapshot_time.write().unwrap() = Some(now);
 
                 tokio::spawn(async move {
-                    if let Err(e) = Self::write_snapshot_async(&snapshot_file, snapshot_data).await {
+                    if let Err(e) = Self::write_snapshot_async(&snapshot_file, snapshot_data).await
+                    {
                         tracing::warn!("Failed to write probe history snapshot: {}", e);
-                    } else {
-                        *last_snapshot_time.write().unwrap() = Some(now);
                     }
                 });
             }
@@ -313,19 +331,13 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
         snapshot_file: &Path,
         snapshot: ProbeHistorySnapshot,
     ) -> std::io::Result<()> {
-        // Try to create the parent directory if needed
-        if let Some(parent) = snapshot_file.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
+        let json_data = serde_json::to_string_pretty(&snapshot).map_err(std::io::Error::other)?;
 
-        let json_data = serde_json::to_string_pretty(&snapshot)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        
         // Write to a temporary file first, then atomically rename
         let temp_file = snapshot_file.with_extension("tmp");
         tokio::fs::write(&temp_file, json_data).await?;
         tokio::fs::rename(&temp_file, &snapshot_file).await?;
-        
+
         Ok(())
     }
 
@@ -563,7 +575,7 @@ mod tests {
 
     #[test]
     fn test_max_state_age_configuration() {
-        let history = ProbeHistory::<10>::with_max_state_age(Duration::minutes(15));
+        let history = ProbeHistory::<10>::new().with_max_state_age(Duration::minutes(15));
         assert_eq!(history.max_state_age(), Duration::minutes(15));
 
         let default_history: ProbeHistory<10> = ProbeHistory::new();
@@ -578,41 +590,42 @@ mod tests {
         let test_timestamp = Utc.with_ymd_and_hms(2023, 6, 15, 14, 37, 23).unwrap();
 
         // Test 1 hour (3600s) alignment - should align to hour boundaries
-        let history_1h = ProbeHistory::<10>::with_max_state_age(Duration::hours(1));
+        let history_1h = ProbeHistory::<10>::new().with_max_state_age(Duration::hours(1));
         let aligned_1h = history_1h.align_start_time(test_timestamp);
         let expected_1h = Utc.with_ymd_and_hms(2023, 6, 15, 14, 0, 0).unwrap();
         assert_eq!(aligned_1h, expected_1h);
 
         // Test 20 minutes (1200s) alignment - should align to 20-minute boundaries
-        let history_20m = ProbeHistory::<10>::with_max_state_age(Duration::minutes(20));
+        let history_20m = ProbeHistory::<10>::new().with_max_state_age(Duration::minutes(20));
         let aligned_20m = history_20m.align_start_time(test_timestamp);
         // 2:37:23 should align to 2:20:00 (the 20-minute boundary before it)
         let expected_20m = Utc.with_ymd_and_hms(2023, 6, 15, 14, 20, 0).unwrap();
         assert_eq!(aligned_20m, expected_20m);
 
         // Test 15 minutes (900s) alignment - should align to 15-minute boundaries
-        let history_15m = ProbeHistory::<10>::with_max_state_age(Duration::minutes(15));
+        let history_15m = ProbeHistory::<10>::new().with_max_state_age(Duration::minutes(15));
         let aligned_15m = history_15m.align_start_time(test_timestamp);
         // 2:37:23 should align to 2:30:00 (the 15-minute boundary before it)
         let expected_15m = Utc.with_ymd_and_hms(2023, 6, 15, 14, 30, 0).unwrap();
         assert_eq!(aligned_15m, expected_15m);
 
         // Test 6 hours (21600s) alignment
-        let history_6h = ProbeHistory::<10>::with_max_state_age(Duration::hours(6));
+        let history_6h = ProbeHistory::<10>::new().with_max_state_age(Duration::hours(6));
         let aligned_6h = history_6h.align_start_time(test_timestamp);
         // 2:37:23 PM should align to 12:00:00 PM (the 6-hour boundary before it)
         let expected_6h = Utc.with_ymd_and_hms(2023, 6, 15, 12, 0, 0).unwrap();
         assert_eq!(aligned_6h, expected_6h);
 
         // Test 1 day (86400s) alignment
-        let history_1d = ProbeHistory::<10>::with_max_state_age(Duration::days(1));
+        let history_1d = ProbeHistory::<10>::new().with_max_state_age(Duration::days(1));
         let aligned_1d = history_1d.align_start_time(test_timestamp);
         // Should align to start of day (midnight)
         let expected_1d = Utc.with_ymd_and_hms(2023, 6, 15, 0, 0, 0).unwrap();
         assert_eq!(aligned_1d, expected_1d);
 
         // Test sub-second duration (no alignment)
-        let history_500ms = ProbeHistory::<10>::with_max_state_age(Duration::milliseconds(500));
+        let history_500ms =
+            ProbeHistory::<10>::new().with_max_state_age(Duration::milliseconds(500));
         let aligned_500ms = history_500ms.align_start_time(test_timestamp);
         assert_eq!(aligned_500ms, test_timestamp); // Should be unchanged
     }
@@ -626,25 +639,25 @@ mod tests {
         // Test custom durations to verify the generic algorithm
 
         // 2-hour duration (7200s) should align to 2-hour boundaries from Unix epoch
-        let history_2h = ProbeHistory::<10>::with_max_state_age(Duration::hours(2));
+        let history_2h = ProbeHistory::<10>::new().with_max_state_age(Duration::hours(2));
         let aligned_2h = history_2h.align_start_time(test_timestamp);
         let expected_2h = Utc.with_ymd_and_hms(2023, 6, 15, 14, 0, 0).unwrap(); // 14:00 (2-hour boundary from epoch)
         assert_eq!(aligned_2h, expected_2h);
 
         // 3-hour duration (10800s) should align to 3-hour boundaries from Unix epoch
-        let history_3h = ProbeHistory::<10>::with_max_state_age(Duration::hours(3));
+        let history_3h = ProbeHistory::<10>::new().with_max_state_age(Duration::hours(3));
         let aligned_3h = history_3h.align_start_time(test_timestamp);
         let expected_3h = Utc.with_ymd_and_hms(2023, 6, 15, 12, 0, 0).unwrap(); // 12:00 (3-hour boundary from epoch)
         assert_eq!(aligned_3h, expected_3h);
 
         // 10-minute duration (600s) should align to 10-minute boundaries from Unix epoch
-        let history_10m = ProbeHistory::<10>::with_max_state_age(Duration::minutes(10));
+        let history_10m = ProbeHistory::<10>::new().with_max_state_age(Duration::minutes(10));
         let aligned_10m = history_10m.align_start_time(test_timestamp);
         let expected_10m = Utc.with_ymd_and_hms(2023, 6, 15, 14, 30, 0).unwrap(); // 30 minutes (10-min boundary from epoch)
         assert_eq!(aligned_10m, expected_10m);
 
         // 45-minute duration (2700s) should align to 45-minute boundaries from Unix epoch
-        let history_45m = ProbeHistory::<10>::with_max_state_age(Duration::minutes(45));
+        let history_45m = ProbeHistory::<10>::new().with_max_state_age(Duration::minutes(45));
         let aligned_45m = history_45m.align_start_time(test_timestamp);
         let expected_45m = Utc.with_ymd_and_hms(2023, 6, 15, 14, 15, 0).unwrap(); // 15 minutes (45-min boundary from epoch)
         assert_eq!(aligned_45m, expected_45m);
@@ -654,7 +667,7 @@ mod tests {
     fn test_state_age_finalization() {
         use chrono::TimeZone;
 
-        let history = ProbeHistory::<10>::with_max_state_age(Duration::minutes(15));
+        let history = ProbeHistory::<10>::new().with_max_state_age(Duration::minutes(15));
 
         let base_time = Utc.with_ymd_and_hms(2023, 1, 1, 10, 0, 0).unwrap();
 
@@ -696,8 +709,10 @@ mod tests {
         let temp_path = temp_dir.path().join("snapshot.json");
 
         // Create history with some data
-        let history = ProbeHistory::<10>::with_snapshot_file(&temp_path).unwrap();
-        
+        let history = ProbeHistory::<10>::new()
+            .with_snapshot_file(&temp_path)
+            .unwrap();
+
         // Add some sample data
         let mut result1 = ProbeResult::new();
         result1.pass = true;
@@ -719,18 +734,23 @@ mod tests {
         assert!(snapshot_content.contains("Test message 2"));
 
         // Create a new history from the snapshot
-        let restored_history = ProbeHistory::<10>::with_snapshot_file(&temp_path).unwrap();
+        let restored_history = ProbeHistory::<10>::new()
+            .with_snapshot_file(&temp_path)
+            .unwrap();
 
         // Verify data was restored correctly
         assert_eq!(restored_history.total_samples(), history.total_samples());
-        assert_eq!(restored_history.healthy_samples(), history.healthy_samples());
+        assert_eq!(
+            restored_history.healthy_samples(),
+            history.healthy_samples()
+        );
         assert_eq!(restored_history.availability(), history.availability());
         assert_eq!(restored_history.len(), history.len());
 
         let original_buckets = history.get_state_buckets();
         let restored_buckets = restored_history.get_state_buckets();
         assert_eq!(original_buckets.len(), restored_buckets.len());
-        
+
         for (orig, rest) in original_buckets.iter().zip(restored_buckets.iter()) {
             assert_eq!(orig.state.pass, rest.state.pass);
             assert_eq!(orig.state.message, rest.state.message);
@@ -750,8 +770,10 @@ mod tests {
         let non_existent_path = temp_dir.path().join("non_existent.json");
 
         // Should create new history without error when file doesn't exist
-        let history = ProbeHistory::<10>::with_snapshot_file(&non_existent_path).unwrap();
-        
+        let history = ProbeHistory::<10>::new()
+            .with_snapshot_file(&non_existent_path)
+            .unwrap();
+
         assert_eq!(history.total_samples(), 0);
         assert_eq!(history.healthy_samples(), 0);
         assert_eq!(history.availability(), 100.0);
@@ -761,7 +783,7 @@ mod tests {
     #[test]
     fn test_default_constructor_no_snapshots() {
         let history: ProbeHistory<10> = ProbeHistory::default();
-        
+
         // Add some data
         let mut result = ProbeResult::new();
         result.pass = true;
@@ -777,11 +799,11 @@ mod tests {
     #[test]
     fn test_serde_duration_module() {
         use serde_json;
-        
+
         let duration = Duration::milliseconds(5000);
         let serialized = serde_json::to_string(&duration.num_milliseconds()).unwrap();
         assert_eq!(serialized, "5000");
-        
+
         let deserialized: i64 = serde_json::from_str(&serialized).unwrap();
         let restored_duration = Duration::milliseconds(deserialized);
         assert_eq!(restored_duration, duration);

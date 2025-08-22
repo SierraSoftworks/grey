@@ -29,7 +29,7 @@ async fn serve_static(path: web::Path<String>) -> Result<HttpResponse> {
         let mut response = HttpResponse::Ok();
 
         // Set appropriate content type
-        match file_path.split('.').last().unwrap_or("") {
+        match file_path.split('.').next_back().unwrap_or("") {
             "js" => response.insert_header(("content-type", "application/javascript")),
             "wasm" => response.insert_header(("content-type", "application/wasm")),
             "css" => response.insert_header(("content-type", "text/css")),
@@ -58,10 +58,6 @@ pub fn create_app<const N: usize>() -> App<
         .route(
             "/api/v1/probes/{probe}/history",
             web::get().to(api::get_history::<N>),
-        )
-        .route(
-            "/api/v1/user-interface",
-            web::get().to(api::get_ui_config::<N>),
         )
         .route("/api/v1/notices", web::get().to(api::get_notices::<N>))
         .route("/static/{filename:.*}", web::get().to(serve_static))

@@ -8,6 +8,7 @@
         // Targets
         "!Dns mapping",
         "!Http mapping",
+        "!Script mapping",
         "!Tcp mapping",
     ],
     "cSpell.words": [

@@ -7,6 +7,8 @@ use std::sync::atomic::AtomicBool;
 use clap::Parser;
 
 mod config;
+#[cfg(feature = "scripts")]
+mod deno;
 mod engine;
 mod history;
 #[macro_use]
@@ -36,6 +38,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ctrlc::set_handler(|| {
     //     CANCEL.store(true, std::sync::atomic::Ordering::Relaxed);
     // })?;
+
+    #[cfg(feature = "scripts")]
+    deno_runtime::deno_tls::rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("Failed to initialize crypto subsystem");
 
     let args = Args::parse();
 

@@ -18,7 +18,7 @@ probes:
     validators:
       net.ip: !Equals "127.0.0.1"
 ```
- 
+
 ## Inputs
 
 ### host <Badge text="required" type="danger" />

@@ -21,12 +21,7 @@ impl<const N: usize> Engine<N> {
         let probes: HashMap<String, Arc<ProbeRunner<N>>> = config
             .probes()
             .iter()
-            .map(|probe| {
-                (
-                    probe.name.clone(),
-                    Self::build_probe_runner(&config, probe),
-                )
-            })
+            .map(|probe| (probe.name.clone(), Self::build_probe_runner(&config, probe)))
             .collect();
 
         let history = HistoryProvider::new();
@@ -80,7 +75,10 @@ impl<const N: usize> Engine<N> {
     fn build_probe_runner(config: &ConfigProvider, probe: &Probe) -> Arc<ProbeRunner<N>> {
         if let Some(state_dir) = config.state_dir() {
             // If a state directory is configured, use it
-            match ProbeRunner::with_snapshot_history(probe.clone(), state_dir.join(format!("{}.dat", probe.name))) {
+            match ProbeRunner::with_snapshot_history(
+                probe.clone(),
+                state_dir.join(format!("{}.dat", probe.name)),
+            ) {
                 Ok(runner) => Arc::new(runner),
                 Err(e) => {
                     warn!("Failed to create probe runner with snapshot history for '{}': {}. Using default state (no history).", probe.name, e);
@@ -101,7 +99,7 @@ impl<const N: usize> Engine<N> {
     }
 
     fn stop_all_probe_runners(&self) {
-        for probe in self.probes.read().unwrap().values().cloned() {
+        for probe in self.probes.read().unwrap().values() {
             probe.cancel();
         }
     }
@@ -132,12 +130,16 @@ impl<const N: usize> Engine<N> {
                             if old_probe != new_probe {
                                 // Probe configuration has changed
                                 info!(name: "config.reload.probe", { probe.name=name, action = "update" }, "Reloaded configuration for probe {}", name);
-                                probes.read().unwrap().get(*name).map(|p| p.update((*new_probe).clone()));
+                                if let Some(p) = probes.read().unwrap().get(*name) {
+                                    p.update((*new_probe).clone())
+                                }
                             }
                         } else {
                             // Probe has been removed
                             info!(name: "config.reload.probe", { probe.name=name, action = "remove" }, "Removed configuration for probe {}", name);
-                            probes.read().unwrap().get(*name).map(|p| p.cancel());
+                            if let Some(p) = probes.read().unwrap().get(*name) {
+                                p.cancel()
+                            }
                         }
                     }
 
@@ -150,10 +152,10 @@ impl<const N: usize> Engine<N> {
 
                             history.init(probe.name().as_str(), probe.history());
 
-                            probes.write().unwrap().insert(
-                                name.to_string(),
-                                probe.clone(),
-                            );
+                            probes
+                                .write()
+                                .unwrap()
+                                .insert(name.to_string(), probe.clone());
 
                             tokio::spawn(async move {
                                 if let Err(e) = probe.schedule().await {
