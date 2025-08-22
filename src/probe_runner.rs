@@ -2,6 +2,7 @@ use std::{
     sync::{atomic::AtomicBool, Arc, RwLock},
     time::Instant,
 };
+use chrono::TimeDelta;
 use tracing_batteries::prelude::{opentelemetry::trace::Status as OpenTelemetryStatus, *};
 
 use crate::{
@@ -34,7 +35,11 @@ impl<const N: usize> ProbeRunner<N> {
         config: Probe, 
         snapshot_path: P
     ) -> std::io::Result<Self> {
-        let history = ProbeHistory::with_snapshot_file(snapshot_path)?;
+        let history = ProbeHistory::new()
+            .with_max_state_age(TimeDelta::hours(1))
+            .with_snapshot_interval(TimeDelta::seconds(60))
+            .with_snapshot_file(snapshot_path)?;
+        
         Ok(Self {
             probe_name: Arc::new(config.name.clone()),
             config: Arc::new(RwLock::new(config)),
