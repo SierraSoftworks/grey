@@ -45,7 +45,7 @@ pub fn probe_list() -> Html {
                     <div class={format!("section service-group {}", service_health)}>
                         <div class="service-title">
                             <h2 class="service-name">{service_name}</h2>
-                            <span class="service-availability">{format!("{:.1}%", service_availability)}</span>
+                            <span class="service-availability">{format!("{:.3}%", service_availability)}</span>
                         </div>
                         {for probes.iter().map(|probe| {
                             html! {

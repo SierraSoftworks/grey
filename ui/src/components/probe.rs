@@ -45,7 +45,7 @@ pub fn probe(props: &ProbeProps) -> Html {
                         </div>
                     }
                 </div>
-                <div class="availability">{format!("{:.1}%", props.probe.availability)}</div>
+                <div class="availability">{format!("{:.3}%", props.probe.availability)}</div>
             </div>
             <div class="probe-config">
                 <span class="probe-target">{&props.probe.target}</span>
