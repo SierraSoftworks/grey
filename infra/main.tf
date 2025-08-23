@@ -20,7 +20,7 @@ variable "location" {
 variable "resource_group" {
   description = "The name of the resource group to deploy into."
   type        = string
-  default     = "app-roadmap"
+  default     = "app-grey"
 }
 
 variable "tags" {
