@@ -3,7 +3,7 @@ data "azuread_client_config" "current" {}
 variable "app-name" {
   description = "The name of the static web app to create."
   type        = string
-  default     = "roadmap"
+  default     = "grey"
 }
 
 variable "root-domain" {
