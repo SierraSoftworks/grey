@@ -32,9 +32,6 @@ pub struct ProbeHistory {
     pub start_time: chrono::DateTime<chrono::Utc>,
     #[serde(with = "crate::serializers::duration_ms")]
     pub latency: std::time::Duration,
-    /// Duration this state was active (for UI weighting)
-    #[serde(with = "humantime_serde")]
-    pub state_duration: std::time::Duration,
     pub attempts: u64,
     pub pass: bool,
     #[serde(default, skip_serializing_if = "String::is_empty")]

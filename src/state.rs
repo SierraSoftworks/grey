@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf, sync::{Arc, Mutex, RwLock}};
 
-use crate::{history::ProbeHistory, Config};
+use crate::{history::History, Config};
 
 #[derive(Clone)]
 pub struct State {
@@ -9,7 +9,7 @@ pub struct State {
 
     config: Arc<RwLock<Arc<Config>>>,
 
-    history: Arc<RwLock<HashMap<String, Arc<ProbeHistory<{crate::HISTORY_SIZE}>>>>>,
+    history: Arc<RwLock<HashMap<String, Arc<History>>>>,
 }
 
 impl State {
@@ -41,11 +41,11 @@ impl State {
         self.config.read().unwrap().clone()
     }
 
-    pub fn get_history(&self, probe_name: &str) -> Option<Arc<ProbeHistory<{crate::HISTORY_SIZE}>>> {
+    pub fn get_history(&self, probe_name: &str) -> Option<Arc<History>> {
         self.history.read().unwrap().get(probe_name).cloned()
     }
 
-    pub fn with_default_history<N: ToString>(&self, probe_name: N, history: Arc<ProbeHistory<{crate::HISTORY_SIZE}>>) -> Arc<ProbeHistory<{crate::HISTORY_SIZE}>> {
+    pub fn with_default_history<N: ToString>(&self, probe_name: N, history: Arc<History>) -> Arc<History> {
         self.history.write().unwrap().entry(probe_name.to_string()).or_insert_with(|| history.clone()).clone()
     }
 }

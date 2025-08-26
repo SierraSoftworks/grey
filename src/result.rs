@@ -60,4 +60,13 @@ impl ValidationResult {
         self.message = Some(message.to_string());
         self
     }
+
+    pub fn with_max_message_length(mut self, max_length: usize) -> Self {
+        if let Some(msg) = &self.message {
+            if msg.len() > max_length {
+                self.message = Some(format!("{}...", &msg[..max_length - 3]));
+            }
+        }
+        self
+    }
 }

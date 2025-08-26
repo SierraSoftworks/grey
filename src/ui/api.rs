@@ -27,29 +27,17 @@ impl From<&crate::Probe> for grey_api::Probe {
 
 impl From<&crate::history::StateBucket> for grey_api::ProbeHistory {
     fn from(bucket: &crate::history::StateBucket) -> Self {
-        let state_duration = match bucket.end_time {
-            Some(end_time) => std::time::Duration::from_secs(
-                (end_time - bucket.start_time).num_seconds().max(1) as u64,
-            ),
-            None => std::time::Duration::from_secs(
-                (chrono::Utc::now() - bucket.start_time)
-                    .num_seconds()
-                    .max(1) as u64,
-            ),
-        };
-
         grey_api::ProbeHistory {
             start_time: bucket.start_time,
             latency: std::time::Duration::from_millis(
                 bucket.total_latency.num_milliseconds() as u64
                 / bucket.total_samples
             ),
-            state_duration,
             attempts: bucket.total_attempts,
-            pass: bucket.state.pass,
-            message: bucket.state.message.clone(),
+            pass: bucket.exemplar.pass,
+            message: bucket.exemplar.message.clone(),
             validations: bucket
-                .state
+                .exemplar
                 .validations
                 .iter()
                 .map(|(k, v)| {
