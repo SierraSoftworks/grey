@@ -14,14 +14,14 @@ use crate::{
 
 const NO_PARENT: Option<tracing::Id> = None;
 
-pub struct ProbeRunner<const N: usize> {
+pub struct ProbeRunner {
     probe_name: Arc<String>,
     config: Arc<RwLock<Probe>>,
-    history: Arc<ProbeHistory<N>>,
+    history: Arc<ProbeHistory<{crate::HISTORY_SIZE}>>,
     cancel: Arc<AtomicBool>,
 }
 
-impl<const N: usize> ProbeRunner<N> {
+impl ProbeRunner {
     pub fn new(config: Probe) -> Self {
         Self {
             probe_name: Arc::new(config.name.clone()),
@@ -52,7 +52,7 @@ impl<const N: usize> ProbeRunner<N> {
         self.probe_name.clone()
     }
 
-    pub fn history(&self) -> Arc<ProbeHistory<N>> {
+    pub fn history(&self) -> Arc<ProbeHistory<{crate::HISTORY_SIZE}>> {
         self.history.clone()
     }
 

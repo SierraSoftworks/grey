@@ -80,15 +80,10 @@ impl From<&crate::config::UiConfig> for grey_api::UiConfig {
     }
 }
 
-pub async fn get_ui_config<const N: usize>(data: web::Data<AppState<N>>) -> Result<HttpResponse> {
-    let api_config: grey_api::UiConfig = (&data.config.ui()).into();
-    Ok(HttpResponse::Ok().json(api_config))
-}
-
-pub async fn get_notices<const N: usize>(data: web::Data<AppState<N>>) -> Result<HttpResponse> {
+pub async fn get_notices(data: web::Data<AppState>) -> Result<HttpResponse> {
     let api_notices: Vec<grey_api::UiNotice> = data
-        .config
-        .ui()
+        .state.get_config()
+        .ui
         .notices
         .iter()
         .map(|notice| notice.clone().into())
@@ -96,30 +91,30 @@ pub async fn get_notices<const N: usize>(data: web::Data<AppState<N>>) -> Result
     Ok(HttpResponse::Ok().json(api_notices))
 }
 
-pub async fn get_probes<const N: usize>(data: web::Data<AppState<N>>) -> Result<HttpResponse> {
+pub async fn get_probes(data: web::Data<AppState>) -> Result<HttpResponse> {
     let mut api_probes: Vec<grey_api::Probe> = data
-        .config
-        .probes()
+        .state.get_config()
+        .probes
         .iter()
         .map(|probe| probe.into())
         .collect();
 
     for probe in api_probes.iter_mut() {
-        probe.availability = data.history.get(&probe.name).map(|h| h.availability()).unwrap_or(100.0);
+        probe.availability = data.state.get_history(&probe.name).map(|h| h.availability()).unwrap_or(100.0);
     }
 
     Ok(HttpResponse::Ok().json(api_probes))
 }
 
-pub async fn get_history<const N: usize>(
+pub async fn get_history(
     probe: web::Path<String>,
-    data: web::Data<AppState<N>>,
+    data: web::Data<AppState>,
 ) -> Result<HttpResponse> {
     let probe_name = probe.into_inner();
 
     let history = data
-        .history
-        .get(probe_name)
+        .state
+        .get_history(&probe_name)
         .ok_or_else(|| actix_web::error::ErrorNotFound("Probe not found"))?;
 
     let api_history: Vec<grey_api::ProbeHistory> = history

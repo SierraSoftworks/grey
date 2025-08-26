@@ -10,36 +10,6 @@ use tokio::time::Instant;
 
 use crate::result::{ProbeResult, ValidationResult};
 
-#[derive(Clone)]
-pub struct HistoryProvider<const N: usize = 10> {
-    probe_histories: Arc<RwLock<HashMap<String, Arc<ProbeHistory<N>>>>>,
-}
-
-impl<const N: usize> HistoryProvider<N> {
-    /// Create a new history provider
-    pub fn new() -> Self {
-        Self {
-            probe_histories: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
-    pub fn get<K: ToString>(&self, probe: K) -> Option<Arc<ProbeHistory<N>>> {
-        self.probe_histories
-            .read()
-            .unwrap()
-            .get(&probe.to_string())
-            .cloned()
-    }
-
-    pub fn init<K: ToString>(&self, probe: K, history: Arc<ProbeHistory<N>>) {
-        self.probe_histories
-            .write()
-            .unwrap()
-            .entry(probe.to_string())
-            .or_insert(history);
-    }
-}
-
 /// Represents a state that the probe can be in
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProbeState {
