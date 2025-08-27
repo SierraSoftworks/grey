@@ -17,8 +17,10 @@ mod probe_runner;
 mod result;
 mod sample;
 mod serializers;
+mod state;
 mod targets;
 mod ui;
+mod utils;
 mod validators;
 
 pub use config::Config;
@@ -28,6 +30,8 @@ pub use probe::Probe;
 pub use sample::{Sample, SampleValue};
 pub use targets::Target;
 pub use validators::Validator;
+
+pub const HISTORY_SIZE: usize = 24;
 
 static CANCEL: AtomicBool = AtomicBool::new(false);
 
@@ -45,11 +49,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "https://analytics.sierrasoftworks.com",
         ));
 
-    let config = config::ConfigProvider::from_path(&args.config).await?;
+    let state = state::State::new(&args.config).await?;
 
-    println!("Starting Grey with {} probes...", config.probes().len());
+    println!("Starting Grey with {} probes...", state.get_config().probes.len());
 
-    let engine = Engine::<48>::new(config);
+    let engine = Engine::new(state);
     engine.run(&CANCEL).await?;
 
     telemetry.shutdown();

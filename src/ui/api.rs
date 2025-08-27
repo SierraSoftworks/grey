@@ -27,29 +27,17 @@ impl From<&crate::Probe> for grey_api::Probe {
 
 impl From<&crate::history::StateBucket> for grey_api::ProbeHistory {
     fn from(bucket: &crate::history::StateBucket) -> Self {
-        let state_duration = match bucket.end_time {
-            Some(end_time) => std::time::Duration::from_secs(
-                (end_time - bucket.start_time).num_seconds().max(1) as u64,
-            ),
-            None => std::time::Duration::from_secs(
-                (chrono::Utc::now() - bucket.start_time)
-                    .num_seconds()
-                    .max(1) as u64,
-            ),
-        };
-
         grey_api::ProbeHistory {
             start_time: bucket.start_time,
             latency: std::time::Duration::from_millis(
                 bucket.total_latency.num_milliseconds() as u64
                 / bucket.total_samples
             ),
-            state_duration,
             attempts: bucket.total_attempts,
-            pass: bucket.state.pass,
-            message: bucket.state.message.clone(),
+            pass: bucket.exemplar.pass,
+            message: bucket.exemplar.message.clone(),
             validations: bucket
-                .state
+                .exemplar
                 .validations
                 .iter()
                 .map(|(k, v)| {
@@ -80,15 +68,10 @@ impl From<&crate::config::UiConfig> for grey_api::UiConfig {
     }
 }
 
-pub async fn get_ui_config<const N: usize>(data: web::Data<AppState<N>>) -> Result<HttpResponse> {
-    let api_config: grey_api::UiConfig = (&data.config.ui()).into();
-    Ok(HttpResponse::Ok().json(api_config))
-}
-
-pub async fn get_notices<const N: usize>(data: web::Data<AppState<N>>) -> Result<HttpResponse> {
+pub async fn get_notices(data: web::Data<AppState>) -> Result<HttpResponse> {
     let api_notices: Vec<grey_api::UiNotice> = data
-        .config
-        .ui()
+        .state.get_config()
+        .ui
         .notices
         .iter()
         .map(|notice| notice.clone().into())
@@ -96,30 +79,30 @@ pub async fn get_notices<const N: usize>(data: web::Data<AppState<N>>) -> Result
     Ok(HttpResponse::Ok().json(api_notices))
 }
 
-pub async fn get_probes<const N: usize>(data: web::Data<AppState<N>>) -> Result<HttpResponse> {
+pub async fn get_probes(data: web::Data<AppState>) -> Result<HttpResponse> {
     let mut api_probes: Vec<grey_api::Probe> = data
-        .config
-        .probes()
+        .state.get_config()
+        .probes
         .iter()
         .map(|probe| probe.into())
         .collect();
 
     for probe in api_probes.iter_mut() {
-        probe.availability = data.history.get(&probe.name).map(|h| h.availability()).unwrap_or(100.0);
+        probe.availability = data.state.get_history(&probe.name).map(|h| h.availability()).unwrap_or(100.0);
     }
 
     Ok(HttpResponse::Ok().json(api_probes))
 }
 
-pub async fn get_history<const N: usize>(
+pub async fn get_history(
     probe: web::Path<String>,
-    data: web::Data<AppState<N>>,
+    data: web::Data<AppState>,
 ) -> Result<HttpResponse> {
     let probe_name = probe.into_inner();
 
     let history = data
-        .history
-        .get(probe_name)
+        .state
+        .get_history(&probe_name)
         .ok_or_else(|| actix_web::error::ErrorNotFound("Probe not found"))?;
 
     let api_history: Vec<grey_api::ProbeHistory> = history

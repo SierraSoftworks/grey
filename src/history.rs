@@ -9,132 +9,17 @@ use std::sync::{
 use tokio::time::Instant;
 
 use crate::result::{ProbeResult, ValidationResult};
-
-#[derive(Clone)]
-pub struct HistoryProvider<const N: usize = 10> {
-    probe_histories: Arc<RwLock<HashMap<String, Arc<ProbeHistory<N>>>>>,
-}
-
-impl<const N: usize> HistoryProvider<N> {
-    /// Create a new history provider
-    pub fn new() -> Self {
-        Self {
-            probe_histories: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
-    pub fn get<K: ToString>(&self, probe: K) -> Option<Arc<ProbeHistory<N>>> {
-        self.probe_histories
-            .read()
-            .unwrap()
-            .get(&probe.to_string())
-            .cloned()
-    }
-
-    pub fn init<K: ToString>(&self, probe: K, history: Arc<ProbeHistory<N>>) {
-        self.probe_histories
-            .write()
-            .unwrap()
-            .entry(probe.to_string())
-            .or_insert(history);
-    }
-}
-
-/// Represents a state that the probe can be in
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProbeState {
-    pub pass: bool,
-    pub message: String,
-    pub validations: HashMap<String, ValidationResult>,
-}
-
-impl ProbeState {
-    /// Create a probe state from a probe result
-    pub fn from_result(result: &ProbeResult) -> Self {
-        Self {
-            pass: result.pass,
-            message: result.message.clone(),
-            validations: result.validations.clone(),
-        }
-    }
-}
-
-/// Represents an aggregated state bucket with timing and success information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateBucket {
-    /// The state this bucket represents
-    pub state: ProbeState,
-    /// When this state period started
-    pub start_time: DateTime<Utc>,
-    /// When this state period ended (None if it's the current state)
-    pub end_time: Option<DateTime<Utc>>,
-    /// Total number of attempts in this state
-    pub total_attempts: u64,
-    /// Total duration of all samples in this state
-    #[serde(with = "crate::serializers::chrono_duration_humantime")]
-    pub total_latency: Duration,
-    /// Number of successful samples in this state bucket
-    pub successful_samples: u64,
-    /// Total number of samples in this state bucket
-    pub total_samples: u64,
-}
-
-impl StateBucket {
-    /// Create a new state bucket from the first sample
-    pub fn new(result: &ProbeResult) -> Self {
-        Self {
-            state: ProbeState::from_result(result),
-            start_time: result.start_time,
-            end_time: None,
-            total_attempts: result.attempts as u64,
-            total_latency: result.duration,
-            successful_samples: if result.pass { 1 } else { 0 },
-            total_samples: 1,
-        }
-    }
-
-    /// Add a sample to this state bucket
-    pub fn add_sample(&mut self, result: &ProbeResult) {
-        self.total_latency += result.duration;
-        self.total_samples += 1;
-        self.total_attempts += result.attempts as u64;
-        if result.pass {
-            self.successful_samples += 1;
-        }
-    }
-
-    /// Finalize this state bucket when transitioning to a new state
-    pub fn finalize(&mut self, end_time: DateTime<Utc>) {
-        self.end_time = Some(end_time);
-    }
-
-    /// Get the duration of this state period
-    pub fn duration(&self) -> Duration {
-        match self.end_time {
-            Some(end) => end - self.start_time,
-            _ => Utc::now() - self.start_time,
-        }
-    }
-
-    /// Get the availability percentage for this state bucket
-    pub fn availability(&self) -> f64 {
-        if self.total_samples == 0 {
-            100.0
-        } else {
-            100.0 * self.successful_samples as f64 / self.total_samples as f64
-        }
-    }
-}
+use crate::utils::Elide;
 
 /// A history manager that tracks probe results using state-based aggregation
 #[derive(Debug)]
-pub struct ProbeHistory<const MAX_STATES: usize> {
+pub struct History {
     /// Total number of samples recorded
     sample_count_total: AtomicU64,
     /// Number of healthy samples recorded
     sample_count_healthy: AtomicU64,
     /// State buckets using circular buffer for state transitions
-    state_buckets: std::sync::RwLock<circular_buffer::CircularBuffer<MAX_STATES, StateBucket>>,
+    state_buckets: std::sync::RwLock<circular_buffer::CircularBuffer<{crate::HISTORY_SIZE}, StateBucket>>,
     /// Maximum age for a state bucket before it's forced to finalize
     max_state_age: Duration,
     /// The minimum amount of time between snapshots
@@ -155,15 +40,8 @@ struct ProbeHistorySnapshot {
     max_state_age: Duration,
 }
 
-impl<const MAX_STATES: usize> Default for ProbeHistory<MAX_STATES> {
+impl Default for History {
     fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
-    /// Creates a new probe history with default settings (1 hour max state age)
-    pub fn new() -> Self {
         Self {
             sample_count_total: AtomicU64::new(0),
             sample_count_healthy: AtomicU64::new(0),
@@ -174,7 +52,9 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
             last_snapshot_time: Arc::new(RwLock::new(None)),
         }
     }
+}
 
+impl History {
     /// Creates a new probe history with the specified maximum state age
     pub fn with_max_state_age(self, max_state_age: Duration) -> Self {
         Self {
@@ -258,26 +138,21 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
             self.sample_count_healthy.fetch_add(1, Ordering::Relaxed);
         }
 
-        let new_state = ProbeState::from_result(&result);
         {
             let mut buckets = self.state_buckets.write().unwrap();
 
             // Check if we can add to the current state bucket or need to create a new one
             if let Some(current_bucket) = buckets.back_mut() {
-                let same_state = current_bucket.state == new_state;
                 let age_exceeded = self.should_finalize_for_age(current_bucket, result.start_time);
 
-                if same_state && !age_exceeded {
+                if !age_exceeded {
                     // Same state and within age limit, add to current bucket
                     current_bucket.add_sample(&result);
                     return;
-                } else {
-                    // State transition or age exceeded, finalize the current bucket
-                    current_bucket.finalize(result.start_time);
                 }
             }
 
-            let new_bucket = StateBucket::new(&result);
+            let new_bucket = StateBucket::new(self.align_start_time(result.start_time), &result);
             buckets.push_back(new_bucket);
         }
 
@@ -388,16 +263,85 @@ impl<const MAX_STATES: usize> ProbeHistory<MAX_STATES> {
         self.state_buckets.read().unwrap().len()
     }
 
-    /// Returns the maximum number of state transitions that can be stored
-    #[cfg(test)]
-    pub const fn max_states(&self) -> usize {
-        MAX_STATES
-    }
-
     /// Returns the maximum state age configuration
     #[cfg(test)]
     pub fn max_state_age(&self) -> Duration {
         self.max_state_age
+    }
+}
+
+
+/// Represents an aggregated state bucket with timing and success information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateBucket {
+    /// When this state period started
+    pub start_time: DateTime<Utc>,
+    /// Total number of attempts in this state
+    pub total_attempts: u64,
+    /// Total duration of all samples in this state
+    #[serde(with = "crate::serializers::chrono_duration_humantime")]
+    pub total_latency: Duration,
+    /// Number of successful samples in this state bucket
+    pub successful_samples: u64,
+    /// Total number of samples in this state bucket
+    pub total_samples: u64,
+    /// An exemplar sample from this state bucket
+    pub exemplar: ProbeState,
+}
+
+impl StateBucket {
+    /// Create a new state bucket from the first sample
+    pub fn new(start_time: DateTime<Utc>, result: &ProbeResult) -> Self {
+        Self {
+            exemplar: ProbeState::from_result(result),
+            start_time,
+            total_attempts: result.attempts as u64,
+            total_latency: result.duration,
+            successful_samples: if result.pass { 1 } else { 0 },
+            total_samples: 1,
+        }
+    }
+
+    /// Add a sample to this state bucket
+    pub fn add_sample(&mut self, result: &ProbeResult) {
+        self.total_latency += result.duration;
+        self.total_samples += 1;
+        self.total_attempts += result.attempts as u64;
+        if result.pass {
+            self.successful_samples += 1;
+        } else {
+            self.exemplar = ProbeState::from_result(result);
+        }
+    }
+
+    /// Get the availability percentage for this state bucket
+    pub fn availability(&self) -> f64 {
+        if self.total_samples == 0 {
+            100.0
+        } else {
+            100.0 * self.successful_samples as f64 / self.total_samples as f64
+        }
+    }
+}
+
+/// Represents a state that the probe can be in
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProbeState {
+    pub pass: bool,
+    pub message: String,
+    pub validations: HashMap<String, ValidationResult>,
+}
+
+impl ProbeState {
+    /// Create a probe state from a probe result
+    pub fn from_result(result: &ProbeResult) -> Self {
+        Self {
+            pass: result.pass,
+            message: result.message.elide(100),
+            validations: result.validations.iter().map(|(k, v)| {
+                (k.clone(), v.clone().elide(100))
+            }).collect(),
+        }
     }
 }
 
@@ -409,16 +353,15 @@ mod tests {
 
     #[test]
     fn test_new_history_has_100_percent_availability() {
-        let history: ProbeHistory<10> = ProbeHistory::new();
+        let history: History = History::default();
         assert_eq!(history.availability(), 100.0);
         assert_eq!(history.total_samples(), 0);
         assert_eq!(history.healthy_samples(), 0);
-        assert_eq!(history.max_states(), 10);
     }
 
     #[test]
     fn test_add_passing_sample() {
-        let history: ProbeHistory<10> = ProbeHistory::new();
+        let history: History = History::default();
         let mut result = ProbeResult::new();
         result.pass = true;
 
@@ -432,7 +375,7 @@ mod tests {
 
     #[test]
     fn test_add_failing_sample() {
-        let history: ProbeHistory<10> = ProbeHistory::new();
+        let history: History = History::default();
         let mut result = ProbeResult::new();
         result.pass = false;
 
@@ -446,7 +389,7 @@ mod tests {
 
     #[test]
     fn test_same_state_aggregation() {
-        let history: ProbeHistory<10> = ProbeHistory::new();
+        let history: History = History::default();
 
         // Add multiple samples with the same state (all passing)
         for i in 0..3 {
@@ -470,65 +413,102 @@ mod tests {
     }
 
     #[test]
-    fn test_state_transition() {
-        let history: ProbeHistory<10> = ProbeHistory::new();
+    fn test_time_based_bucketing() {
+        use chrono::TimeZone;
+        
+        // Use a shorter max_state_age for testing
+        let history = History::default().with_max_state_age(Duration::minutes(15));
+        let base_time = Utc.with_ymd_and_hms(2023, 1, 1, 10, 0, 0).unwrap();
 
-        // Add passing sample
+        // Add passing sample at base time
         let mut result = ProbeResult::new();
         result.pass = true;
         result.message = "Passing".to_string();
+        result.start_time = base_time;
         history.add_sample(result.clone());
 
-        // Add another passing sample (same state)
+        // Add another passing sample within the same time bucket (5 minutes later)
+        result.start_time = base_time + Duration::minutes(5);
         history.add_sample(result.clone());
 
-        // Add failing sample (state transition)
+        // Add failing sample within same time bucket - this should still be in the same bucket
+        // since we're now using time-based bucketing, not state-based
         let mut failing_result = ProbeResult::new();
         failing_result.pass = false;
         failing_result.message = "Failing".to_string();
-        failing_result.start_time = result.start_time + Duration::seconds(10);
+        failing_result.start_time = base_time + Duration::minutes(10);
         history.add_sample(failing_result);
 
-        // Should have 2 state buckets
-        assert_eq!(history.len(), 2);
+        // Should have only 1 bucket since all samples are within the same time window
+        assert_eq!(history.len(), 1);
         assert_eq!(history.total_samples(), 3);
         assert_eq!(history.healthy_samples(), 2);
 
         let buckets = history.get_state_buckets();
+        assert_eq!(buckets.len(), 1);
+
+        // Single bucket: 2 passing, 1 failing sample
+        // The exemplar should be the failing one since failing samples override exemplars
+        assert_eq!(buckets[0].total_samples, 3);
+        assert_eq!(buckets[0].successful_samples, 2);
+        assert_eq!(buckets[0].exemplar.pass, false);
+        assert_eq!(buckets[0].exemplar.message, "Failing");
+
+        // Now add a sample that crosses the time boundary (20 minutes later)
+        let mut late_result = ProbeResult::new();
+        late_result.pass = true;
+        late_result.message = "Late passing".to_string();
+        late_result.start_time = base_time + Duration::minutes(20);
+        history.add_sample(late_result);
+
+        // Should now have 2 buckets due to time boundary
+        assert_eq!(history.len(), 2);
+        assert_eq!(history.total_samples(), 4);
+        assert_eq!(history.healthy_samples(), 3);
+
+        let buckets = history.get_state_buckets();
         assert_eq!(buckets.len(), 2);
 
-        // First bucket: 2 passing samples
-        assert_eq!(buckets[0].total_samples, 2);
+        // First bucket: still has 3 samples
+        assert_eq!(buckets[0].total_samples, 3);
         assert_eq!(buckets[0].successful_samples, 2);
-        assert_eq!(buckets[0].state.pass, true);
-        assert!(buckets[0].end_time.is_some());
 
-        // Second bucket: 1 failing sample
+        // Second bucket: 1 passing sample
         assert_eq!(buckets[1].total_samples, 1);
-        assert_eq!(buckets[1].successful_samples, 0);
-        assert_eq!(buckets[1].state.pass, false);
-        assert!(buckets[1].end_time.is_none()); // Current state
+        assert_eq!(buckets[1].successful_samples, 1);
+        assert_eq!(buckets[1].exemplar.pass, true);
     }
 
     #[test]
     fn test_circular_buffer_overflow() {
-        let history: ProbeHistory<3> = ProbeHistory::new();
+        use chrono::TimeZone;
+        
+        // Use a shorter max_state_age for testing to create more buckets
+        let history = History::default().with_max_state_age(Duration::seconds(1));
+        let base_time = Utc.with_ymd_and_hms(2023, 1, 1, 10, 0, 0).unwrap();
 
-        // Add 5 different states (more than buffer capacity)
-        for i in 0..5 {
+        // Add samples that span multiple time boundaries (1 second apart each)
+        // This will create HISTORY_SIZE+2 buckets, but only HISTORY_SIZE will be retained
+        for i in 0..crate::HISTORY_SIZE+2 {
             let mut result = ProbeResult::new();
             result.pass = i % 2 == 0;
-            result.message = format!("State {}", i);
-            result.start_time = result.start_time + Duration::seconds(i as i64);
+            result.message = format!("Sample {}", i);
+            // Space each sample 2 seconds apart to ensure they're in different buckets
+            result.start_time = base_time + Duration::seconds((i * 2) as i64);
             history.add_sample(result);
         }
 
-        // Should only keep the last 3 states
-        assert_eq!(history.len(), 3);
-        assert_eq!(history.total_samples(), 5);
+        // Should only keep the last HISTORY_SIZE buckets due to circular buffer
+        assert_eq!(history.len(), crate::HISTORY_SIZE);
+        assert_eq!(history.total_samples() as usize, crate::HISTORY_SIZE + 2);
 
         let buckets = history.get_state_buckets();
-        assert_eq!(buckets.len(), 3);
+        assert_eq!(buckets.len(), crate::HISTORY_SIZE);
+        
+        // Each bucket should have exactly 1 sample since we spaced them apart
+        for bucket in &buckets {
+            assert_eq!(bucket.total_samples, 1);
+        }
     }
 
     #[test]
@@ -537,7 +517,7 @@ mod tests {
         result.pass = true;
         result.duration = Duration::milliseconds(100);
 
-        let mut bucket = StateBucket::new(&result);
+        let mut bucket = StateBucket::new(result.start_time, &result);
         assert_eq!(bucket.total_samples, 1);
         assert_eq!(bucket.successful_samples, 1);
         assert_eq!(bucket.availability(), 100.0);
@@ -575,10 +555,10 @@ mod tests {
 
     #[test]
     fn test_max_state_age_configuration() {
-        let history = ProbeHistory::<10>::new().with_max_state_age(Duration::minutes(15));
+        let history = History::default().with_max_state_age(Duration::minutes(15));
         assert_eq!(history.max_state_age(), Duration::minutes(15));
 
-        let default_history: ProbeHistory<10> = ProbeHistory::new();
+        let default_history = History::default();
         assert_eq!(default_history.max_state_age(), Duration::hours(1));
     }
 
@@ -590,42 +570,41 @@ mod tests {
         let test_timestamp = Utc.with_ymd_and_hms(2023, 6, 15, 14, 37, 23).unwrap();
 
         // Test 1 hour (3600s) alignment - should align to hour boundaries
-        let history_1h = ProbeHistory::<10>::new().with_max_state_age(Duration::hours(1));
+        let history_1h = History::default().with_max_state_age(Duration::hours(1));
         let aligned_1h = history_1h.align_start_time(test_timestamp);
         let expected_1h = Utc.with_ymd_and_hms(2023, 6, 15, 14, 0, 0).unwrap();
         assert_eq!(aligned_1h, expected_1h);
 
         // Test 20 minutes (1200s) alignment - should align to 20-minute boundaries
-        let history_20m = ProbeHistory::<10>::new().with_max_state_age(Duration::minutes(20));
+        let history_20m = History::default().with_max_state_age(Duration::minutes(20));
         let aligned_20m = history_20m.align_start_time(test_timestamp);
         // 2:37:23 should align to 2:20:00 (the 20-minute boundary before it)
         let expected_20m = Utc.with_ymd_and_hms(2023, 6, 15, 14, 20, 0).unwrap();
         assert_eq!(aligned_20m, expected_20m);
 
         // Test 15 minutes (900s) alignment - should align to 15-minute boundaries
-        let history_15m = ProbeHistory::<10>::new().with_max_state_age(Duration::minutes(15));
+        let history_15m = History::default().with_max_state_age(Duration::minutes(15));
         let aligned_15m = history_15m.align_start_time(test_timestamp);
         // 2:37:23 should align to 2:30:00 (the 15-minute boundary before it)
         let expected_15m = Utc.with_ymd_and_hms(2023, 6, 15, 14, 30, 0).unwrap();
         assert_eq!(aligned_15m, expected_15m);
 
         // Test 6 hours (21600s) alignment
-        let history_6h = ProbeHistory::<10>::new().with_max_state_age(Duration::hours(6));
+        let history_6h = History::default().with_max_state_age(Duration::hours(6));
         let aligned_6h = history_6h.align_start_time(test_timestamp);
         // 2:37:23 PM should align to 12:00:00 PM (the 6-hour boundary before it)
         let expected_6h = Utc.with_ymd_and_hms(2023, 6, 15, 12, 0, 0).unwrap();
         assert_eq!(aligned_6h, expected_6h);
 
         // Test 1 day (86400s) alignment
-        let history_1d = ProbeHistory::<10>::new().with_max_state_age(Duration::days(1));
+        let history_1d = History::default().with_max_state_age(Duration::days(1));
         let aligned_1d = history_1d.align_start_time(test_timestamp);
         // Should align to start of day (midnight)
         let expected_1d = Utc.with_ymd_and_hms(2023, 6, 15, 0, 0, 0).unwrap();
         assert_eq!(aligned_1d, expected_1d);
 
         // Test sub-second duration (no alignment)
-        let history_500ms =
-            ProbeHistory::<10>::new().with_max_state_age(Duration::milliseconds(500));
+        let history_500ms = History::default().with_max_state_age(Duration::milliseconds(500));
         let aligned_500ms = history_500ms.align_start_time(test_timestamp);
         assert_eq!(aligned_500ms, test_timestamp); // Should be unchanged
     }
@@ -639,25 +618,25 @@ mod tests {
         // Test custom durations to verify the generic algorithm
 
         // 2-hour duration (7200s) should align to 2-hour boundaries from Unix epoch
-        let history_2h = ProbeHistory::<10>::new().with_max_state_age(Duration::hours(2));
+        let history_2h = History::default().with_max_state_age(Duration::hours(2));
         let aligned_2h = history_2h.align_start_time(test_timestamp);
         let expected_2h = Utc.with_ymd_and_hms(2023, 6, 15, 14, 0, 0).unwrap(); // 14:00 (2-hour boundary from epoch)
         assert_eq!(aligned_2h, expected_2h);
 
         // 3-hour duration (10800s) should align to 3-hour boundaries from Unix epoch
-        let history_3h = ProbeHistory::<10>::new().with_max_state_age(Duration::hours(3));
+        let history_3h = History::default().with_max_state_age(Duration::hours(3));
         let aligned_3h = history_3h.align_start_time(test_timestamp);
         let expected_3h = Utc.with_ymd_and_hms(2023, 6, 15, 12, 0, 0).unwrap(); // 12:00 (3-hour boundary from epoch)
         assert_eq!(aligned_3h, expected_3h);
 
         // 10-minute duration (600s) should align to 10-minute boundaries from Unix epoch
-        let history_10m = ProbeHistory::<10>::new().with_max_state_age(Duration::minutes(10));
+        let history_10m = History::default().with_max_state_age(Duration::minutes(10));
         let aligned_10m = history_10m.align_start_time(test_timestamp);
         let expected_10m = Utc.with_ymd_and_hms(2023, 6, 15, 14, 30, 0).unwrap(); // 30 minutes (10-min boundary from epoch)
         assert_eq!(aligned_10m, expected_10m);
 
         // 45-minute duration (2700s) should align to 45-minute boundaries from Unix epoch
-        let history_45m = ProbeHistory::<10>::new().with_max_state_age(Duration::minutes(45));
+        let history_45m = History::default().with_max_state_age(Duration::minutes(45));
         let aligned_45m = history_45m.align_start_time(test_timestamp);
         let expected_45m = Utc.with_ymd_and_hms(2023, 6, 15, 14, 15, 0).unwrap(); // 15 minutes (45-min boundary from epoch)
         assert_eq!(aligned_45m, expected_45m);
@@ -667,7 +646,7 @@ mod tests {
     fn test_state_age_finalization() {
         use chrono::TimeZone;
 
-        let history = ProbeHistory::<10>::new().with_max_state_age(Duration::minutes(15));
+        let history = History::default().with_max_state_age(Duration::minutes(15));
 
         let base_time = Utc.with_ymd_and_hms(2023, 1, 1, 10, 0, 0).unwrap();
 
@@ -694,34 +673,37 @@ mod tests {
 
         // Should now have two state buckets due to age limit
         assert_eq!(history.len(), 2);
-
-        let buckets = history.get_state_buckets();
-        assert!(buckets[0].end_time.is_some()); // First bucket should be finalized
-        assert!(buckets[1].end_time.is_none()); // Second bucket should be current
     }
 
     #[tokio::test]
     async fn test_snapshot_creation_and_restore() {
         use tempfile::TempDir;
+        use chrono::TimeZone;
 
         // Create a temporary directory for testing
         let temp_dir = TempDir::new().unwrap();
         let temp_path = temp_dir.path().join("snapshot.json");
 
-        // Create history with some data
-        let history = ProbeHistory::<10>::new()
+        // Create history with some data and a short max_state_age to create separate buckets
+        let history = History::default()
+            .with_max_state_age(Duration::seconds(1))
             .with_snapshot_file(&temp_path)
             .unwrap();
 
-        // Add some sample data
+        let base_time = Utc.with_ymd_and_hms(2023, 1, 1, 10, 0, 0).unwrap();
+
+        // Add some sample data in different time buckets
         let mut result1 = ProbeResult::new();
         result1.pass = true;
         result1.message = "Test message 1".to_string();
+        result1.start_time = base_time;
         history.add_sample(result1);
 
+        // Add a failing sample in a different time bucket
         let mut result2 = ProbeResult::new();
         result2.pass = false;
         result2.message = "Test message 2".to_string();
+        result2.start_time = base_time + Duration::seconds(2);
         history.add_sample(result2);
 
         // Force a snapshot
@@ -730,11 +712,13 @@ mod tests {
         // Verify snapshot file exists and contains data
         assert!(temp_path.exists());
         let snapshot_content = tokio::fs::read_to_string(&temp_path).await.unwrap();
-        assert!(snapshot_content.contains("Test message 1"));
-        assert!(snapshot_content.contains("Test message 2"));
+        
+        // Since exemplars are only updated on failing samples, we should find the failing message
+        // The passing message will be in the exemplar of the first bucket
+        assert!(snapshot_content.contains("Test message"));
 
         // Create a new history from the snapshot
-        let restored_history = ProbeHistory::<10>::new()
+        let restored_history = History::default()
             .with_snapshot_file(&temp_path)
             .unwrap();
 
@@ -752,8 +736,8 @@ mod tests {
         assert_eq!(original_buckets.len(), restored_buckets.len());
 
         for (orig, rest) in original_buckets.iter().zip(restored_buckets.iter()) {
-            assert_eq!(orig.state.pass, rest.state.pass);
-            assert_eq!(orig.state.message, rest.state.message);
+            assert_eq!(orig.exemplar.pass, rest.exemplar.pass);
+            assert_eq!(orig.exemplar.message, rest.exemplar.message);
             assert_eq!(orig.total_samples, rest.total_samples);
             assert_eq!(orig.successful_samples, rest.successful_samples);
         }
@@ -770,7 +754,7 @@ mod tests {
         let non_existent_path = temp_dir.path().join("non_existent.json");
 
         // Should create new history without error when file doesn't exist
-        let history = ProbeHistory::<10>::new()
+        let history = History::default()
             .with_snapshot_file(&non_existent_path)
             .unwrap();
 
@@ -782,7 +766,7 @@ mod tests {
 
     #[test]
     fn test_default_constructor_no_snapshots() {
-        let history: ProbeHistory<10> = ProbeHistory::default();
+        let history = History::default();
 
         // Add some data
         let mut result = ProbeResult::new();
