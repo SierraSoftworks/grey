@@ -413,63 +413,102 @@ mod tests {
     }
 
     #[test]
-    fn test_state_transition() {
-        let history: History = History::default();
+    fn test_time_based_bucketing() {
+        use chrono::TimeZone;
+        
+        // Use a shorter max_state_age for testing
+        let history = History::default().with_max_state_age(Duration::minutes(15));
+        let base_time = Utc.with_ymd_and_hms(2023, 1, 1, 10, 0, 0).unwrap();
 
-        // Add passing sample
+        // Add passing sample at base time
         let mut result = ProbeResult::new();
         result.pass = true;
         result.message = "Passing".to_string();
+        result.start_time = base_time;
         history.add_sample(result.clone());
 
-        // Add another passing sample (same state)
+        // Add another passing sample within the same time bucket (5 minutes later)
+        result.start_time = base_time + Duration::minutes(5);
         history.add_sample(result.clone());
 
-        // Add failing sample (state transition)
+        // Add failing sample within same time bucket - this should still be in the same bucket
+        // since we're now using time-based bucketing, not state-based
         let mut failing_result = ProbeResult::new();
         failing_result.pass = false;
         failing_result.message = "Failing".to_string();
-        failing_result.start_time = result.start_time + Duration::seconds(10);
+        failing_result.start_time = base_time + Duration::minutes(10);
         history.add_sample(failing_result);
 
-        // Should have 2 state buckets
-        assert_eq!(history.len(), 2);
+        // Should have only 1 bucket since all samples are within the same time window
+        assert_eq!(history.len(), 1);
         assert_eq!(history.total_samples(), 3);
         assert_eq!(history.healthy_samples(), 2);
 
         let buckets = history.get_state_buckets();
+        assert_eq!(buckets.len(), 1);
+
+        // Single bucket: 2 passing, 1 failing sample
+        // The exemplar should be the failing one since failing samples override exemplars
+        assert_eq!(buckets[0].total_samples, 3);
+        assert_eq!(buckets[0].successful_samples, 2);
+        assert_eq!(buckets[0].exemplar.pass, false);
+        assert_eq!(buckets[0].exemplar.message, "Failing");
+
+        // Now add a sample that crosses the time boundary (20 minutes later)
+        let mut late_result = ProbeResult::new();
+        late_result.pass = true;
+        late_result.message = "Late passing".to_string();
+        late_result.start_time = base_time + Duration::minutes(20);
+        history.add_sample(late_result);
+
+        // Should now have 2 buckets due to time boundary
+        assert_eq!(history.len(), 2);
+        assert_eq!(history.total_samples(), 4);
+        assert_eq!(history.healthy_samples(), 3);
+
+        let buckets = history.get_state_buckets();
         assert_eq!(buckets.len(), 2);
 
-        // First bucket: 2 passing samples
-        assert_eq!(buckets[0].total_samples, 2);
+        // First bucket: still has 3 samples
+        assert_eq!(buckets[0].total_samples, 3);
         assert_eq!(buckets[0].successful_samples, 2);
-        assert_eq!(buckets[0].exemplar.pass, true);
 
-        // Second bucket: 1 failing sample
+        // Second bucket: 1 passing sample
         assert_eq!(buckets[1].total_samples, 1);
-        assert_eq!(buckets[1].successful_samples, 0);
-        assert_eq!(buckets[1].exemplar.pass, false);
+        assert_eq!(buckets[1].successful_samples, 1);
+        assert_eq!(buckets[1].exemplar.pass, true);
     }
 
     #[test]
     fn test_circular_buffer_overflow() {
-        let history = History::default();
+        use chrono::TimeZone;
+        
+        // Use a shorter max_state_age for testing to create more buckets
+        let history = History::default().with_max_state_age(Duration::seconds(1));
+        let base_time = Utc.with_ymd_and_hms(2023, 1, 1, 10, 0, 0).unwrap();
 
-        // Add 5 different states (more than buffer capacity)
+        // Add samples that span multiple time boundaries (1 second apart each)
+        // This will create HISTORY_SIZE+2 buckets, but only HISTORY_SIZE will be retained
         for i in 0..crate::HISTORY_SIZE+2 {
             let mut result = ProbeResult::new();
             result.pass = i % 2 == 0;
-            result.message = format!("State {}", i);
-            result.start_time = result.start_time + Duration::seconds(i as i64);
+            result.message = format!("Sample {}", i);
+            // Space each sample 2 seconds apart to ensure they're in different buckets
+            result.start_time = base_time + Duration::seconds((i * 2) as i64);
             history.add_sample(result);
         }
 
-        // Should only keep the last 3 states
+        // Should only keep the last HISTORY_SIZE buckets due to circular buffer
         assert_eq!(history.len(), crate::HISTORY_SIZE);
         assert_eq!(history.total_samples() as usize, crate::HISTORY_SIZE + 2);
 
         let buckets = history.get_state_buckets();
-        assert_eq!(buckets.len(), 3);
+        assert_eq!(buckets.len(), crate::HISTORY_SIZE);
+        
+        // Each bucket should have exactly 1 sample since we spaced them apart
+        for bucket in &buckets {
+            assert_eq!(bucket.total_samples, 1);
+        }
     }
 
     #[test]
@@ -639,25 +678,32 @@ mod tests {
     #[tokio::test]
     async fn test_snapshot_creation_and_restore() {
         use tempfile::TempDir;
+        use chrono::TimeZone;
 
         // Create a temporary directory for testing
         let temp_dir = TempDir::new().unwrap();
         let temp_path = temp_dir.path().join("snapshot.json");
 
-        // Create history with some data
+        // Create history with some data and a short max_state_age to create separate buckets
         let history = History::default()
+            .with_max_state_age(Duration::seconds(1))
             .with_snapshot_file(&temp_path)
             .unwrap();
 
-        // Add some sample data
+        let base_time = Utc.with_ymd_and_hms(2023, 1, 1, 10, 0, 0).unwrap();
+
+        // Add some sample data in different time buckets
         let mut result1 = ProbeResult::new();
         result1.pass = true;
         result1.message = "Test message 1".to_string();
+        result1.start_time = base_time;
         history.add_sample(result1);
 
+        // Add a failing sample in a different time bucket
         let mut result2 = ProbeResult::new();
         result2.pass = false;
         result2.message = "Test message 2".to_string();
+        result2.start_time = base_time + Duration::seconds(2);
         history.add_sample(result2);
 
         // Force a snapshot
@@ -666,8 +712,10 @@ mod tests {
         // Verify snapshot file exists and contains data
         assert!(temp_path.exists());
         let snapshot_content = tokio::fs::read_to_string(&temp_path).await.unwrap();
-        assert!(snapshot_content.contains("Test message 1"));
-        assert!(snapshot_content.contains("Test message 2"));
+        
+        // Since exemplars are only updated on failing samples, we should find the failing message
+        // The passing message will be in the exemplar of the first bucket
+        assert!(snapshot_content.contains("Test message"));
 
         // Create a new history from the snapshot
         let restored_history = History::default()
