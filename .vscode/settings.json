@@ -2,6 +2,7 @@
     "yaml.customTags": [
         // Validators
         "!Contains scalar",
+        "!NotEquals scalar",
         "!Equals scalar",
         "!OneOf sequence",
 
@@ -9,6 +10,7 @@
         "!Dns mapping",
         "!Http mapping",
         "!Tcp mapping",
+        "!Grpc mapping",
     ],
     "cSpell.words": [
         "actix",
