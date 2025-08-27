@@ -3,6 +3,8 @@ use std::{collections::HashMap, fmt::Display};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::utils::Elide;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProbeResult {
     pub start_time: DateTime<Utc>,
@@ -60,13 +62,17 @@ impl ValidationResult {
         self.message = Some(message.to_string());
         self
     }
+}
 
-    pub fn with_max_message_length(mut self, max_length: usize) -> Self {
-        if let Some(msg) = &self.message {
-            if msg.len() > max_length {
-                self.message = Some(format!("{}...", &msg[..max_length - 3]));
+impl Elide for ValidationResult {
+    type Output = ValidationResult;
+    fn elide(&self, len: usize) -> Self::Output {
+        let mut vr = self.clone();
+        if let Some(msg) = &vr.message {
+            if msg.len() > len {
+                vr.message = Some(format!("{}...", &msg[..len - 3]));
             }
         }
-        self
+        vr
     }
 }

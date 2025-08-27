@@ -9,89 +9,7 @@ use std::sync::{
 use tokio::time::Instant;
 
 use crate::result::{ProbeResult, ValidationResult};
-
-fn limit_message_length(message: &str) -> String {
-    const MAX_LENGTH: usize = 250;
-    if message.len() > MAX_LENGTH {
-        format!("{}...", &message[..MAX_LENGTH-3])
-    } else {
-        message.to_string()
-    }
-}
-
-/// Represents a state that the probe can be in
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProbeState {
-    pub pass: bool,
-    pub message: String,
-    pub validations: HashMap<String, ValidationResult>,
-}
-
-impl ProbeState {
-    /// Create a probe state from a probe result
-    pub fn from_result(result: &ProbeResult) -> Self {
-        Self {
-            pass: result.pass,
-            message:  limit_message_length(&result.message),
-            validations: result.validations.iter().map(|(k, v)| {
-                (k.clone(), v.clone().with_max_message_length(100))
-            }).collect(),
-        }
-    }
-}
-
-/// Represents an aggregated state bucket with timing and success information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateBucket {
-    /// When this state period started
-    pub start_time: DateTime<Utc>,
-    /// Total number of attempts in this state
-    pub total_attempts: u64,
-    /// Total duration of all samples in this state
-    #[serde(with = "crate::serializers::chrono_duration_humantime")]
-    pub total_latency: Duration,
-    /// Number of successful samples in this state bucket
-    pub successful_samples: u64,
-    /// Total number of samples in this state bucket
-    pub total_samples: u64,
-    /// An exemplar sample from this state bucket
-    pub exemplar: ProbeState,
-}
-
-impl StateBucket {
-    /// Create a new state bucket from the first sample
-    pub fn new(start_time: DateTime<Utc>, result: &ProbeResult) -> Self {
-        Self {
-            exemplar: ProbeState::from_result(result),
-            start_time,
-            total_attempts: result.attempts as u64,
-            total_latency: result.duration,
-            successful_samples: if result.pass { 1 } else { 0 },
-            total_samples: 1,
-        }
-    }
-
-    /// Add a sample to this state bucket
-    pub fn add_sample(&mut self, result: &ProbeResult) {
-        self.total_latency += result.duration;
-        self.total_samples += 1;
-        self.total_attempts += result.attempts as u64;
-        if result.pass {
-            self.successful_samples += 1;
-        } else {
-            self.exemplar = ProbeState::from_result(result);
-        }
-    }
-
-    /// Get the availability percentage for this state bucket
-    pub fn availability(&self) -> f64 {
-        if self.total_samples == 0 {
-            100.0
-        } else {
-            100.0 * self.successful_samples as f64 / self.total_samples as f64
-        }
-    }
-}
+use crate::utils::Elide;
 
 /// A history manager that tracks probe results using state-based aggregation
 #[derive(Debug)]
@@ -349,6 +267,81 @@ impl History {
     #[cfg(test)]
     pub fn max_state_age(&self) -> Duration {
         self.max_state_age
+    }
+}
+
+
+/// Represents an aggregated state bucket with timing and success information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateBucket {
+    /// When this state period started
+    pub start_time: DateTime<Utc>,
+    /// Total number of attempts in this state
+    pub total_attempts: u64,
+    /// Total duration of all samples in this state
+    #[serde(with = "crate::serializers::chrono_duration_humantime")]
+    pub total_latency: Duration,
+    /// Number of successful samples in this state bucket
+    pub successful_samples: u64,
+    /// Total number of samples in this state bucket
+    pub total_samples: u64,
+    /// An exemplar sample from this state bucket
+    pub exemplar: ProbeState,
+}
+
+impl StateBucket {
+    /// Create a new state bucket from the first sample
+    pub fn new(start_time: DateTime<Utc>, result: &ProbeResult) -> Self {
+        Self {
+            exemplar: ProbeState::from_result(result),
+            start_time,
+            total_attempts: result.attempts as u64,
+            total_latency: result.duration,
+            successful_samples: if result.pass { 1 } else { 0 },
+            total_samples: 1,
+        }
+    }
+
+    /// Add a sample to this state bucket
+    pub fn add_sample(&mut self, result: &ProbeResult) {
+        self.total_latency += result.duration;
+        self.total_samples += 1;
+        self.total_attempts += result.attempts as u64;
+        if result.pass {
+            self.successful_samples += 1;
+        } else {
+            self.exemplar = ProbeState::from_result(result);
+        }
+    }
+
+    /// Get the availability percentage for this state bucket
+    pub fn availability(&self) -> f64 {
+        if self.total_samples == 0 {
+            100.0
+        } else {
+            100.0 * self.successful_samples as f64 / self.total_samples as f64
+        }
+    }
+}
+
+/// Represents a state that the probe can be in
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProbeState {
+    pub pass: bool,
+    pub message: String,
+    pub validations: HashMap<String, ValidationResult>,
+}
+
+impl ProbeState {
+    /// Create a probe state from a probe result
+    pub fn from_result(result: &ProbeResult) -> Self {
+        Self {
+            pass: result.pass,
+            message: result.message.elide(100),
+            validations: result.validations.iter().map(|(k, v)| {
+                (k.clone(), v.clone().elide(100))
+            }).collect(),
+        }
     }
 }
 

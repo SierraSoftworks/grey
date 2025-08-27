@@ -20,6 +20,7 @@ mod serializers;
 mod state;
 mod targets;
 mod ui;
+mod utils;
 mod validators;
 
 pub use config::Config;
