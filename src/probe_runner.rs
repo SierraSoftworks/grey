@@ -3,29 +3,30 @@ use std::{
     sync::{atomic::AtomicBool, Arc, RwLock},
     time::Instant,
 };
+use chrono::TimeDelta;
 use tracing_batteries::prelude::{opentelemetry::trace::Status as OpenTelemetryStatus, *};
 
 use crate::{
-    history::ProbeHistory,
+    history::History, 
     result::{ProbeResult, ValidationResult},
     Probe, Validator,
 };
 
 const NO_PARENT: Option<tracing::Id> = None;
 
-pub struct ProbeRunner<const N: usize> {
+pub struct ProbeRunner {
     probe_name: Arc<String>,
     config: Arc<RwLock<Probe>>,
-    history: Arc<ProbeHistory<N>>,
+    history: Arc<History>,
     cancel: Arc<AtomicBool>,
 }
 
-impl<const N: usize> ProbeRunner<N> {
+impl ProbeRunner {
     pub fn new(config: Probe) -> Self {
         Self {
             probe_name: Arc::new(config.name.clone()),
             config: Arc::new(RwLock::new(config)),
-            history: Arc::new(ProbeHistory::default()),
+            history: Arc::new(History::default()),
             cancel: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -34,10 +35,11 @@ impl<const N: usize> ProbeRunner<N> {
         config: Probe,
         snapshot_path: P,
     ) -> std::io::Result<Self> {
-        let history = ProbeHistory::new()
+        let history = History::default()
             .with_max_state_age(TimeDelta::hours(1))
             .with_snapshot_interval(TimeDelta::seconds(60))
             .with_snapshot_file(snapshot_path)?;
+        
         Ok(Self {
             probe_name: Arc::new(config.name.clone()),
             config: Arc::new(RwLock::new(config)),
@@ -50,7 +52,7 @@ impl<const N: usize> ProbeRunner<N> {
         self.probe_name.clone()
     }
 
-    pub fn history(&self) -> Arc<ProbeHistory<N>> {
+    pub fn history(&self) -> Arc<History> {
         self.history.clone()
     }
 

@@ -5,28 +5,21 @@ use yew::ServerRenderer;
 
 use super::{AppState, ASSETS_DIR};
 
-pub async fn index<const N: usize>(data: web::Data<AppState<N>>) -> Result<HttpResponse> {
-    let config: grey_api::UiConfig = (&data.config.ui()).into();
-    let notices = data.config.ui().notices;
-    let probes = data
-        .config
-        .probes()
+pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
+    let config = data.state.get_config();
+    let probes = config.probes
         .iter()
         .map(|probe| probe.into())
         .map(|mut probe: Probe| {
-            probe.availability = data
-                .history
-                .get(&probe.name)
-                .map(|h| h.availability())
-                .unwrap_or(100.0);
+            probe.availability = data.state.get_history(&probe.name).map(|h| h.availability()).unwrap_or(100.0);
             probe
         })
         .collect::<Vec<grey_api::Probe>>();
     let histories = probes
         .iter()
         .filter_map(|probe| {
-            data.history
-                .get(&probe.name)
+            data.state
+                .get_history(&probe.name)
                 .map(|history| (probe, history))
         })
         .map(|(probe, history)| {
@@ -51,10 +44,10 @@ pub async fn index<const N: usize>(data: web::Data<AppState<N>>) -> Result<HttpR
         })?;
 
     // Render the ServerApp component for SSR
-    let title = config.title.clone();
+    let title = config.ui.title.clone();
     let app_props = AppProps {
-        config,
-        notices,
+        config: (&config.ui).into(),
+        notices: config.ui.notices.clone(),
         probes,
         histories,
     };

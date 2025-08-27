@@ -7,7 +7,7 @@ For a quick introduction to using Grey to probe a service, take a look at the
 [Usage Guide](../guide/README.md).
 :::
 
-When defining a probe, you can specify the target type using the `!Http` syntax. These
+When defining a probe, you can specify the target type using the `!Http`, `!Grpc`, `!Tcp`, or `!Dns` syntax. These
 target types each accept a distinct set of configuration options which are documented
 on their respective pages.
 
@@ -25,6 +25,18 @@ probes:
     validators:
       http.status: !OneOf [200]
       http.header.content-type: !Contains "text/html"
+
+  - name: grpc.example
+    policy:
+      interval: 5000
+      timeout: 2000
+      retries: 3
+    target: !Grpc
+      url: https://api.example.com:443
+      service: "myservice.v1.MyService"
+    validators:
+      grpc.status: !Equals "SERVING"
+      grpc.status_code: !Equals 1
 
   - name: tcp.example
     policy:

@@ -5,41 +5,39 @@ use std::sync::{atomic::AtomicBool, Arc};
 use tracing_batteries::prelude::opentelemetry::trace::SpanKind as OpenTelemetrySpanKind;
 use tracing_batteries::prelude::*;
 
-use crate::config::ConfigProvider;
-use crate::history::HistoryProvider;
+use crate::state::State;
 use crate::probe_runner::ProbeRunner;
 use crate::Probe;
 
-pub struct Engine<const N: usize> {
-    config: ConfigProvider,
-    probes: Arc<RwLock<HashMap<String, Arc<ProbeRunner<N>>>>>,
-    history: HistoryProvider<N>,
+pub struct Engine {
+    state: State,
+    probes: Arc<RwLock<HashMap<String, Arc<ProbeRunner>>>>,
 }
 
-impl<const N: usize> Engine<N> {
-    pub fn new(config: ConfigProvider) -> Self {
-        let probes: HashMap<String, Arc<ProbeRunner<N>>> = config
-            .probes()
+impl Engine {
+    pub fn new(state: State) -> Self {
+        let probes: HashMap<String, Arc<ProbeRunner>> = state
+            .get_config()
+            .probes
             .iter()
-            .map(|probe| (probe.name.clone(), Self::build_probe_runner(&config, probe)))
+            .map(|probe| {
+                (
+                    probe.name.clone(),
+                    Self::build_probe_runner(&state, probe),
+                )
+            })
             .collect();
 
-        let history = HistoryProvider::new();
-        for probe in probes.values() {
-            history.init(probe.name(), probe.history());
-        }
-
         Self {
-            config,
+            state,
             probes: Arc::new(RwLock::new(probes)),
-            history,
         }
     }
 
     #[tracing::instrument(name = "engine", skip(self), fields(otel.kind=?OpenTelemetrySpanKind::Internal), err(Debug))]
     pub async fn run(&self, cancel: &AtomicBool) -> Result<(), Box<dyn std::error::Error>> {
         // Ensure that the state directory is created (if specified)
-        if let Some(state_dir) = self.config.state_dir() {
+        if let Some(state_dir) = &self.state.get_config().state_directory {
             std::fs::create_dir_all(state_dir)?;
         }
 
@@ -51,16 +49,13 @@ impl<const N: usize> Engine<N> {
             self.start_probe_runner(probe);
         }
 
-        if self.config.ui().enabled {
+        if self.state.get_config().ui.enabled {
             eprintln!(
                 "Starting web UI on http://{}",
-                self.config.ui().listen.as_str()
+                self.state.get_config().ui.listen.as_str()
             );
 
-            let config = self.config.clone();
-            let history = self.history.clone();
-
-            crate::ui::start_server(config, history).await?;
+            crate::ui::start_server(self.state.clone()).await?;
         } else {
             while !cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -72,8 +67,8 @@ impl<const N: usize> Engine<N> {
         Ok(())
     }
 
-    fn build_probe_runner(config: &ConfigProvider, probe: &Probe) -> Arc<ProbeRunner<N>> {
-        if let Some(state_dir) = config.state_dir() {
+    fn build_probe_runner(state: &State, probe: &Probe) -> Arc<ProbeRunner> {
+        let runner = if let Some(state_dir) = &state.get_config().state_directory {
             // If a state directory is configured, use it
             match ProbeRunner::with_snapshot_history(
                 probe.clone(),
@@ -87,10 +82,14 @@ impl<const N: usize> Engine<N> {
             }
         } else {
             Arc::new(ProbeRunner::new(probe.clone()))
-        }
+        };
+
+        state.with_default_history(probe.name.clone(), runner.history());
+
+        runner
     }
 
-    fn start_probe_runner(&self, probe: Arc<ProbeRunner<N>>) {
+    fn start_probe_runner(&self, probe: Arc<ProbeRunner>) {
         tokio::spawn(async move {
             if let Err(e) = probe.schedule().await {
                 error!(name: "engine.probe", { probe.name=%probe.name(), action = "schedule", exception = e }, "Failed to schedule probe {}: {}", probe.name(), e);
@@ -105,18 +104,17 @@ impl<const N: usize> Engine<N> {
     }
 
     fn start_config_reloader(&self) {
-        let config = self.config.clone();
-        let history = self.history.clone();
+        let state = self.state.clone();
         let probes = self.probes.clone();
         tokio::spawn(async move {
-            let mut current_probes = config.probes().clone();
+            let mut current_probes = state.get_config().probes.clone();
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-                if let Err(err) = config.reload().await {
+                if let Err(err) = state.reload().await {
                     error!("Failed to reload config: {}", err);
                 }
 
-                let new_probes = config.probes().clone();
+                let new_probes = state.get_config().probes.clone();
                 if new_probes != current_probes {
                     let old_probes: HashMap<&str, &Probe> = current_probes
                         .iter()
@@ -148,9 +146,9 @@ impl<const N: usize> Engine<N> {
                             // New probe has been added
                             let name = name.to_string();
                             info!(name: "config.reload.probe", { probe.name=name, action = "add" }, "Added configuration for probe {}", name);
-                            let probe = Self::build_probe_runner(&config, new_probe);
+                            let probe = Self::build_probe_runner(&state, new_probe);
 
-                            history.init(probe.name().as_str(), probe.history());
+                            state.with_default_history(probe.name(), probe.history());
 
                             probes
                                 .write()

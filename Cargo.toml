@@ -31,6 +31,8 @@ openssl-sys = { version = "0.9", features = ["vendored"], optional = true }
 rand = "0.9"
 reqwest = { version = "0.12", features = ["rustls-tls-webpki-roots"] }
 serde_yaml = "0.9"
+tonic = { version = "0.12", features = ["tls"] }
+tonic-health = "0.12"
 tokio = { version = "1", features = [
   "fs",
   "macros",

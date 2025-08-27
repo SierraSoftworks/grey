@@ -1,0 +1,44 @@
+# Example gRPC health check configuration
+probes:
+  # Example gRPC health check (will fail since there's no actual gRPC server)
+  - name: grpc.example
+    policy:
+      interval: 10000
+      timeout: 3000
+      retries: 1
+    target: !Grpc
+      url: http://localhost:50051
+      service: ""  # Check overall server health
+    validators:
+      grpc.status: !Equals "SERVING"
+      
+  # Another example with a specific service
+  - name: grpc.specific-service
+    policy:
+      interval: 10000
+      timeout: 3000
+      retries: 1
+    target: !Grpc
+      url: https://grpc.example.com:443
+      service: "example.v1.ExampleService"
+    validators:
+      grpc.status: !Equals "SERVING"
+      grpc.status_code: !Equals 1
+
+  # Example with custom CA certificate
+  - name: grpc.custom-ca
+    policy:
+      interval: 15000
+      timeout: 5000
+      retries: 1
+    target: !Grpc
+      url: https://internal.company.com:443
+      service: "internal.v1.InternalService"
+      ca_cert: |
+        -----BEGIN CERTIFICATE-----
+        MIIDXTCCAkWgAwIBAgIJAKoK/heBjcOuMA0GCSqGSIb3DQEBCwUAMEUxCzAJBgNV
+        BAYTAkFVMRMwEQYDVQQIDApTb21lLVN0YXRlMSEwHwYDVQQKDBhJbnRlcm5ldCBX
+        aWRnaXRzIFB0eSBMdGQwHhcNMTcwODI4MTUxNjU5WhcNMTgwODI4MTUxNjU5WjBF
+        -----END CERTIFICATE-----
+    validators:
+      grpc.status: !Equals "SERVING"

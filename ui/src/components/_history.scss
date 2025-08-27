@@ -13,6 +13,7 @@
     flex: 1;
     position: relative;
     cursor: pointer;
+    min-width: 10px;
 
     &:first-child {
         border-top-left-radius: $border-radius-small;
