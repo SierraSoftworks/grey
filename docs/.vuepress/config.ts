@@ -53,6 +53,7 @@ export default defineUserConfig({
         children: [
           '/targets/README.md',
           '/targets/dns.md',
+          '/targets/grpc.md',
           '/targets/http.md',
           '/targets/tcp.md',
         ]
@@ -105,6 +106,7 @@ export default defineUserConfig({
           children: [
             '/targets/README.md',
             '/targets/dns.md',
+            '/targets/grpc.md',
             '/targets/http.md',
             '/targets/tcp.md',
           ]

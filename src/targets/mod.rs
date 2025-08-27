@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::Sample;
 
 mod dns;
+mod grpc;
 mod http;
 mod tcp;
 
@@ -18,6 +19,7 @@ pub enum TargetType {
     #[cfg(test)]
     Mock,
     Dns(dns::DnsTarget),
+    Grpc(grpc::GrpcTarget),
     Http(http::HttpTarget),
     Tcp(tcp::TcpTarget),
 }
@@ -28,6 +30,7 @@ impl Display for TargetType {
             #[cfg(test)]
             TargetType::Mock => write!(f, "Mock"),
             TargetType::Dns(target) => write!(f, "{}", target),
+            TargetType::Grpc(target) => write!(f, "{}", target),
             TargetType::Http(target) => write!(f, "{}", target),
             TargetType::Tcp(target) => write!(f, "{}", target),
         }
@@ -41,6 +44,7 @@ impl Target for TargetType {
             #[cfg(test)]
             TargetType::Mock => Ok(Sample::default()),
             TargetType::Dns(target) => target.run(cancel).await,
+            TargetType::Grpc(target) => target.run(cancel).await,
             TargetType::Http(target) => target.run(cancel).await,
             TargetType::Tcp(target) => target.run(cancel).await,
         }
