@@ -19,8 +19,8 @@ impl Validator for OneOf {
             Ok(())
         } else {
             Err(format!(
-                "The {} value '{}' did not match any of the expected values ({:?}).",
-                field, sample, self.0
+                "The {} value '{}' did not match any of the expected values ([{}]).",
+                field, sample, self.0.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", ")
             )
             .into())
         }

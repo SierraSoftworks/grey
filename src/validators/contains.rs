@@ -27,7 +27,12 @@ impl Validator for Contains {
                 if values.contains(item) {
                     Ok(())
                 } else {
-                    Err(format!("{} ('{:?}') did not contain the item '{}'.", field, values, item).into())
+                    Err(format!(
+                        "{} ([{}]) did not contain the item '{}'.",
+                        field,
+                        values.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", "),
+                        item
+                    ).into())
                 }
             }
             _ => Err(format!("This validator is not compatible with fields of type '{}' and values of type '{}'.", sample.get_type(), self.0.get_type()).into()),
