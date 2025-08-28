@@ -28,7 +28,7 @@ async fn serve_static(path: web::Path<String>) -> Result<HttpResponse> {
         let mut response = HttpResponse::Ok();
 
         // Set appropriate content type
-        match file_path.split('.').last().unwrap_or("") {
+        match file_path.split('.').next_back().unwrap_or("") {
             "js" => response.insert_header(("content-type", "application/javascript")),
             "wasm" => response.insert_header(("content-type", "application/wasm")),
             "css" => response.insert_header(("content-type", "text/css")),

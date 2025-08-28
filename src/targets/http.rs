@@ -35,7 +35,6 @@ pub struct HttpTarget {
     pub no_verify: bool,
 }
 
-#[async_trait::async_trait]
 impl Target for HttpTarget {
     #[tracing::instrument(
         "target.http",
@@ -50,6 +49,7 @@ impl Target for HttpTarget {
             http.flavor = EmptyField,
             cert.no_verify = %self.no_verify,
     ))]
+
     async fn run(&self, _cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>> {
         let method = reqwest::Method::from_str(&self.method)?;
 
@@ -60,6 +60,7 @@ impl Target for HttpTarget {
         };
 
         let mut headers = self.headers.clone();
+
         opentelemetry::global::get_text_map_propagator(|propagator| {
             propagator.inject_context(&Span::current().context(), &mut headers)
         });

@@ -9,6 +9,7 @@
         // Targets
         "!Dns mapping",
         "!Http mapping",
+        "!Script mapping",
         "!Tcp mapping",
         "!Grpc mapping",
     ],

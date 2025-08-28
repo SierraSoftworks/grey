@@ -15,7 +15,6 @@ pub struct DnsTarget {
     pub record_type: Option<String>,
 }
 
-#[async_trait::async_trait]
 impl Target for DnsTarget {
     async fn run(&self, _cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>> {
         let lookup = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default())

@@ -1,15 +1,14 @@
+use chrono::TimeDelta;
 use std::{
     sync::{atomic::AtomicBool, Arc, RwLock},
     time::Instant,
 };
-use chrono::TimeDelta;
 use tracing_batteries::prelude::{opentelemetry::trace::Status as OpenTelemetryStatus, *};
 
 use crate::{
     history::History, 
     result::{ProbeResult, ValidationResult},
-    Target, Validator,
-    Probe
+    Probe, Validator,
 };
 
 const NO_PARENT: Option<tracing::Id> = None;
@@ -32,8 +31,8 @@ impl ProbeRunner {
     }
 
     pub fn with_snapshot_history<P: Into<std::path::PathBuf>>(
-        config: Probe, 
-        snapshot_path: P
+        config: Probe,
+        snapshot_path: P,
     ) -> std::io::Result<Self> {
         let history = History::default()
             .with_max_state_age(TimeDelta::hours(1))
@@ -72,11 +71,14 @@ impl ProbeRunner {
         error=EmptyField
     ))]
     pub async fn schedule(&self) -> Result<(), Box<dyn std::error::Error>> {
-        self.cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.cancel
+            .store(false, std::sync::atomic::Ordering::Relaxed);
 
-        let mut next_run_time = self.config.read()
-                .map_err(|e| format!("Failed to read probe config: {}", e))?
-                .next_start_time();
+        let mut next_run_time = self
+            .config
+            .read()
+            .map_err(|e| format!("Failed to read probe config: {}", e))?
+            .next_start_time();
 
         let parent_span = Span::current();
 
@@ -90,7 +92,8 @@ impl ProbeRunner {
                 tokio::time::sleep(sleep_time).await;
             }
 
-            let probe = self.config
+            let probe = self
+                .config
                 .read()
                 .map_err(|e| format!("Failed to read probe config: {}", e))?
                 .clone();
@@ -132,7 +135,8 @@ impl ProbeRunner {
         probe.attempts=0,
     ))]
     async fn run_scheduled_execution(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let probe = self.config
+        let probe = self
+            .config
             .read()
             .map_err(|e| format!("Failed to read probe config: {}", e))?
             .clone();
@@ -159,7 +163,12 @@ impl ProbeRunner {
                     "Running probe attempt {}/{}...",
                     sample.attempts, total_attempts,
                 );
-                match tokio::time::timeout(probe.policy.timeout, self.run_attempt(&probe, &mut sample)).await {
+                match tokio::time::timeout(
+                    probe.policy.timeout,
+                    self.run_attempt(&probe, &mut sample),
+                )
+                .await
+                {
                     Ok(Ok(res)) => return Ok(res),
                     Ok(Err(err)) => {
                         debug!("Probe failed: {}", err);
@@ -168,7 +177,7 @@ impl ProbeRunner {
                             sample.message = err.to_string();
                             return Err(err);
                         }
-                    },
+                    }
                     Err(_) => {
                         debug!("Probe timed out");
                         if sample.attempts == total_attempts {
@@ -236,7 +245,7 @@ impl ProbeRunner {
                 }
                 Err(err) => {
                     span.record("otel.status_code", "Error")
-                        .record("otel.status_message", &err.to_string());
+                        .record("otel.status_message", err.to_string());
                     error!(error = err, "{}", err);
                     result
                         .validations
@@ -248,5 +257,4 @@ impl ProbeRunner {
 
         Ok(())
     }
-
 }

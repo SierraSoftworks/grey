@@ -1,5 +1,5 @@
-use grey_api::{NoticeLevel, UiNotice};
 use crate::contexts::use_notices;
+use grey_api::{NoticeLevel, UiNotice};
 use yew::prelude::*;
 
 #[function_component(Timeline)]
@@ -21,7 +21,6 @@ pub fn timeline() -> Html {
         </div>
     }
 }
-
 
 #[derive(Properties, PartialEq)]
 pub struct NoticeProps {

@@ -1,17 +1,9 @@
 use grey_api::UiConfig;
 use yew::prelude::*;
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 pub struct UiConfigContext {
     pub config: UiConfig,
-}
-
-impl Default for UiConfigContext {
-    fn default() -> Self {
-        Self {
-            config: UiConfig::default(),
-        }
-    }
 }
 
 #[derive(Properties, PartialEq)]

@@ -35,8 +35,8 @@ pub mod chrono_duration_humantime {
         {
             let std_duration: std::time::Duration = humantime::parse_duration(value)
                 .map_err(|e| E::custom(format!("Invalid duration format: {}", e)))?;
-            Ok(Duration::from_std(std_duration)
-                .map_err(|e| E::custom(format!("Duration conversion error: {}", e)))?)
+            Duration::from_std(std_duration)
+                .map_err(|e| E::custom(format!("Duration conversion error: {}", e)))
         }
     }
 }

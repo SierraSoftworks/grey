@@ -577,10 +577,8 @@ mod tests {
 
         // Test 20 minutes (1200s) alignment - should align to 20-minute boundaries
         let history_20m = History::default().with_max_state_age(Duration::minutes(20));
-        let aligned_20m = history_20m.align_start_time(test_timestamp);
-        // 2:37:23 should align to 2:20:00 (the 20-minute boundary before it)
         let expected_20m = Utc.with_ymd_and_hms(2023, 6, 15, 14, 20, 0).unwrap();
-        assert_eq!(aligned_20m, expected_20m);
+        assert_eq!(history_20m.align_start_time(test_timestamp), expected_20m);
 
         // Test 15 minutes (900s) alignment - should align to 15-minute boundaries
         let history_15m = History::default().with_max_state_age(Duration::minutes(15));

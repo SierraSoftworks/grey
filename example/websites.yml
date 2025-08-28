@@ -3,10 +3,10 @@ ui:
   enabled: true
   listen: 127.0.0.1:3002
 
-  notices:
-    - title: Example Notice
-      description: This is an example notice message showcasing how you can alert users to something happening on your platform.
-      timestamp: 2025-08-10T19:00:00Z
+  # notices:
+  #   - title: Example Notice
+  #     description: This is an example notice message showcasing how you can alert users to something happening on your platform.
+  #     timestamp: 2025-08-10T19:00:00Z
 
 probes:
   - name: google.search
@@ -47,3 +47,32 @@ probes:
     tags:
       domain: github.com
       service: Coding
+  - name: bender.production.script
+    policy:
+      interval: 10s
+      timeout: 5s
+      retries: 2
+    tags:
+      domain: bender.sierrasoftworks.com
+      service: Scripting
+    target: !Script
+      args:
+        - https://bender.sierrasoftworks.com
+      code: |
+        const resp = await fetch(`${arguments[0]}/api/v1/quote/bender`, {
+          headers: {
+            "Accept": "application/json",
+            ...getTraceHeaders()
+          }
+        })
+
+        output["http.status"] = resp.status
+
+        if (resp.status == 200) {
+          const quote = await resp.json()
+          output["quote.who"] = quote.who
+        }
+
+    validators:
+      http.status: !Equals 200
+      quote.who: !Equals "Bender"

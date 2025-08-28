@@ -9,6 +9,7 @@ use clap::Parser;
 mod config;
 mod engine;
 mod history;
+mod js;
 #[macro_use]
 mod macros;
 mod policy;
@@ -54,7 +55,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting Grey with {} probes...", state.get_config().probes.len());
 
     let engine = Engine::new(state);
-    engine.run(&CANCEL).await?;
+    let local_set = &mut tokio::task::LocalSet::new();
+    local_set.run_until(engine.run(&CANCEL)).await?;
 
     telemetry.shutdown();
 

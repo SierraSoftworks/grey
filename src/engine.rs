@@ -70,7 +70,10 @@ impl Engine {
     fn build_probe_runner(state: &State, probe: &Probe) -> Arc<ProbeRunner> {
         let runner = if let Some(state_dir) = &state.get_config().state_directory {
             // If a state directory is configured, use it
-            match ProbeRunner::with_snapshot_history(probe.clone(), state_dir.join(format!("{}.dat", probe.name))) {
+            match ProbeRunner::with_snapshot_history(
+                probe.clone(),
+                state_dir.join(format!("{}.dat", probe.name)),
+            ) {
                 Ok(runner) => Arc::new(runner),
                 Err(e) => {
                     warn!("Failed to create probe runner with snapshot history for '{}': {}. Using default state (no history).", probe.name, e);
@@ -87,7 +90,7 @@ impl Engine {
     }
 
     fn start_probe_runner(&self, probe: Arc<ProbeRunner>) {
-        tokio::spawn(async move {
+        tokio::task::spawn_local(async move {
             if let Err(e) = probe.schedule().await {
                 error!(name: "engine.probe", { probe.name=%probe.name(), action = "schedule", exception = e }, "Failed to schedule probe {}: {}", probe.name(), e);
             }
@@ -95,7 +98,7 @@ impl Engine {
     }
 
     fn stop_all_probe_runners(&self) {
-        for probe in self.probes.read().unwrap().values().cloned() {
+        for probe in self.probes.read().unwrap().values() {
             probe.cancel();
         }
     }
@@ -125,12 +128,16 @@ impl Engine {
                             if old_probe != new_probe {
                                 // Probe configuration has changed
                                 info!(name: "config.reload.probe", { probe.name=name, action = "update" }, "Reloaded configuration for probe {}", name);
-                                probes.read().unwrap().get(*name).map(|p| p.update((*new_probe).clone()));
+                                if let Some(p) = probes.read().unwrap().get(*name) {
+                                    p.update((*new_probe).clone())
+                                }
                             }
                         } else {
                             // Probe has been removed
                             info!(name: "config.reload.probe", { probe.name=name, action = "remove" }, "Removed configuration for probe {}", name);
-                            probes.read().unwrap().get(*name).map(|p| p.cancel());
+                            if let Some(p) = probes.read().unwrap().get(*name) {
+                                p.cancel()
+                            }
                         }
                     }
 
@@ -143,12 +150,12 @@ impl Engine {
 
                             state.with_default_history(probe.name(), probe.history());
 
-                            probes.write().unwrap().insert(
-                                name.to_string(),
-                                probe.clone(),
-                            );
+                            probes
+                                .write()
+                                .unwrap()
+                                .insert(name.to_string(), probe.clone());
 
-                            tokio::spawn(async move {
+                            tokio::task::spawn_local(async move {
                                 if let Err(e) = probe.schedule().await {
                                     error!(name: "config.reload.probe", { probe.name=name, action = "schedule", exception = e }, "Failed to schedule probe {}: {}", name, e);
                                 }

@@ -31,6 +31,7 @@ cheapest public cloud instances money can buy, giving you exceptional breadth of
 ratios.
 
 ## Features
+
  - **Extremely low memory footprint** allows you to run Grey in resource constrained environments at low cost.
  - **Native ARM binaries** allow you to run Grey on embedded Linux devices like Raspberry Pis for cheap distributed probing.
 
@@ -68,7 +69,6 @@ ui:
       timestamp: 2025-08-10T19:00:00Z
       level: ok # ok, warning, error
 ```
-
 
 <ClientOnly>
     <Contributors repo="SierraSoftworks/grey" />

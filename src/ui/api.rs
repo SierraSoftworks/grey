@@ -1,5 +1,4 @@
 use actix_web::{web, HttpResponse, Result};
-use grey_api;
 
 use super::AppState;
 
@@ -30,8 +29,7 @@ impl From<&crate::history::StateBucket> for grey_api::ProbeHistory {
         grey_api::ProbeHistory {
             start_time: bucket.start_time,
             latency: std::time::Duration::from_millis(
-                bucket.total_latency.num_milliseconds() as u64
-                / bucket.total_samples
+                bucket.total_latency.num_milliseconds() as u64 / bucket.total_samples,
             ),
             attempts: bucket.total_attempts,
             pass: bucket.exemplar.pass,

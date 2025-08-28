@@ -15,21 +15,11 @@ pub struct HistoryProps {
     pub samples: Vec<ProbeHistory>,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 struct TooltipData {
     pub visible: bool,
     pub element_index: usize,
     pub probe_result: Option<grey_api::ProbeHistory>,
-}
-
-impl Default for TooltipData {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            element_index: 0,
-            probe_result: None,
-        }
-    }
 }
 
 #[function_component(History)]

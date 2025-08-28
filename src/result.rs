@@ -16,6 +16,12 @@ pub struct ProbeResult {
     pub validations: HashMap<String, ValidationResult>,
 }
 
+impl Default for ProbeResult {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProbeResult {
     pub fn new() -> Self {
         Self {

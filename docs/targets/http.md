@@ -52,7 +52,8 @@ It should be a string containing the body that you wish to send, in its UTF-8 en
 format.
 
 ### no_verify <Badge text="default: false"/>
-The `no_verify` property is used to disable TLS verification for the request. This is useful in scenarios where the remote service is running
+The `no_verify` property is used to disable TLS verification for the request.
+This is useful in scenarios where the remote service is running
 with a self-signed certificate and/or you wish to ignore potentially
 expired certificates.
 

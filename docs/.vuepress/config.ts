@@ -55,6 +55,7 @@ export default defineUserConfig({
           '/targets/dns.md',
           '/targets/grpc.md',
           '/targets/http.md',
+          '/targets/script.md',
           '/targets/tcp.md',
         ]
       },
@@ -97,6 +98,7 @@ export default defineUserConfig({
             '/guide/README.md',
             `/guide/configuration.md`,
             '/guide/telemetry.md',
+            '/guide/azure-msi.md',
           ]
         }
       ],
@@ -108,6 +110,7 @@ export default defineUserConfig({
             '/targets/dns.md',
             '/targets/grpc.md',
             '/targets/http.md',
+            '/targets/script.md',
             '/targets/tcp.md',
           ]
         }
