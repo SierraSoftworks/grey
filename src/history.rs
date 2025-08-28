@@ -36,8 +36,6 @@ struct ProbeHistorySnapshot {
     sample_count_total: u64,
     sample_count_healthy: u64,
     state_buckets: Vec<StateBucket>,
-    #[serde(with = "crate::serializers::chrono_duration_humantime")]
-    max_state_age: Duration,
 }
 
 impl Default for History {
@@ -96,7 +94,6 @@ impl History {
             history
                 .sample_count_healthy
                 .store(snapshot.sample_count_healthy, Ordering::Relaxed);
-            history.max_state_age = snapshot.max_state_age;
 
             let mut buckets = history.state_buckets.write().unwrap();
             for bucket in snapshot.state_buckets {
@@ -197,7 +194,6 @@ impl History {
             sample_count_total: self.sample_count_total.load(Ordering::Relaxed),
             sample_count_healthy: self.sample_count_healthy.load(Ordering::Relaxed),
             state_buckets: buckets.iter().cloned().collect(),
-            max_state_age: self.max_state_age,
         }
     }
 
