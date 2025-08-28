@@ -1,6 +1,5 @@
 # Script
-The `!Script` target type is built on top of [Deno](https://deno.land) and
-allows you to write custom JavaScript probes to conduct complex health
+The `!Script` target type allows you to write custom JavaScript probes to conduct complex health
 evaluations against your service. This includes executing complex workflows
 like signing into a website, or implementing more powerful validation than
 is possible with the standard [validators](../validators/README.md).
@@ -31,7 +30,7 @@ probes:
         })
 
         // Store the authentication request status code in the output
-        setOutput("auth.status", auth.status)
+        output["auth.status"] = auth.status;
 
         if (auth.ok) {
             const authPayload = await auth.json()
@@ -43,11 +42,11 @@ probes:
                 }
             })
 
-            setOutput("profile.status", profile.status)
+            output["profile.status"] = profile.status
 
             if (profile.ok) {
                 const profilePayload = await profile.json()
-                setOutput("profile.username", profilePayload.username)
+                output["profile.username"] = profilePayload.username
             }
         }
     validators:
@@ -71,8 +70,7 @@ promises will not be run to completion, so make sure you `await` them.*
 ### args
 The `args` property can be used to provide customizable arguments to your
 script. These arguments should appear as a list of strings in your probe
-definition and may be accessed through the
-[`Deno.args`](https://examples.deno.land/command-line-arguments)
+definition and may be accessed through the `arguments`
 array in your code. Conceptually, these are the same as command line arguments
 and can be paired with YAML's ability to leverage references to re-use scripts
 across multiple probes.
@@ -82,7 +80,7 @@ probes:
   - name: script.example
     target: !Script
       code: &myScript |
-        // Your script code here
+        output['arg0'] = arguments[0]
       args:
         - "--foo"
         - "bar"
@@ -108,22 +106,26 @@ will set an output which may then be checked by one or more of the
 [validators](../validators/README.md).
 
 ```js
-setOutput("my.value", 42)
+output["my.value"] = 42;
 ```
 
 ::: warning
-Only primitive values (`null`, `boolean`, `number`, `string`) are supported
-by the output system. More complex types will automatically be converted to
-their JSON string representation during the output process.
+Only primitive values (`null`, `boolean`, `number`, `string`) and lists thereof are supported
+by the output system. More complex types will be converted into their `JSON.stringify(...)` representation.
 :::
 
 ## Runtime Environment
-The script runtime environment is built on top of [Deno](https://deno.land)
-and includes most Web APIs, allowing you to use features like
-[fetch()](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API),
-[WebSocket](https://developer.mozilla.org/en-US/docs/Web/API/WebSocket),
-and more. It also includes Deno-specific APIs which allow you to connect
-directly to TCP, resolve DNS names, and more.
+The script runtime environment is reasonably limited, exposing only the following
+Web APIs at this time:
+
+- [`Array`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array)
+- [`console`](https://developer.mozilla.org/en-US/docs/Web/API/Console)
+- [`Date`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date)
+- [`fetch`](https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API)
+- [`JSON`](https://developer.mozilla.org/en-US/docs/Web/API/JSON)
+- [`Math`](https://developer.mozilla.org/en-US/docs/Web/API/Math)
+- [`RegExp`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp)
+- [`setTimeout`](https://developer.mozilla.org/en-US/docs/Web/API/WindowOrWorkerGlobalScope/setTimeout)
 
 On top of these APIs, we also provide a couple of helpers to improve the
 integration with Grey.
@@ -134,16 +136,21 @@ directive to import additional scripts either from the local filesystem or
 from remote endpoints.
 :::
 
-### `setOutput(key: string, value: any): never`
+### `output[key: string] = value`
 This method allows you to emit a new output value from your probe which
 can then be interrogated by the [validators](../validators/README.md)
 that you have defined in your Grey configuration.
 
-```js
-const resp = await fetch("https://example.com")
+::: warning
+Only primitive values (`null`, `boolean`, `number`, `string`) and lists thereof are supported
+by the output system. More complex types will be converted into their `JSON.stringify(...)` representation.
+:::
 
-setOutput('http.status_code', resp.status)
-setOutput('http.body', await resp.text())
+```js
+const resp = await fetch("https://example.com");
+
+output['http.status_code'] = resp.status;
+output['http.body'] = await resp.text();
 ```
 
 ### `getTraceId(): string`
@@ -166,3 +173,8 @@ await fetch("https://example.com/api/v1/ping", {
     }
 })
 ```
+
+::: tip
+Trace headers are automatically injected in their default for for any outgoing
+requests submitted using `fetch(...)`.
+:::

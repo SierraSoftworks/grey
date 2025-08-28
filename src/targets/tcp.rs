@@ -9,7 +9,6 @@ pub struct TcpTarget {
     pub host: String,
 }
 
-#[async_trait::async_trait]
 impl Target for TcpTarget {
     async fn run(&self, _cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>> {
         let addr = lookup_host(&self.host)

@@ -70,21 +70,6 @@ impl History {
         }
     }
 
-    /// Creates a new probe history with the specified maximum state age
-    pub fn with_max_state_age(self, max_state_age: Duration) -> Self {
-        Self {
-            max_state_age,
-            ..self
-        }
-    }
-
-    pub fn with_snapshot_interval(self, interval: Duration) -> Self {
-        Self {
-            snapshot_interval: Some(interval),
-            ..self
-        }
-    }
-
     /// Creates a new probe history with snapshotting enabled
     pub fn with_snapshot_file<P: Into<PathBuf>>(self, path: P) -> std::io::Result<Self> {
         let snapshot_file = path.into();
@@ -593,6 +578,7 @@ mod tests {
         // Test 20 minutes (1200s) alignment - should align to 20-minute boundaries
         let history_20m = History::default().with_max_state_age(Duration::minutes(20));
         let expected_20m = Utc.with_ymd_and_hms(2023, 6, 15, 14, 20, 0).unwrap();
+        assert_eq!(history_20m.align_start_time(test_timestamp), expected_20m);
 
         // Test 15 minutes (900s) alignment - should align to 15-minute boundaries
         let history_15m = History::default().with_max_state_age(Duration::minutes(15));

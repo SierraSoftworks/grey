@@ -18,7 +18,6 @@ pub struct GrpcTarget {
     pub ca_cert: Option<String>,
 }
 
-#[async_trait::async_trait]
 impl Target for GrpcTarget {
     #[tracing::instrument(
         "target.grpc",

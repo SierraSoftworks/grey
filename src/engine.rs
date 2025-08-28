@@ -90,7 +90,7 @@ impl Engine {
     }
 
     fn start_probe_runner(&self, probe: Arc<ProbeRunner>) {
-        tokio::spawn(async move {
+        tokio::task::spawn_local(async move {
             if let Err(e) = probe.schedule().await {
                 error!(name: "engine.probe", { probe.name=%probe.name(), action = "schedule", exception = e }, "Failed to schedule probe {}: {}", probe.name(), e);
             }
@@ -155,7 +155,7 @@ impl Engine {
                                 .unwrap()
                                 .insert(name.to_string(), probe.clone());
 
-                            tokio::spawn(async move {
+                            tokio::task::spawn_local(async move {
                                 if let Err(e) = probe.schedule().await {
                                     error!(name: "config.reload.probe", { probe.name=name, action = "schedule", exception = e }, "Failed to schedule probe {}: {}", name, e);
                                 }

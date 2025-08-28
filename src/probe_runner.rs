@@ -3,7 +3,6 @@ use std::{
     sync::{atomic::AtomicBool, Arc, RwLock},
     time::Instant,
 };
-use chrono::TimeDelta;
 use tracing_batteries::prelude::{opentelemetry::trace::Status as OpenTelemetryStatus, *};
 
 use crate::{

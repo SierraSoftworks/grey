@@ -1,8 +1,12 @@
-use deno_core::anyhow;
+use boa_engine::{
+    builtins::promise::PromiseState, job::JobExecutor, Module, Source
+};
 use serde::{Deserialize, Serialize};
-use std::{fmt::Display, sync::atomic::AtomicBool};
+use std::{cell::RefCell, fmt::Display, rc::Rc, sync::atomic::AtomicBool};
+use tracing_batteries::prelude::*;
+use tracing::instrument;
 
-use crate::{targets::Target, Sample};
+use crate::{js::JobQueue, targets::Target, Sample};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct ScriptTarget {
@@ -11,36 +15,46 @@ pub struct ScriptTarget {
     pub args: Vec<String>,
 }
 
-#[async_trait::async_trait]
 impl Target for ScriptTarget {
+    #[instrument("target.script", skip(self, _cancel), err(Debug), fields(script.exit_code = EmptyField))]
     async fn run(&self, _cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>> {
         let code = self.code.clone();
         let args = self.args.clone();
+        
+        let executor = Rc::new(JobQueue::new());
+        let context = &mut boa_engine::Context::builder()
+            .job_executor(executor.clone())
+            .build()?;
 
-        let (send, recv) = tokio::sync::oneshot::channel::<Result<Sample, anyhow::Error>>();
+        crate::js::setup_runtime(context, args)?;
 
-        tokio::task::spawn_blocking(move || {
-            std::thread::spawn(move || {
-                match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                {
-                    Ok(rt) => {
-                        let result =
-                            rt.block_on(
-                                async move { crate::deno::run_probe_script(&code, args).await },
-                            );
+        let module = Module::parse(Source::from_bytes(&code), None, context)?;
 
-                        send.send(result).ok();
-                    }
-                    Err(err) => {
-                        send.send(Err(err.into())).ok();
-                    }
-                }
-            });
-        });
+        let promise = module.load_link_evaluate(context);
 
-        recv.await?.map_err(|e| format!("{e}").into())
+        executor.run_jobs_async(&RefCell::new(context)).await?;
+
+        let output = context.eval(Source::from_bytes("output"))?;
+
+        let mut sample = if let Some(output) = output.as_object() {
+            crate::js::jsobject_to_sample(&output, context)?
+        } else {
+            Sample::default()
+        };
+
+        match promise.state() {
+            PromiseState::Fulfilled(_) => {
+                sample.set("script.exit_code", 0);
+            }
+            PromiseState::Rejected(err) => {
+                return Err(err.to_string(context)?.to_std_string_lossy().into());
+            }
+            PromiseState::Pending => {
+                return Err("Script awaits unresolvable promises.".into());
+            }
+        }
+
+        Ok(sample)
     }
 }
 
@@ -60,6 +74,8 @@ impl Display for ScriptTarget {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use crate::sample::SampleValue;
 
     use super::*;
@@ -92,7 +108,7 @@ mod tests {
     #[tokio::test]
     async fn test_script_with_outputs() {
         let target = ScriptTarget {
-            code: r#"setOutput('abc', '123'); setOutput('x', 'y')"#.into(),
+            code: r#"output['abc'] = '123'; output['x'] = 'y';"#.into(),
             ..Default::default()
         };
         let cancel = AtomicBool::new(false);
@@ -102,19 +118,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_script_fetch() {
-        deno_runtime::deno_tls::rustls::crypto::aws_lc_rs::default_provider()
-            .install_default()
-            .expect("Failed to initialize crypto subsystem");
+    async fn test_script_args() {
+        let target = ScriptTarget {
+            code: r#"output.a = arguments[0]; output.b = arguments[1]"#.into(),
+            args: vec!["arg1".into(), "arg2".into()],
+        };
 
+        let cancel = AtomicBool::new(false);
+        let sample = target.run(&cancel).await.expect("no error to be raised");
+        assert_eq!(sample.get("a"), &SampleValue::from("arg1"));
+        assert_eq!(sample.get("b"), &SampleValue::from("arg2"));
+    }
+
+    #[tokio::test]
+    async fn test_script_set_timeout() {
+        let target = ScriptTarget {
+            code: r#"await new Promise((resolve) => setTimeout(resolve, 100));"#.into(),
+            ..Default::default()
+        };
+        let cancel = AtomicBool::new(false);
+
+        let result = target.run(&cancel).await.unwrap();
+        assert_eq!(result.get("script.exit_code"), &SampleValue::from(0));
+    }
+
+    #[tokio::test]
+    async fn test_script_fetch() {
         let target = ScriptTarget {
             code: r#"
             const result = await fetch("https://bender.sierrasoftworks.com/api/v1/quote/bender", {
                 headers: getTraceHeaders()
             });
-            setOutput('http.status_code', result.status);
+            output['http.status_code'] = result.status;
             const quote = await result.json();
-            setOutput('quote.who', quote.who);
+            output['quote.who'] = quote.who;
             "#
             .into(),
             ..Default::default()
@@ -124,5 +161,49 @@ mod tests {
         let sample = target.run(&cancel).await.expect("no error to be raised");
         assert_eq!(sample.get("http.status_code"), &SampleValue::from(200));
         assert_eq!(sample.get("quote.who"), &SampleValue::from("Bender"));
+    }
+
+    #[tokio::test]
+    async fn test_script_ignores_invalid_blockers() {
+        // validates that tokio's timeout wrapper causes a script to halt execution
+        let target = ScriptTarget {
+            code: r#"await new Promise((resolve) => { /* never resolves */ });"#.into(),
+            ..Default::default()
+        };
+        let cancel = AtomicBool::new(false);
+
+        target
+            .run(&cancel)
+            .await.expect_err("Should raise an error explaining that the script cannot complete");
+    }
+
+    #[tokio::test]
+    async fn test_script_timeout() {
+        // validates that tokio's timeout wrapper causes a script to halt execution
+        let target = ScriptTarget {
+            code: r#"await new Promise((resolve) => { setTimeout(resolve, 1000); });"#.into(),
+            ..Default::default()
+        };
+        let cancel = AtomicBool::new(false);
+
+        match tokio::time::timeout(Duration::from_millis(100), target.run(&cancel)).await {
+            Ok(result) => panic!("Expected timeout, but got {:?}", result),
+            Err(_) => {}
+        }
+    }
+
+    #[tokio::test]
+    async fn test_script_json() {
+        let target = ScriptTarget {
+            code: r#"
+            output.json = JSON.stringify({ "x": 1 })
+            "#
+            .into(),
+            ..Default::default()
+        };
+        let cancel = AtomicBool::new(false);
+
+        let sample = target.run(&cancel).await.expect("no error to be raised");
+        assert_eq!(sample.get("json"), &SampleValue::from(r#"{"x":1}"#));
     }
 }

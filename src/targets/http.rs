@@ -35,7 +35,6 @@ pub struct HttpTarget {
     pub no_verify: bool,
 }
 
-#[async_trait::async_trait]
 impl Target for HttpTarget {
     #[tracing::instrument(
         "target.http",

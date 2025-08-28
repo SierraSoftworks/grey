@@ -22,16 +22,6 @@ struct TooltipData {
     pub probe_result: Option<grey_api::ProbeHistory>,
 }
 
-impl Default for TooltipData {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            element_index: 0,
-            probe_result: None,
-        }
-    }
-}
-
 #[function_component(History)]
 pub fn history(props: &HistoryProps) -> Html {
     let tooltip_data = use_state(TooltipData::default);
