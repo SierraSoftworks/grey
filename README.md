@@ -10,7 +10,7 @@ they fail.
 ## Features
 - Extremely lightweight, can be run on every server in your fleet if you wish.
 - Native OpenTelemetry integration, including trace propagation.
-- Supports multiple health probes, including HTTP, TCP, and DNS.
+- Supports multiple health probes, including HTTP, gRPC, TCP, DNS, and custom JavaScript scripts.
 
 ## Usage
 Grey is a self contained binary which is expected to be executed with a YAML
@@ -55,6 +55,19 @@ It exposes the following fields for validation:
 - `http.version`: The HTTP version of the response.
 - `http.body`: The body of the response.
 
+### `grpc`
+The `grpc` target performs health checks on gRPC services using the standard
+gRPC Health Checking Protocol. It accepts the following options:
+
+- `url` (required): The gRPC endpoint URL to connect to (e.g. `https://api.example.com:443`).
+- `service` (optional): The name of the specific service to check. If omitted, checks overall server health.
+- `ca_cert` (optional): Custom Certificate Authority certificate in PEM format for TLS validation.
+
+It exposes the following fields for validation:
+
+- `grpc.status`: The health status returned by the service (`UNKNOWN`, `SERVING`, `NOT_SERVING`, `SERVICE_UNKNOWN`).
+- `grpc.status_code`: The numeric representation of the health status (0-3).
+
 ### `tcp`
 The `tcp` target makes a TCP connection to a host and port to confirm that it
 is available and accepting connections. It accepts the following options:
@@ -75,6 +88,22 @@ matches your provided expectations. It accepts the following options:
 It exposes the following fields for validation:
 
 - `dns.answers`: The list of answers to the DNS query.
+
+### `script`
+The `script` target allows you to write custom JavaScript probes for complex health
+evaluations and workflows. It accepts the following options:
+
+- `code` (required): The JavaScript code to execute for the probe.
+- `args` (optional): A list of string arguments to pass to the script.
+
+The script environment provides access to standard Web APIs like `fetch`, `console`, 
+`JSON`, and `setTimeout`. Custom outputs can be set using the `output` object, and
+trace information can be retrieved using `getTraceId()` and `getTraceHeaders()`.
+
+It exposes the following fields for validation:
+
+- `script.exit_code`: The exit code of the script execution (0 for success).
+- Custom fields set via `output[key] = value` in the script code.
 
 ## Validators
 Validation is performed using one of the provided validation functions.

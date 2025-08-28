@@ -7,7 +7,7 @@ For a quick introduction to using Grey to probe a service, take a look at the
 [Usage Guide](../guide/README.md).
 :::
 
-When defining a probe, you can specify the target type using the `!Http`, `!Grpc`, `!Tcp`, or `!Dns` syntax. These
+When defining a probe, you can specify the target type using the `!Http`, `!Grpc`, `!Tcp`, `!Dns`, or `!Script` syntax. These
 target types each accept a distinct set of configuration options which are documented
 on their respective pages.
 
@@ -17,8 +17,8 @@ on their respective pages.
 probes:
   - name: http.example
     policy:
-      interval: 5000
-      timeout: 2000
+      interval: 5s
+      timeout: 2s
       retries: 3
     target: !Http
       url: https://example.com
@@ -28,8 +28,8 @@ probes:
 
   - name: grpc.example
     policy:
-      interval: 5000
-      timeout: 2000
+      interval: 5s
+      timeout: 2s
       retries: 3
     target: !Grpc
       url: https://api.example.com:443
@@ -40,8 +40,8 @@ probes:
 
   - name: tcp.example
     policy:
-      interval: 5000
-      timeout: 2000
+      interval: 5s
+      timeout: 2s
       retries: 3
     target: !Tcp
       host: example.com:6379
@@ -50,12 +50,30 @@ probes:
 
   - name: dns.example
     policy:
-      interval: 5000
-      timeout: 2000
+      interval: 5s
+      timeout: 2s
       retries: 3
     target: !Dns
       domain: example.com
       record_type: MX
     validators:
       dns.answers: !Contains "10 smtp.example.com"
+
+  - name: script.example
+    policy:
+      interval: 3s0
+      timeout: 5s
+      retries: 3
+    target: !Script
+      code: |
+        const response = await fetch("https://api.example.com/health");
+        output["api.status"] = response.status;
+        output["api.ok"] = response.ok;
+        
+        const data = await response.json();
+        output["api.version"] = data.version;
+    validators:
+      api.status: !Equals 200
+      api.ok: !Equals true
+      api.version: !Contains "v1"
 ```
