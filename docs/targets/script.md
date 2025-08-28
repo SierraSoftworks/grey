@@ -32,7 +32,7 @@ probes:
         // Store the authentication request status code in the output
         output["auth.status"] = auth.status;
 
-        if (auth.ok) {
+        if (auth.status === 200) {
             const authPayload = await auth.json()
 
             const profile = await fetch("https://example.com/api/v1/profile", {
@@ -44,10 +44,8 @@ probes:
 
             output["profile.status"] = profile.status
 
-            if (profile.ok) {
-                const profilePayload = await profile.json()
-                output["profile.username"] = profilePayload.username
-            }
+            const profilePayload = await profile.json()
+            output["profile.username"] = profilePayload.username
         }
     validators:
       auth.status: !Equals 200

@@ -59,18 +59,18 @@ probes:
       args:
         - https://bender.sierrasoftworks.com
       code: |
-        const resp = await fetch(`${Deno.args[0]}/api/v1/quote/bender`, {
+        const resp = await fetch(`${arguments[0]}/api/v1/quote/bender`, {
           headers: {
             "Accept": "application/json",
             ...getTraceHeaders()
           }
         })
 
-        setOutput("http.status", resp.status)
+        output["http.status"] = resp.status
 
-        if (resp.ok) {
+        if (resp.status == 200) {
           const quote = await resp.json()
-          setOutput("quote.who", quote.who)
+          output["quote.who"] = quote.who
         }
 
     validators:
