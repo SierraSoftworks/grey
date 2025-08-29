@@ -112,7 +112,7 @@ mod tests {
     #[tokio::test]
     async fn test_get() {
         let target = HttpTarget {
-            url: "https://httpbin.org/get".to_string(),
+            url: "https://bender.sierrasoftworks.com/api/v1/quote".to_string(),
             method: "GET".to_string(),
             headers: HashMap::new(),
             body: None,

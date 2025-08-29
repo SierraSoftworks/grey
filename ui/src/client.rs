@@ -1,15 +1,10 @@
-use std::collections::HashMap;
-
 use chrono::Datelike;
 #[cfg(feature = "wasm")]
 use grey_api::UiConfig;
 use yew::prelude::*;
 
 use crate::components::status::StatusLevel;
-use crate::contexts::{
-    use_probe_history, use_probes, NoticesProvider, ProbeHistoryProvider, ProbesProvider,
-    UiConfigProvider,
-};
+use crate::contexts::{use_probes, NoticesProvider, ProbesProvider, UiConfigProvider};
 
 use super::components::{Banner, BannerKind, Header, ProbeList, Timeline};
 
@@ -17,7 +12,6 @@ use super::components::{Banner, BannerKind, Header, ProbeList, Timeline};
 pub enum ClientMsg {
     UpdateNotices(Vec<grey_api::UiNotice>),
     UpdateProbes(Vec<grey_api::Probe>),
-    UpdateProbeHistory(String, Vec<grey_api::ProbeHistory>),
     Error(String),
 }
 
@@ -25,7 +19,6 @@ pub enum ClientMsg {
 pub struct App {
     notices: Vec<grey_api::UiNotice>,
     probes: Vec<grey_api::Probe>,
-    probe_histories: std::collections::HashMap<String, Vec<grey_api::ProbeHistory>>,
     has_error: bool,
 }
 
@@ -35,7 +28,6 @@ pub struct AppProps {
     pub config: grey_api::UiConfig,
     pub notices: Vec<grey_api::UiNotice>,
     pub probes: Vec<grey_api::Probe>,
-    pub histories: HashMap<String, Vec<grey_api::ProbeHistory>>,
 }
 
 impl AppProps {
@@ -56,7 +48,6 @@ impl AppProps {
             config,
             notices: Vec::new(),
             probes: Vec::new(),
-            histories: HashMap::new(),
         })
     }
 
@@ -77,21 +68,15 @@ impl AppProps {
         let probes_data = app_element
             .get_attribute("data-probes")
             .ok_or("#app[data-probes] not found")?;
-        let histories_data = app_element
-            .get_attribute("data-probe-histories")
-            .ok_or("#app[data-probe-histories] not found")?;
 
         let config: UiConfig = serde_json::from_str(&config_data)?;
         let notices: Vec<grey_api::UiNotice> = serde_json::from_str(&notices_data)?;
         let probes: Vec<grey_api::Probe> = serde_json::from_str(&probes_data)?;
-        let histories: HashMap<String, Vec<grey_api::ProbeHistory>> =
-            serde_json::from_str(&histories_data)?;
 
         Ok(Self {
             config,
             notices,
             probes,
-            histories,
         })
     }
 }
@@ -108,7 +93,6 @@ impl Component for App {
         let app = Self {
             notices: ctx.props().notices.clone(),
             probes: ctx.props().probes.clone(),
-            probe_histories: ctx.props().histories.clone(),
             has_error: false,
         };
 
@@ -133,26 +117,8 @@ impl Component for App {
         match msg {
             ClientMsg::UpdateProbes(probes) => {
                 self.probes = probes;
-                for probe in self.probes.iter() {
-                    let probe_name = probe.name.clone();
-                    ctx.link().send_future(async move {
-                        match Self::fetch_probe_history(&probe_name).await {
-                            Ok(history) => ClientMsg::UpdateProbeHistory(probe_name, history),
-                            Err(err) => ClientMsg::Error(format!(
-                                "Failed to fetch history for {}: {}",
-                                probe_name, err
-                            )),
-                        }
-                    });
-                }
-
                 // Setup next polling cycle
                 Self::schedule_next_probes_poll(ctx);
-                true
-            }
-            ClientMsg::UpdateProbeHistory(probe_name, history) => {
-                self.probe_histories.insert(probe_name, history);
-                self.has_error = false;
                 true
             }
             ClientMsg::UpdateNotices(notices) => {
@@ -173,21 +139,17 @@ impl Component for App {
         let config_json = serde_json::to_string(&ctx.props().config).unwrap_or_default();
         let notices_json = serde_json::to_string(&ctx.props().notices).unwrap_or_default();
         let probes_json = serde_json::to_string(&ctx.props().probes).unwrap_or_default();
-        let histories_json = serde_json::to_string(&ctx.props().histories).unwrap_or_default();
 
         html! {
             <div id="app"
                 data-config={config_json}
                 data-notices={notices_json}
                 data-probes={probes_json}
-                data-probe-histories={histories_json}
             >
                 <UiConfigProvider config={ctx.props().config.clone()}>
                     <NoticesProvider notices={self.notices.clone()}>
                         <ProbesProvider probes={self.probes.clone()}>
-                            <ProbeHistoryProvider probe_histories={self.probe_histories.clone()}>
-                                <AppContent has_error={self.has_error} />
-                            </ProbeHistoryProvider>
+                            <AppContent has_error={self.has_error} />
                         </ProbesProvider>
                     </NoticesProvider>
                 </UiConfigProvider>
@@ -205,12 +167,11 @@ pub struct AppContentProps {
 #[function_component(AppContent)]
 fn app_content(props: &AppContentProps) -> Html {
     let probes_ctx = use_probes();
-    let history_ctx = use_probe_history();
 
-    let healthy_probes = history_ctx
-        .probe_histories
+    let healthy_probes = probes_ctx
+        .probes
         .iter()
-        .filter_map(|(_, history)| history.last())
+        .filter_map(|probe| probe.history.last())
         .filter(|entry| entry.pass)
         .count();
 
@@ -303,21 +264,5 @@ impl App {
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
         Ok(probes)
-    }
-
-    async fn fetch_probe_history(
-        probe_name: &str,
-    ) -> Result<Vec<grey_api::ProbeHistory>, Box<dyn std::error::Error>> {
-        let url = format!("/api/v1/probes/{}/history", probe_name);
-        let response = gloo::net::http::Request::get(&url)
-            .send()
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-
-        let history: Vec<grey_api::ProbeHistory> = response
-            .json()
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-        Ok(history)
     }
 }

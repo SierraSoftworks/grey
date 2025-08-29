@@ -1,0 +1,42 @@
+---
+state: ./state1.redb
+
+ui:
+  enabled: true
+  listen: 127.0.0.1:3001
+
+  title: Cluster Primary
+
+
+cluster:
+  enabled: true
+  listen: 127.0.0.1:13001
+  peers: []
+  secret: shared-cluster-join-secret
+  #gossip_interval: 1s
+
+probes:
+  - name: common
+    policy:
+      interval: 5000ms
+      timeout: 2s
+      retries: 3
+    target: !Dns
+      domain: google.com
+    validators:
+      dns.answers: !NotEquals []
+    tags:
+      domain: google.com
+      service: Common Probes
+  - name: agent1
+    policy:
+      interval: 5000ms
+      timeout: 2s
+      retries: 3
+    target: !Dns
+      domain: google.com
+    validators:
+      dns.answers: !NotEquals []
+    tags:
+      domain: google.com
+      service: Agent 1

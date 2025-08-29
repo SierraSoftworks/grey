@@ -1,10 +1,17 @@
 use boa_engine::{
-    context::time::JsInstant, job::{GenericJob, Job, JobExecutor, NativeAsyncJob, PromiseJob, TimeoutJob}, Context, JsResult
+    context::time::JsInstant,
+    job::{GenericJob, Job, JobExecutor, NativeAsyncJob, PromiseJob, TimeoutJob},
+    Context, JsResult,
 };
 use futures::StreamExt;
 use futures_concurrency::future::FutureGroup;
 use futures_lite::future;
-use std::{cell::RefCell, collections::{BTreeMap, VecDeque}, ops::DerefMut, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, VecDeque},
+    ops::DerefMut,
+    rc::Rc,
+};
 
 pub(crate) struct JobQueue {
     async_jobs: RefCell<VecDeque<NativeAsyncJob>>,
@@ -47,8 +54,7 @@ impl JobQueue {
 
         let job = self.generic_jobs.borrow_mut().pop_front();
         if let Some(generic) = job {
-            if let Err(err) = generic.call(context)
-            {
+            if let Err(err) = generic.call(context) {
                 eprintln!("Uncaught {err}");
             }
         }
@@ -84,7 +90,8 @@ impl JobExecutor for JobQueue {
             .build()
             .unwrap();
 
-        tokio::task::LocalSet::default().block_on(&runtime, self.run_jobs_async(&RefCell::new(context)))
+        tokio::task::LocalSet::default()
+            .block_on(&runtime, self.run_jobs_async(&RefCell::new(context)))
     }
 
     // ...the async flavor won't, which allows concurrent execution with external async tasks.

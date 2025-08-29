@@ -11,7 +11,10 @@ mod script;
 mod tcp;
 
 pub trait Target: Display {
-    fn run(&self, cancel: &AtomicBool) -> impl Future<Output = Result<Sample, Box<dyn std::error::Error>>>;
+    fn run(
+        &self,
+        cancel: &AtomicBool,
+    ) -> impl Future<Output = Result<Sample, Box<dyn std::error::Error>>>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

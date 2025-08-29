@@ -1,10 +1,8 @@
-use boa_engine::{
-    Context, JsData, JsResult
-};
+use boa_engine::{Context, JsData, JsResult};
 use boa_gc::{Finalize, Trace};
 use boa_runtime::fetch::{request::JsRequest, response::JsResponse, Fetcher};
-use tracing_batteries::prelude::*;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use tracing_batteries::prelude::*;
 
 use crate::version;
 
@@ -15,7 +13,11 @@ pub(crate) struct ReqwestFetcher {
 }
 
 impl Fetcher for ReqwestFetcher {
-    async fn fetch(self: Rc<Self>, request: JsRequest, _context: &RefCell<&mut Context>) -> JsResult<JsResponse> {
+    async fn fetch(
+        self: Rc<Self>,
+        request: JsRequest,
+        _context: &RefCell<&mut Context>,
+    ) -> JsResult<JsResponse> {
         let client = self.client.clone();
 
         use boa_engine::{JsError, JsString};
@@ -31,9 +33,9 @@ impl Fetcher for ReqwestFetcher {
         tracing_batteries::prelude::opentelemetry::global::get_text_map_propagator(|p| {
             p.inject_context(&Span::current().context(), &mut trace_headers)
         });
-        let req = trace_headers.into_iter().fold(req, |req, (k, v)| {
-            req.header(k.as_str(), v)
-        });
+        let req = trace_headers
+            .into_iter()
+            .fold(req, |req, (k, v)| req.header(k.as_str(), v));
 
         let req = req
             .headers(request.headers().clone())

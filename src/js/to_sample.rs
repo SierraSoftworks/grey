@@ -13,7 +13,7 @@ trait JsInto<T> {
 impl JsInto<Sample> for JsObject {
     fn js_into(&self, context: &mut Context) -> JsResult<Sample> {
         let mut sample: Sample = Sample::default();
-    
+
         let keys = self.own_property_keys(context)?;
         for key in keys {
             let value = self.get(key.clone(), context)?;
@@ -55,15 +55,23 @@ impl JsInto<SampleValue> for JsObject {
 
             Ok(SampleValue::List(array))
         } else {
-            let json = context.global_object()
-                .get(js_string!("JSON"), context)?;
-            
-            let stringify = json
-                .as_object().ok_or(JsError::from_rust(std::io::Error::other("JSON is not defined in the global scope")))?
-                .get(js_string!("stringify"), context)?
-                .as_function().ok_or(JsError::from_rust(std::io::Error::other("JSON.stringify is not defined in the global scope")))?;
+            let json = context.global_object().get(js_string!("JSON"), context)?;
 
-            let value = stringify.call(&json, &[JsValue::from(self.clone())], context)?.to_string(context)?.to_std_string_lossy();
+            let stringify = json
+                .as_object()
+                .ok_or(JsError::from_rust(std::io::Error::other(
+                    "JSON is not defined in the global scope",
+                )))?
+                .get(js_string!("stringify"), context)?
+                .as_function()
+                .ok_or(JsError::from_rust(std::io::Error::other(
+                    "JSON.stringify is not defined in the global scope",
+                )))?;
+
+            let value = stringify
+                .call(&json, &[JsValue::from(self.clone())], context)?
+                .to_string(context)?
+                .to_std_string_lossy();
             Ok(SampleValue::String(value))
         }
     }

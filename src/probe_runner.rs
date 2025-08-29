@@ -1,58 +1,33 @@
-use chrono::TimeDelta;
+use grey_api::ValidationResult;
 use std::{
     sync::{atomic::AtomicBool, Arc, RwLock},
     time::Instant,
 };
 use tracing_batteries::prelude::{opentelemetry::trace::Status as OpenTelemetryStatus, *};
 
-use crate::{
-    history::History, 
-    result::{ProbeResult, ValidationResult},
-    Probe, Validator,
-};
+use crate::{result::ProbeResult, state::State, Probe, Validator};
 
 const NO_PARENT: Option<tracing::Id> = None;
 
 pub struct ProbeRunner {
     probe_name: Arc<String>,
     config: Arc<RwLock<Probe>>,
-    history: Arc<History>,
+    state: State,
     cancel: Arc<AtomicBool>,
 }
 
 impl ProbeRunner {
-    pub fn new(config: Probe) -> Self {
+    pub fn new(config: Probe, state: State) -> Self {
         Self {
             probe_name: Arc::new(config.name.clone()),
             config: Arc::new(RwLock::new(config)),
-            history: Arc::new(History::default()),
+            state,
             cancel: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    pub fn with_snapshot_history<P: Into<std::path::PathBuf>>(
-        config: Probe,
-        snapshot_path: P,
-    ) -> std::io::Result<Self> {
-        let history = History::default()
-            .with_max_state_age(TimeDelta::hours(1))
-            .with_snapshot_interval(TimeDelta::seconds(60))
-            .with_snapshot_file(snapshot_path)?;
-        
-        Ok(Self {
-            probe_name: Arc::new(config.name.clone()),
-            config: Arc::new(RwLock::new(config)),
-            history: Arc::new(history),
-            cancel: Arc::new(AtomicBool::new(false)),
-        })
-    }
-
     pub fn name(&self) -> Arc<String> {
         self.probe_name.clone()
-    }
-
-    pub fn history(&self) -> Arc<History> {
-        self.history.clone()
     }
 
     pub fn update(&self, probe: Probe) {
@@ -212,7 +187,9 @@ impl ProbeRunner {
             }
         };
 
-        self.history.add_sample(sample);
+        self.state
+            .update_probe_state(self.name().as_str(), &sample)
+            .await?;
         result
     }
 

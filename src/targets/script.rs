@@ -1,10 +1,8 @@
-use boa_engine::{
-    builtins::promise::PromiseState, job::JobExecutor, Module, Source
-};
+use boa_engine::{builtins::promise::PromiseState, job::JobExecutor, Module, Source};
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, fmt::Display, rc::Rc, sync::atomic::AtomicBool};
-use tracing_batteries::prelude::*;
 use tracing::instrument;
+use tracing_batteries::prelude::*;
 
 use crate::{js::JobQueue, targets::Target, Sample};
 
@@ -20,7 +18,7 @@ impl Target for ScriptTarget {
     async fn run(&self, _cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>> {
         let code = self.code.clone();
         let args = self.args.clone();
-        
+
         let executor = Rc::new(JobQueue::new());
         let context = &mut boa_engine::Context::builder()
             .job_executor(executor.clone())
@@ -174,7 +172,8 @@ mod tests {
 
         target
             .run(&cancel)
-            .await.expect_err("Should raise an error explaining that the script cannot complete");
+            .await
+            .expect_err("Should raise an error explaining that the script cannot complete");
     }
 
     #[tokio::test]

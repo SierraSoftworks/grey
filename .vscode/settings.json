@@ -20,8 +20,12 @@
         "chrono",
         "Csvg",
         "gloo",
+        "humantime",
         "nixos",
         "nixpkgs",
+        "onmouseenter",
+        "onmouseleave",
+        "redb",
         "sierrasoftworks",
         "Softworks"
     ]

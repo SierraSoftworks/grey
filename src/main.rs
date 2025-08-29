@@ -6,9 +6,9 @@ use std::sync::atomic::AtomicBool;
 
 use clap::Parser;
 
+mod cluster;
 mod config;
 mod engine;
-mod history;
 mod js;
 #[macro_use]
 mod macros;
@@ -52,7 +52,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = state::State::new(&args.config).await?;
 
-    println!("Starting Grey with {} probes...", state.get_config().probes.len());
+    println!(
+        "Starting Grey with {} probes...",
+        state.get_config().probes.len()
+    );
 
     let engine = Engine::new(state);
     let local_set = &mut tokio::task::LocalSet::new();

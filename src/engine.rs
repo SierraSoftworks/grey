@@ -5,9 +5,9 @@ use std::sync::{atomic::AtomicBool, Arc};
 use tracing_batteries::prelude::opentelemetry::trace::SpanKind as OpenTelemetrySpanKind;
 use tracing_batteries::prelude::*;
 
-use crate::state::State;
 use crate::probe_runner::ProbeRunner;
-use crate::Probe;
+use crate::state::State;
+use crate::{cluster, Probe};
 
 pub struct Engine {
     state: State,
@@ -23,7 +23,7 @@ impl Engine {
             .map(|probe| {
                 (
                     probe.name.clone(),
-                    Self::build_probe_runner(&state, probe),
+                    Arc::new(ProbeRunner::new(probe.clone(), state.clone())),
                 )
             })
             .collect();
@@ -37,16 +37,45 @@ impl Engine {
     #[tracing::instrument(name = "engine", skip(self), fields(otel.kind=?OpenTelemetrySpanKind::Internal), err(Debug))]
     pub async fn run(&self, cancel: &AtomicBool) -> Result<(), Box<dyn std::error::Error>> {
         // Ensure that the state directory is created (if specified)
-        if let Some(state_dir) = &self.state.get_config().state_directory {
+        if let Some(state_dir) = &self.state.get_config().state.parent() {
             std::fs::create_dir_all(state_dir)?;
         }
 
         // Start config reload watcher
         self.start_config_reloader();
 
+        {
+            let state = self.state.clone();
+            tokio::task::spawn_local(async move {
+                state.gc_loop().await;
+            });
+        }
+
         // Start probe runners
         for probe in self.probes.read().unwrap().values().cloned() {
             self.start_probe_runner(probe);
+        }
+
+        if self.state.get_config().cluster.enabled {
+            let state = self.state.clone();
+            let cluster_transport =
+                cluster::UdpGossipTransport::new(&self.state.get_config().cluster.listen).await?;
+            let cluster_client = cluster::GossipClient::new(state, cluster_transport)
+                .with_gossip_factor(self.state.get_config().cluster.gossip_factor)
+                .with_gossip_interval(self.state.get_config().cluster.gossip_interval)
+                .with_seed_peers(
+                    self.state
+                        .get_config()
+                        .cluster
+                        .peers
+                        .iter()
+                        .filter_map(|p| p.parse().ok())
+                        .collect(),
+                );
+
+            tokio::task::spawn_local(async move {
+                cluster_client.run().await;
+            });
         }
 
         if self.state.get_config().ui.enabled {
@@ -67,28 +96,6 @@ impl Engine {
         Ok(())
     }
 
-    fn build_probe_runner(state: &State, probe: &Probe) -> Arc<ProbeRunner> {
-        let runner = if let Some(state_dir) = &state.get_config().state_directory {
-            // If a state directory is configured, use it
-            match ProbeRunner::with_snapshot_history(
-                probe.clone(),
-                state_dir.join(format!("{}.dat", probe.name)),
-            ) {
-                Ok(runner) => Arc::new(runner),
-                Err(e) => {
-                    warn!("Failed to create probe runner with snapshot history for '{}': {}. Using default state (no history).", probe.name, e);
-                    Arc::new(ProbeRunner::new(probe.clone()))
-                }
-            }
-        } else {
-            Arc::new(ProbeRunner::new(probe.clone()))
-        };
-
-        state.with_default_history(probe.name.clone(), runner.history());
-
-        runner
-    }
-
     fn start_probe_runner(&self, probe: Arc<ProbeRunner>) {
         tokio::task::spawn_local(async move {
             if let Err(e) = probe.schedule().await {
@@ -106,7 +113,7 @@ impl Engine {
     fn start_config_reloader(&self) {
         let state = self.state.clone();
         let probes = self.probes.clone();
-        tokio::spawn(async move {
+        tokio::task::spawn_local(async move {
             let mut current_probes = state.get_config().probes.clone();
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
@@ -146,9 +153,8 @@ impl Engine {
                             // New probe has been added
                             let name = name.to_string();
                             info!(name: "config.reload.probe", { probe.name=name, action = "add" }, "Added configuration for probe {}", name);
-                            let probe = Self::build_probe_runner(&state, new_probe);
-
-                            state.with_default_history(probe.name(), probe.history());
+                            let probe =
+                                Arc::new(ProbeRunner::new(new_probe.clone(), state.clone()));
 
                             probes
                                 .write()

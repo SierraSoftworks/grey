@@ -1,17 +1,24 @@
 use std::collections::HashMap;
 
-use boa_engine::{js_string, object::builtins::JsArray, property::Attribute, Context, IntoJsFunctionCopied, JsObject, JsValue};
 use super::ReqwestFetcher;
+use boa_engine::{
+    js_string, object::builtins::JsArray, property::Attribute, Context, IntoJsFunctionCopied,
+    JsObject, JsValue,
+};
 use tracing_batteries::prelude::*;
 
-pub fn setup_runtime(context: &mut Context, args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> { 
+pub fn setup_runtime(
+    context: &mut Context,
+    args: Vec<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
     boa_runtime::register(
         (
             boa_runtime::extensions::ConsoleExtension(super::TraceLogger),
             boa_runtime::extensions::FetchExtension(ReqwestFetcher::default()),
-        ), 
+        ),
         None,
-        context)?;
+        context,
+    )?;
 
     context.register_global_property(
         js_string!("output"),
@@ -20,7 +27,11 @@ pub fn setup_runtime(context: &mut Context, args: Vec<String>) -> Result<(), Box
     )?;
 
     let args = JsArray::from_iter(args.into_iter().map(|v| js_string!(v).into()), context);
-    context.register_global_property(js_string!("arguments"), args, Attribute::READONLY | Attribute::ENUMERABLE)?;
+    context.register_global_property(
+        js_string!("arguments"),
+        args,
+        Attribute::READONLY | Attribute::ENUMERABLE,
+    )?;
 
     let get_trace_headers_ = get_trace_headers.into_js_function_copied(context);
     context.register_global_builtin_callable(
@@ -30,11 +41,7 @@ pub fn setup_runtime(context: &mut Context, args: Vec<String>) -> Result<(), Box
     )?;
 
     let get_trace_id_ = get_trace_id.into_js_function_copied(context);
-    context.register_global_builtin_callable(
-        js_string!("getTraceId"),
-        0,
-        get_trace_id_,
-    )?;
+    context.register_global_builtin_callable(js_string!("getTraceId"), 0, get_trace_id_)?;
 
     Ok(())
 }
@@ -48,7 +55,14 @@ fn get_trace_headers() -> JsValue {
 
     let object = JsObject::with_null_proto();
     for (key, value) in headers.into_iter() {
-        object.set(js_string!(key), js_string!(value), false, &mut Context::default()).unwrap();
+        object
+            .set(
+                js_string!(key),
+                js_string!(value),
+                false,
+                &mut Context::default(),
+            )
+            .unwrap();
     }
 
     object.into()

@@ -1,36 +1,14 @@
 use actix_web::{web, HttpResponse, Result};
-use grey_api::Probe;
 use grey_ui::{App, AppProps};
 use yew::ServerRenderer;
 
 use super::{AppState, ASSETS_DIR};
 
 pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
+    let probe_histories = data.state.get_probe_states().await?;
+
     let config = data.state.get_config();
-    let probes = config.probes
-        .iter()
-        .map(|probe| probe.into())
-        .map(|mut probe: Probe| {
-            probe.availability = data.state.get_history(&probe.name).map(|h| h.availability()).unwrap_or(100.0);
-            probe
-        })
-        .collect::<Vec<grey_api::Probe>>();
-    let histories = probes
-        .iter()
-        .filter_map(|probe| {
-            data.state
-                .get_history(&probe.name)
-                .map(|history| (probe, history))
-        })
-        .map(|(probe, history)| {
-            let history = history
-                .get_state_buckets()
-                .iter()
-                .map(|bucket| bucket.into())
-                .collect();
-            (probe.name.clone(), history)
-        })
-        .collect::<std::collections::HashMap<_, Vec<grey_api::ProbeHistory>>>();
+    let probes = probe_histories.into_values().collect();
 
     // Read the embedded HTML template
     let html_template = ASSETS_DIR
@@ -49,7 +27,6 @@ pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
         config: (&config.ui).into(),
         notices: config.ui.notices.clone(),
         probes,
-        histories,
     };
     let renderer = ServerRenderer::<App>::with_props(move || app_props).hydratable(true);
     let ssr_content = renderer.render().await;

@@ -1,4 +1,4 @@
-use grey_api::ProbeHistory;
+use grey_api::ProbeHistoryBucket;
 use yew::prelude::*;
 
 #[cfg(feature = "wasm")]
@@ -12,14 +12,14 @@ use gloo_console as console;
 
 #[derive(Properties, PartialEq)]
 pub struct HistoryProps {
-    pub samples: Vec<ProbeHistory>,
+    pub samples: Vec<ProbeHistoryBucket>,
 }
 
 #[derive(Clone, Default, PartialEq)]
 struct TooltipData {
     pub visible: bool,
     pub element_index: usize,
-    pub probe_result: Option<grey_api::ProbeHistory>,
+    pub probe_result: Option<grey_api::ProbeHistoryBucket>,
 }
 
 #[function_component(History)]
@@ -36,7 +36,7 @@ pub fn history(props: &HistoryProps) -> Html {
                     // Get the JSON data from the element
                     if let Some(json_data) = element.get_attribute("data-probe-result") {
                         if let Ok(probe_result) =
-                            serde_json::from_str::<grey_api::ProbeHistory>(&json_data)
+                            serde_json::from_str::<grey_api::ProbeHistoryBucket>(&json_data)
                         {
                             let element_index = element
                                 .get_attribute("data-index")
@@ -135,7 +135,7 @@ pub fn history(props: &HistoryProps) -> Html {
     }
 }
 
-fn render_tooltip(probe_result: &grey_api::ProbeHistory) -> Html {
+fn render_tooltip(probe_result: &grey_api::ProbeHistoryBucket) -> Html {
     let status_text = if probe_result.pass {
         "Passed"
     } else {
@@ -150,7 +150,10 @@ fn render_tooltip(probe_result: &grey_api::ProbeHistory) -> Html {
         .to_string();
 
     // Format duration
-    let duration_text = format!("{}", humantime::format_duration(probe_result.latency));
+    let duration_text = format!(
+        "{}",
+        humantime::format_duration(probe_result.average_latency())
+    );
 
     html! {
         <div class="tooltip visible">

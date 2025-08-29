@@ -4,14 +4,23 @@ use yew::prelude::*;
 #[derive(Properties, PartialEq)]
 pub struct ProbeProps {
     pub probe: grey_api::Probe,
-    pub history: Vec<grey_api::ProbeHistory>,
 }
 
 #[function_component(Probe)]
 pub fn probe(props: &ProbeProps) -> Html {
-    let recent_availability =
-        props.history.iter().filter(|h| h.pass).count() as f64 / props.history.len() as f64;
-    let probe_class = match props.history.last() {
+    let (successful, total) = props
+        .probe
+        .history
+        .iter()
+        .map(|history| (history.successful_samples, history.sample_count))
+        .fold((0, 0), |acc, x| (acc.0 + x.0, acc.1 + x.1));
+    let recent_availability = if total == 0 {
+        100.0
+    } else {
+        100.0 * successful as f64 / total as f64
+    };
+
+    let probe_class = match props.probe.history.last() {
         Some(h) if h.pass => "ok",
         Some(h) if !h.pass && recent_availability > 0.8 => "warn",
         Some(h) if !h.pass && recent_availability <= 0.8 => "error",
@@ -45,13 +54,13 @@ pub fn probe(props: &ProbeProps) -> Html {
                         </div>
                     }
                 </div>
-                <div class="availability">{format!("{:.3}%", props.probe.availability)}</div>
+                <div class="availability">{format!("{:.3}%", props.probe.availability())}</div>
             </div>
             <div class="probe-config">
                 <span class="probe-target">{&props.probe.target}</span>
                 <span class="probe-policy">{policy}</span>
             </div>
-            <History samples={props.history.clone()} />
+            <History samples={props.probe.history.clone()} />
         </div>
     }
 }

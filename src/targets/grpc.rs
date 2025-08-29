@@ -1,7 +1,10 @@
 use std::{fmt::Display, sync::atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
-use tonic::{transport::{Certificate, Channel}, Request};
+use tonic::{
+    transport::{Certificate, Channel},
+    Request,
+};
 use tonic_health::pb::health_client::HealthClient;
 use tonic_health::pb::HealthCheckRequest;
 use tracing_batteries::prelude::opentelemetry::trace::SpanKind as OpenTelemetrySpanKind;
@@ -40,9 +43,11 @@ impl Target for GrpcTarget {
         }
 
         let endpoint = Channel::from_shared(self.url.clone())?
-                .tls_config(tls_config)?
-                .user_agent(format!("SierraSoftworks/grey@{}", env!("CARGO_PKG_VERSION")))?;
-
+            .tls_config(tls_config)?
+            .user_agent(format!(
+                "SierraSoftworks/grey@{}",
+                env!("CARGO_PKG_VERSION")
+            ))?;
 
         let channel = endpoint.connect().await?;
         let mut client = HealthClient::new(channel);
@@ -53,7 +58,7 @@ impl Target for GrpcTarget {
 
         let response = client.check(request).await?;
         let health_response = response.into_inner();
-        
+
         Span::current().record("grpc.status", health_response.status().as_str_name());
 
         let sample = Sample::default()
@@ -92,6 +97,9 @@ mod tests {
             service: "myservice".to_string(),
             ca_cert: None,
         };
-        assert_eq!(target_with_service.to_string(), "gRPC https://localhost:50051 (myservice)");
+        assert_eq!(
+            target_with_service.to_string(),
+            "gRPC https://localhost:50051 (myservice)"
+        );
     }
 }

@@ -11,7 +11,7 @@ static ASSETS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/ui/dist");
 
 #[derive(Clone)]
 pub struct AppState {
-    pub state: State
+    pub state: State,
 }
 
 impl AppState {
@@ -54,17 +54,11 @@ pub fn create_app() -> App<
     App::new()
         .route("/", web::get().to(page::index))
         .route("/api/v1/probes", web::get().to(api::get_probes))
-        .route(
-            "/api/v1/probes/{probe}/history",
-            web::get().to(api::get_history),
-        )
         .route("/api/v1/notices", web::get().to(api::get_notices))
         .route("/static/{filename:.*}", web::get().to(serve_static))
 }
 
-pub async fn start_server(
-    state: State,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn start_server(state: State) -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState::new(state);
 
     let listen_addr = state.state.get_config().ui.listen.clone();
