@@ -1,6 +1,8 @@
 use grey_api::ProbeHistoryBucket;
 use yew::prelude::*;
 
+use crate::formatters::{availability, si_magnitude};
+
 #[cfg(feature = "wasm")]
 use {
     wasm_bindgen::JsCast,
@@ -155,6 +157,8 @@ fn render_tooltip(probe_result: &grey_api::ProbeHistoryBucket) -> Html {
         humantime::format_duration(probe_result.average_latency())
     );
 
+    let samples = si_magnitude(probe_result.sample_count as f64, "");
+
     html! {
         <div class="tooltip visible">
             <div class="tooltip-header">
@@ -172,11 +176,15 @@ fn render_tooltip(probe_result: &grey_api::ProbeHistoryBucket) -> Html {
                 </div>
                 <div class="tooltip-row">
                     <span class="tooltip-label">{"Availability:"}</span>
-                    <span>{format!("{:.1}%", probe_result.availability())}</span>
+                    <span>{availability(probe_result.availability())}</span>
                 </div>
                 <div class="tooltip-row">
                     <span class="tooltip-label">{"Retry Rate:"}</span>
                     <span>{format!("{:.1}%", probe_result.retry_rate())}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">{"Samples:"}</span>
+                    <span>{samples}</span>
                 </div>
                 if !probe_result.message.is_empty() {
                     <div class="tooltip-row">
