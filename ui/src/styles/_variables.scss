@@ -15,6 +15,11 @@
     --color-status-warn: #e67e22;
     --color-status-error: #e74c3c;
     --color-status-unknown: #3498db;
+
+    /* Tooltip theme */
+    --tooltip-background: #111; /* near-black for readability */
+    --tooltip-text: #fff;        /* light text on dark background */
+    --tooltip-border: rgba(255, 255, 255, 0.12); /* subtle border for separation */
 }
 
 // SCSS Variables for easier use
@@ -30,6 +35,11 @@ $color-status-ok: var(--color-status-ok);
 $color-status-warn: var(--color-status-warn);
 $color-status-error: var(--color-status-error);
 $color-status-unknown: var(--color-status-unknown);
+
+// Tooltip theme variables
+$color-tooltip-background: var(--tooltip-background);
+$color-tooltip-text: var(--tooltip-text);
+$color-tooltip-border: var(--tooltip-border);
 
 // Breakpoints
 $mobile: 600px;

@@ -47,7 +47,8 @@ pub fn probe(props: &ProbeProps) -> Html {
                         </div>
                     }
                 </div>
-                <div class="probe-observers">
+                <div class="probe-observers" tooltip="The number of agents which have contributed to this status report.">
+                    <span class="icon-eye"></span>
                     {format!("{}", props.probe.observers)}
                 </div>
                 <div class="availability">{format!("{:.3}%", props.probe.availability())}</div>

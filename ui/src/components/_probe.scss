@@ -34,8 +34,9 @@
     font-weight: bold;
     color: $color-text;
     margin-right: 0.5rem;
+    cursor: default;
 
-    &::before {
+    .icon-eye {
         content: "";
         display: inline-block;
         width: 1rem;
