@@ -3,7 +3,7 @@ use std::{future::Future, hash::Hash};
 use super::*;
 
 #[cfg(test)]
-pub use in_memory::{InMemoryGossipStore, VersionedField};
+pub use in_memory::InMemoryGossipStore;
 
 pub trait GossipStore {
     type Peer: Eq + Hash;
@@ -37,7 +37,7 @@ pub trait GossipStore {
 #[cfg(test)]
 mod in_memory {
     use super::*;
-    use serde::{de::DeserializeOwned, Deserialize, Serialize};
+    use serde::{de::DeserializeOwned, Serialize};
     use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::Arc};
     use tokio::sync::RwLock;
 
@@ -229,53 +229,6 @@ mod in_memory {
                 address: VersionedField::new(address),
                 fields: HashMap::new(),
                 max_version: 0,
-            }
-        }
-    }
-
-    #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-    pub struct VersionedField<T> {
-        pub version: u64,
-        pub value: T,
-    }
-
-    impl<T> VersionedField<T> {
-        pub fn new(value: T) -> Self {
-            Self { version: 1, value }
-        }
-
-        pub fn with_version(self, version: u64) -> Self {
-            Self { version, ..self }
-        }
-    }
-
-    impl<T> From<(u64, T)> for VersionedField<T> {
-        fn from(value: (u64, T)) -> Self {
-            Self {
-                version: value.0,
-                value: value.1,
-            }
-        }
-    }
-
-    impl<T: Clone + Debug + Serialize + DeserializeOwned> Versioned for VersionedField<T> {
-        type Diff = Self;
-
-        fn version(&self) -> u64 {
-            self.version
-        }
-
-        fn diff(&self, version: u64) -> Option<Self::Diff> {
-            if version < self.version {
-                Some(self.clone())
-            } else {
-                None
-            }
-        }
-
-        fn apply(&mut self, diff: &Self::Diff) {
-            if diff.version > self.version {
-                *self = diff.clone();
             }
         }
     }
