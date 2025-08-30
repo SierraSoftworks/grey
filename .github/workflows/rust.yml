@@ -69,8 +69,8 @@ jobs:
       - name: Upload build artifacts for use in other build stages
         uses: actions/upload-artifact@v4
         with:
-          name: api-build
-          path: ./api/dist
+          name: ui-build
+          path: ./ui/dist
 
   test:
     name: Test
@@ -103,8 +103,8 @@ jobs:
       - name: Fetch UI build artifacts
         uses: actions/download-artifact@v5
         with:
-          name: api-build
-          path: ./api/dist
+          name: ui-build
+          path: ./ui/dist
 
       - name: Setup Cache
         uses: Swatinem/rust-cache@v2
@@ -207,8 +207,8 @@ jobs:
       - name: Fetch UI build artifacts
         uses: actions/download-artifact@v5
         with:
-          name: api-build
-          path: ./api/dist
+          name: ui-build
+          path: ./ui/dist
 
       - name: Setup Cache
         uses: Swatinem/rust-cache@v2
