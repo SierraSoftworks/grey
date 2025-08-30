@@ -211,10 +211,10 @@ impl State {
             let mut dropped_probe_records = 0;
             table_fields.retain(|(_, probe_name), (version, _data)| {
                 let last_updated = chrono::DateTime::from_timestamp(version as i64, 0).unwrap_or_default();
-                if last_updated < history_expiry_threshold {
-                    info!(name: "state.gc.probe", { probe.name = %probe_name, %last_updated }, "Dropping stale probe record");
+                if last_updated >= history_expiry_threshold {
                     true
                 } else {
+                    info!(name: "state.gc.probe", { probe.name = %probe_name, %last_updated }, "Dropping stale probe record");
                     dropped_probe_records += 1;
                     false
                 }
