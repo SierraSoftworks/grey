@@ -36,7 +36,7 @@ jobs:
 
   build-ui:
     name: Build User Interface
-    runs-on: ubuntu-latest
+    runs-on: darwin-latest
 
     steps:
       - name: Get Rust Stable
