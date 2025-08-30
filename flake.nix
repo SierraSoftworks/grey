@@ -115,8 +115,8 @@
         # it's not possible to build the server on the
         # wasm32 target, so we only build the client.
         wasmArgs = commonArgs // {
-          pname = "grey-api";
-          cargoExtraArgs = "--package=grey-api --features=wasm";
+          pname = "grey-ui";
+          cargoExtraArgs = "--package=grey-ui --features=wasm";
           CARGO_BUILD_TARGET = "wasm32-unknown-unknown";
         };
 
@@ -132,10 +132,9 @@
         grey-ui = craneLib.buildTrunkPackage (
           wasmArgs
           // {
-            pname = "grey-api";
             cargoArtifacts = cargoArtifactsWasm;
             preBuild = ''
-              cd ./api
+              cd ./ui
             '';
             # After building, move the `dist` artifacts and restore the working directory
             postBuild = ''
