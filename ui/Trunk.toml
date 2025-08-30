@@ -1,0 +1,11 @@
+[build]
+target = "index.html"
+dist = "dist"
+public_url = "/static/"
+minify = "on_release"
+
+[watch]
+# Files to watch for changes
+watch = ["src/"]
+ignore = ["target/", "dist/"]
+
