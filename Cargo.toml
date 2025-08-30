@@ -1,7 +1,6 @@
 [workspace]
 default-members = ["agent"]
-members = ["agent", "api"]
-exclude = ["ui"]
+members = ["agent", "api", "ui"]
 resolver = "3"
 
 [workspace.package]
@@ -14,7 +13,6 @@ readme = "README.md"
 grey-api = { path = "api" }
 grey-ui = { path = "ui", default-features = false }
 
-# Shared dependencies
 actix-web = "4.11"
 aes-gcm = "0.10.3"
 async-trait = "0.1"
@@ -67,6 +65,15 @@ tracing-batteries = { git = "https://github.com/sierrasoftworks/tracing-batterie
 ] }
 trust-dns-resolver = { version = "0.23", features = ["tokio-runtime"] }
 yew = { version = "0.21", features = ["ssr"] }
+
+gloo = { version = "0.11" }
+gloo-console = { version = "0.3" }
+gloo-net = { version = "0.6" }
+gloo-timers = { version = "0.3", features = ["futures"] }
+wasm-bindgen = { version = "0.2.100" }
+wasm-bindgen-futures = { version = "0.4" }
+wasm-logger = { version = "0.2" }
+web-sys = { version = "0.3" }
 
 # Test dependencies
 tempfile = "3.21"
