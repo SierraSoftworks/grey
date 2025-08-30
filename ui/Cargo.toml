@@ -1,10 +1,7 @@
 [package]
 name = "grey-ui"
 edition = "2024"
-version.workspace = true
-description.workspace = true
-documentation.workspace = true
-readme.workspace = true
+version = "0.1.0"
 
 [[bin]]
 name = "grey-ui"
@@ -15,20 +12,22 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 grey-api = { path = "../api" }
-chrono = { workspace = true, features = ["wasmbind"] }
-circular-buffer = { workspace = true }
-gloo = { workspace = true, optional = true }
-gloo-console = { workspace = true, optional = true }
-gloo-net = { workspace = true, optional = true }
-gloo-timers = { workspace = true, optional = true }
-humantime = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-yew = { workspace = true, features = ["hydration"] }
-wasm-bindgen = { workspace = true, optional = true }
-wasm-bindgen-futures = { workspace = true, optional = true }
-wasm-logger = { workspace = true, optional = true }
-web-sys = { workspace = true, optional = true }
+
+chrono = { version = "0.4.38", features = ["serde", "wasmbind"] }
+humantime = { version = "2.2.0" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+yew = { version = "0.21", features = ["ssr", "hydration"] }
+
+gloo = { version = "0.11", optional = true }
+gloo-console = { version = "0.3", optional = true }
+gloo-net = { version = "0.6", optional = true }
+gloo-timers = { version = "0.3", features = ["futures"], optional = true }
+wasm-bindgen = { version = "0.2.100", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+wasm-logger = { version = "0.2", optional = true }
+web-sys = { version = "0.3", optional = true }
+
 
 [features]
 default = ["wasm"]
