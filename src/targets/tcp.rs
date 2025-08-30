@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, sync::atomic::AtomicBool};
-use tokio::net::{lookup_host, TcpSocket};
+use tokio::net::{TcpSocket, lookup_host};
 
 use crate::{Sample, Target};
 

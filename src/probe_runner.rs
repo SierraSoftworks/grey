@@ -1,11 +1,11 @@
 use grey_api::ValidationResult;
 use std::{
-    sync::{atomic::AtomicBool, Arc, RwLock},
+    sync::{Arc, RwLock, atomic::AtomicBool},
     time::Instant,
 };
 use tracing_batteries::prelude::{opentelemetry::trace::Status as OpenTelemetryStatus, *};
 
-use crate::{result::ProbeResult, state::State, Probe, Validator};
+use crate::{Probe, Validator, result::ProbeResult, state::State};
 
 const NO_PARENT: Option<tracing::Id> = None;
 

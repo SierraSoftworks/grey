@@ -1,5 +1,8 @@
 use std::{
-    collections::HashMap, net::SocketAddr, path::PathBuf, sync::{Arc, Mutex, RwLock}, time::Duration
+    collections::HashMap,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Arc, Mutex, RwLock},
 };
 
 use grey_api::{Mergeable, Probe};
@@ -8,9 +11,9 @@ use tracing::info;
 use tracing_batteries::prelude::*;
 
 use crate::{
+    Config,
     cluster::{self, ClusterStateDigest, NodeID, Versioned},
     result::ProbeResult,
-    Config,
 };
 
 // Maps a node's address to a tuple of its (NodeID, Last Seen Timestamp)
@@ -21,7 +24,6 @@ const CLUSTER_FIELDS_TABLE: TableDefinition<(u128, String), (u64, &[u8])> =
     TableDefinition::new("cluster_fields");
 
 type ProbeState = Probe;
-
 
 #[derive(Clone)]
 pub struct State {
@@ -108,10 +110,9 @@ impl State {
                 .get((self.node_id.into(), probe.name.clone()))?
                 .map(|existing| {
                     let (_version, data) = existing.value();
-                    let mut snapshot = rmp_serde::from_slice::<ProbeState>(data)
-                        .unwrap_or_else(|_| probe.into());
-                    snapshot
-                }).unwrap_or_else(|| probe.into());
+                    rmp_serde::from_slice::<ProbeState>(data).unwrap_or_else(|_| probe.into())
+                })
+                .unwrap_or_else(|| probe.into());
 
             let mut updated_probe: ProbeState = probe.into();
             updated_probe.last_updated = snapshot.last_updated + chrono::Duration::milliseconds(1);
@@ -183,12 +184,14 @@ impl State {
             let mut table_peers = txn.open_table(CLUSTER_PEERS_TABLE)?;
             let mut table_fields = txn.open_table(CLUSTER_FIELDS_TABLE)?;
 
-            let history_expiry_threshold = chrono::Utc::now() - self.get_config().cluster.gc_probe_expiry;
+            let history_expiry_threshold =
+                chrono::Utc::now() - self.get_config().cluster.gc_probe_expiry;
             let peer_drop_threshold = chrono::Utc::now() - self.get_config().cluster.gc_peer_expiry;
 
             table_peers.retain(|addr, (peer_id, last_seen)| {
                 let peer_id = NodeID::from(peer_id);
-                let last_seen = chrono::DateTime::from_timestamp(last_seen as i64, 0).unwrap_or_default();
+                let last_seen =
+                    chrono::DateTime::from_timestamp(last_seen as i64, 0).unwrap_or_default();
                 if last_seen >= peer_drop_threshold {
                     true
                 } else {
@@ -295,14 +298,10 @@ impl cluster::GossipStore for State {
             if version <= remote_version {
                 continue;
             }
-            
+
             let data: ProbeState = rmp_serde::from_slice(data)?;
             if let Some(diff) = data.diff(remote_version) {
-                delta.update(
-                    peer.clone(),
-                    probe,
-                    diff,
-                );
+                delta.update(peer.clone(), probe, diff);
             }
         }
 
@@ -369,7 +368,12 @@ impl Versioned for Probe {
                 successful_samples: self.successful_samples,
                 last_updated: self.last_updated,
                 observers: 0,
-                history: self.history.iter().filter(|h| h.start_time > self.last_updated - chrono::Duration::hours(2)).cloned().collect(),
+                history: self
+                    .history
+                    .iter()
+                    .filter(|h| h.start_time > self.last_updated - chrono::Duration::hours(2))
+                    .cloned()
+                    .collect(),
             })
         } else {
             None

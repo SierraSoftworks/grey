@@ -1,8 +1,8 @@
-use actix_web::{web, HttpResponse, Result};
+use actix_web::{HttpResponse, Result, web};
 use grey_ui::{App, AppProps};
 use yew::ServerRenderer;
 
-use super::{AppState, ASSETS_DIR};
+use super::{ASSETS_DIR, AppState};
 
 pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
     let probe_histories = data.state.get_probe_states().await?;

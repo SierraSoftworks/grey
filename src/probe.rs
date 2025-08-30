@@ -2,7 +2,7 @@ use std::{collections::HashMap, time::Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{targets::TargetType, utils::random_start_offset, validators::ValidatorType, Policy};
+use crate::{Policy, targets::TargetType, utils::random_start_offset, validators::ValidatorType};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Probe {

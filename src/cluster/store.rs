@@ -37,8 +37,8 @@ pub trait GossipStore {
 #[cfg(test)]
 mod in_memory {
     use super::*;
-    use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::Arc};
     use serde::{Deserialize, Serialize};
+    use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::Arc};
     use tokio::sync::RwLock;
 
     #[derive(Clone)]
@@ -68,14 +68,10 @@ mod in_memory {
                 .and_then(|node| node.fields.get(field).cloned())
         }
 
-        pub async fn set<S: ToString>(&self, field: S, value: T)
-        {
+        pub async fn set<S: ToString>(&self, field: S, value: T) {
             let field = field.to_string();
 
-            let mut state = self
-                .state
-                .write()
-                .await;
+            let mut state = self.state.write().await;
 
             let node_state = state
                 .entry(self.node_id.clone())
@@ -87,7 +83,13 @@ mod in_memory {
                 .and_modify(|f| f.apply(&value))
                 .or_insert(value);
 
-            node_state.max_version = node_state.fields.values().map(|v| v.version()).max().unwrap_or_default().max(node_state.address.version());
+            node_state.max_version = node_state
+                .fields
+                .values()
+                .map(|v| v.version())
+                .max()
+                .unwrap_or_default()
+                .max(node_state.address.version());
         }
     }
 
@@ -172,11 +174,13 @@ mod in_memory {
                     .or_insert_with(|| NodeState::new(address.clone()));
 
                 if node_state.address.value != address {
-                    node_state.address = VersionedField::new(address.clone()).with_version(node_state.max_version + 1);
+                    node_state.address = VersionedField::new(address.clone())
+                        .with_version(node_state.max_version + 1);
                 }
 
                 for (field, value) in node_diff {
-                    node_state.fields
+                    node_state
+                        .fields
                         .entry(field)
                         .and_modify(|f| {
                             f.apply(&value);
@@ -184,7 +188,13 @@ mod in_memory {
                         .or_insert(value);
                 }
 
-                node_state.max_version = node_state.fields.values().map(|v| v.version()).max().unwrap_or_default().max(node_state.address.version());
+                node_state.max_version = node_state
+                    .fields
+                    .values()
+                    .map(|v| v.version())
+                    .max()
+                    .unwrap_or_default()
+                    .max(node_state.address.version());
             }
 
             Ok(())
@@ -213,8 +223,7 @@ mod in_memory {
     }
 
     impl<T, A> NodeState<T, A> {
-        pub fn new(address: A) -> Self
-        {
+        pub fn new(address: A) -> Self {
             Self {
                 address: VersionedField::new(address),
                 fields: HashMap::new(),
@@ -222,7 +231,7 @@ mod in_memory {
             }
         }
     }
-        
+
     #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
     pub struct VersionedField<T> {
         pub version: u64,
@@ -278,7 +287,9 @@ mod tests {
         let node_id = NodeID::new();
         let store = InMemoryGossipStore::new(node_id, node_id);
 
-        store.set("test", VersionedField::new(1).with_version(1)).await;
+        store
+            .set("test", VersionedField::new(1).with_version(1))
+            .await;
         assert_eq!(store.get(&node_id, "test").await.unwrap().value, 1);
 
         assert_eq!(
@@ -292,12 +303,21 @@ mod tests {
             .unwrap();
         assert_eq!(
             diff,
-            ClusterStateDiff::new().with_node(node_id, vec![("test".into(), VersionedField::new(1).with_version(1))].into_iter().collect())
+            ClusterStateDiff::new().with_node(
+                node_id,
+                vec![("test".into(), VersionedField::new(1).with_version(1))]
+                    .into_iter()
+                    .collect()
+            )
         );
 
         let new_node = NodeID::new();
-        let diff =
-            ClusterStateDiff::new().with_node(new_node, vec![("test".into(), VersionedField::new(42).with_version(1))].into_iter().collect());
+        let diff = ClusterStateDiff::new().with_node(
+            new_node,
+            vec![("test".into(), VersionedField::new(42).with_version(1))]
+                .into_iter()
+                .collect(),
+        );
         store
             .apply_diff(diff, new_node)
             .await

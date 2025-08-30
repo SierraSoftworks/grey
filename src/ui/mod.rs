@@ -1,5 +1,5 @@
-use actix_web::{http::header::ContentType, web, App, HttpResponse, HttpServer, Result};
-use include_dir::{include_dir, Dir};
+use actix_web::{App, HttpResponse, HttpServer, Result, http::header::ContentType, web};
+use include_dir::{Dir, include_dir};
 
 use crate::state::State;
 

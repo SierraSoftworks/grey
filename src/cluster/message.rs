@@ -12,9 +12,7 @@ pub enum Message<P: Eq + Hash, T> {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct ClusterStateDiff<Peer: Eq + Hash, Value>(
-    HashMap<Peer, HashMap<String, Value>>,
-);
+pub struct ClusterStateDiff<Peer: Eq + Hash, Value>(HashMap<Peer, HashMap<String, Value>>);
 
 impl<P: Eq + Hash, T: Versioned> ClusterStateDiff<P, T> {
     pub fn new() -> Self {

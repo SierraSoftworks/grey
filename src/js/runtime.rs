@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use super::ReqwestFetcher;
 use boa_engine::{
-    js_string, object::builtins::JsArray, property::Attribute, Context, IntoJsFunctionCopied,
-    JsObject, JsValue,
+    Context, IntoJsFunctionCopied, JsObject, JsValue, js_string, object::builtins::JsArray,
+    property::Attribute,
 };
 use tracing_batteries::prelude::*;
 

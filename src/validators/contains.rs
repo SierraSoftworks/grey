@@ -54,29 +54,37 @@ mod tests {
     fn test_validate() {
         let validator = Contains(SampleValue::String("world".to_string()));
 
-        assert!(validator
-            .validate("field", &SampleValue::String("hello world".to_string()))
-            .is_ok());
-        assert!(validator
-            .validate(
-                "field",
-                &SampleValue::List(vec![
-                    SampleValue::String("hello".to_string()),
-                    SampleValue::String("world".to_string())
-                ])
-            )
-            .is_ok());
-        assert!(validator
-            .validate("field", &SampleValue::String("hello".to_string()))
-            .is_err());
-        assert!(validator
-            .validate(
-                "field",
-                &SampleValue::List(vec![
-                    SampleValue::String("hello".to_string()),
-                    SampleValue::String("worlds".to_string())
-                ])
-            )
-            .is_err());
+        assert!(
+            validator
+                .validate("field", &SampleValue::String("hello world".to_string()))
+                .is_ok()
+        );
+        assert!(
+            validator
+                .validate(
+                    "field",
+                    &SampleValue::List(vec![
+                        SampleValue::String("hello".to_string()),
+                        SampleValue::String("world".to_string())
+                    ])
+                )
+                .is_ok()
+        );
+        assert!(
+            validator
+                .validate("field", &SampleValue::String("hello".to_string()))
+                .is_err()
+        );
+        assert!(
+            validator
+                .validate(
+                    "field",
+                    &SampleValue::List(vec![
+                        SampleValue::String("hello".to_string()),
+                        SampleValue::String("worlds".to_string())
+                    ])
+                )
+                .is_err()
+        );
     }
 }

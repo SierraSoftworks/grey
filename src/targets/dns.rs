@@ -2,9 +2,9 @@ use std::{fmt::Display, str::FromStr, sync::atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
 use trust_dns_resolver::{
+    TokioAsyncResolver,
     config::{ResolverConfig, ResolverOpts},
     proto::rr::RecordType,
-    TokioAsyncResolver,
 };
 
 use crate::{Sample, Target};

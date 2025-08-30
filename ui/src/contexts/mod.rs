@@ -2,6 +2,6 @@ pub mod config;
 pub mod notices;
 pub mod probes;
 
-pub use config::{use_ui_config, UiConfigContext, UiConfigProvider};
-pub use notices::{use_notices, NoticesContext, NoticesProvider};
-pub use probes::{use_probes, ProbesContext, ProbesProvider};
+pub use config::{UiConfigContext, UiConfigProvider, use_ui_config};
+pub use notices::{NoticesContext, NoticesProvider, use_notices};
+pub use probes::{ProbesContext, ProbesProvider, use_probes};

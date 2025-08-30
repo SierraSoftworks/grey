@@ -4,7 +4,7 @@ use grey_api::UiConfig;
 use yew::prelude::*;
 
 use crate::components::status::StatusLevel;
-use crate::contexts::{use_probes, NoticesProvider, ProbesProvider, UiConfigProvider};
+use crate::contexts::{NoticesProvider, ProbesProvider, UiConfigProvider, use_probes};
 
 use super::components::{Banner, BannerKind, Header, ProbeList, Timeline};
 

@@ -1,10 +1,10 @@
-use boa_engine::{builtins::promise::PromiseState, job::JobExecutor, Module, Source};
+use boa_engine::{Module, Source, builtins::promise::PromiseState, job::JobExecutor};
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, fmt::Display, rc::Rc, sync::atomic::AtomicBool};
 use tracing::instrument;
 use tracing_batteries::prelude::*;
 
-use crate::{js::JobQueue, targets::Target, Sample};
+use crate::{Sample, js::JobQueue, targets::Target};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct ScriptTarget {

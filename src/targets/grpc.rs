@@ -2,11 +2,11 @@ use std::{fmt::Display, sync::atomic::AtomicBool};
 
 use serde::{Deserialize, Serialize};
 use tonic::{
-    transport::{Certificate, Channel},
     Request,
+    transport::{Certificate, Channel},
 };
-use tonic_health::pb::health_client::HealthClient;
 use tonic_health::pb::HealthCheckRequest;
+use tonic_health::pb::health_client::HealthClient;
 use tracing_batteries::prelude::opentelemetry::trace::SpanKind as OpenTelemetrySpanKind;
 use tracing_batteries::prelude::*;
 

@@ -1,4 +1,4 @@
-use boa_engine::{js_string, Context, JsError, JsObject, JsResult, JsValue};
+use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, js_string};
 
 use crate::{Sample, SampleValue};
 

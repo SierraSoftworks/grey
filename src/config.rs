@@ -108,18 +108,24 @@ pub struct ClusterConfig {
 
 impl ClusterConfig {
     pub fn get_secret_key(&self) -> Result<[u8; 32], Box<dyn std::error::Error>> {
-        use base64::prelude::*;
         use aes_gcm::{
-            aead::{KeyInit, OsRng},
             Aes256Gcm,
+            aead::{KeyInit, OsRng},
         };
+        use base64::prelude::*;
 
-        let secret_bytes = BASE64_STANDARD.decode(self.secret.as_bytes()).unwrap_or_default();
+        let secret_bytes = BASE64_STANDARD
+            .decode(self.secret.as_bytes())
+            .unwrap_or_default();
         if secret_bytes.len() < 32 {
             let example_key = Aes256Gcm::generate_key(OsRng);
             let key: &[u8] = example_key.as_slice();
-            
-            return Err(format!("Cluster secret key must contain 32-bytes of base64-encoded data (such as '{}')", BASE64_STANDARD.encode(key)).into());
+
+            return Err(format!(
+                "Cluster secret key must contain 32-bytes of base64-encoded data (such as '{}')",
+                BASE64_STANDARD.encode(key)
+            )
+            .into());
         }
 
         let mut key = [0u8; 32];

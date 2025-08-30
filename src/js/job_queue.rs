@@ -1,7 +1,7 @@
 use boa_engine::{
+    Context, JsResult,
     context::time::JsInstant,
     job::{GenericJob, Job, JobExecutor, NativeAsyncJob, PromiseJob, TimeoutJob},
-    Context, JsResult,
 };
 use futures::StreamExt;
 use futures_concurrency::future::FutureGroup;

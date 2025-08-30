@@ -4,7 +4,7 @@ members = [".", "ui", "api"]
 [package]
 name = "grey"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "A lightweight tool for checking the health of online services and reporting this to a monitoring system."
 
 [[bin]]

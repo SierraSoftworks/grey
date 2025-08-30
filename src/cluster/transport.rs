@@ -2,7 +2,7 @@ use std::{hash::Hash, net::SocketAddr, str::FromStr, sync::Arc};
 
 use super::*;
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 #[cfg(test)]
 pub use tests::InMemoryGossipTransport;
 use tokio::net::UdpSocket;
@@ -34,7 +34,10 @@ pub struct UdpGossipTransport<P, T> {
 }
 
 impl<P, T> UdpGossipTransport<P, T> {
-    pub async fn new(addr: &str, shared_secret: [u8; 32]) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new(
+        addr: &str,
+        shared_secret: [u8; 32],
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let addr = SocketAddr::from_str(addr)?;
         let socket = UdpSocket::bind(addr).await?;
 
@@ -46,8 +49,8 @@ impl<P, T> UdpGossipTransport<P, T> {
     }
 
     fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        use aes_gcm::{Aes256Gcm, Key, KeyInit};
         use aes_gcm::aead::{Aead, AeadCore, OsRng};
+        use aes_gcm::{Aes256Gcm, Key, KeyInit};
 
         let key: &Key<Aes256Gcm> = &self.shared_secret.into();
         let cipher = Aes256Gcm::new(&key);
@@ -63,8 +66,8 @@ impl<P, T> UdpGossipTransport<P, T> {
     }
 
     fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        use aes_gcm::{Aes256Gcm, Key, KeyInit};
         use aes_gcm::aead::{Aead, Nonce};
+        use aes_gcm::{Aes256Gcm, Key, KeyInit};
 
         if ciphertext.len() < 12 {
             return Err("Ciphertext too short to contain nonce".into());
@@ -122,7 +125,7 @@ mod tests {
     use std::hash::Hash;
 
     use super::*;
-    use tokio::sync::{mpsc, Mutex};
+    use tokio::sync::{Mutex, mpsc};
 
     pub struct InMemoryGossipTransport<P: Eq + Hash, T> {
         sender: mpsc::Sender<Message<P, T>>,

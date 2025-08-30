@@ -1,6 +1,6 @@
 use boa_engine::{Context, JsData, JsResult};
 use boa_gc::{Finalize, Trace};
-use boa_runtime::fetch::{request::JsRequest, response::JsResponse, Fetcher};
+use boa_runtime::fetch::{Fetcher, request::JsRequest, response::JsResponse};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use tracing_batteries::prelude::*;
 

@@ -89,7 +89,9 @@ where
         let digest = self.store.get_digest().await?;
 
         for addr in peer_addresses {
-            self.transport.send(addr, Message::Syn(self_id.clone(), digest.clone())).await?;
+            self.transport
+                .send(addr, Message::Syn(self_id.clone(), digest.clone()))
+                .await?;
         }
 
         Ok(())
@@ -110,14 +112,20 @@ where
                 }
                 Err(err) => {
                     // Handle error
-                    warn!("Malformed gossip message received, ignoring (make sure all Grey instances in the cluster are running the same major version): {err:?}");
+                    warn!(
+                        "Malformed gossip message received, ignoring (make sure all Grey instances in the cluster are running the same major version): {err:?}"
+                    );
                     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                 }
             }
         }
     }
 
-    async fn handle_message(&self, addr: &S::Address, msg: Message<S::Peer, S::State>) -> Result<(), Box<dyn std::error::Error>> {
+    async fn handle_message(
+        &self,
+        addr: &S::Address,
+        msg: Message<S::Peer, S::State>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         match msg {
             Message::Syn(peer_id, digest) => {
                 trace!("Received gossip syn from {peer_id}: {digest}");
@@ -125,7 +133,10 @@ where
                 let delta = self.store.get_diff(digest).await?;
                 let digest = self.store.get_digest().await?;
                 self.transport
-                    .send(addr.clone(), Message::SynAck(self_id.clone(), digest, delta))
+                    .send(
+                        addr.clone(),
+                        Message::SynAck(self_id.clone(), digest, delta),
+                    )
                     .await?;
             }
             Message::SynAck(peer_id, digest, diff) => {
@@ -134,8 +145,7 @@ where
                 let delta = self.store.get_diff(digest).await?;
                 self.store.apply_diff(diff, addr.clone()).await?;
 
-                self
-                    .transport
+                self.transport
                     .send(addr.clone(), Message::Ack(self_id.clone(), delta))
                     .await?;
             }

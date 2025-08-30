@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::sync::RwLock;
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::{Arc, atomic::AtomicBool};
 
 use tracing_batteries::prelude::opentelemetry::trace::SpanKind as OpenTelemetrySpanKind;
 use tracing_batteries::prelude::*;
 
 use crate::probe_runner::ProbeRunner;
 use crate::state::State;
-use crate::{cluster, Probe};
+use crate::{Probe, cluster};
 
 pub struct Engine {
     state: State,
@@ -60,8 +60,11 @@ impl Engine {
             let state = self.state.clone();
             let secret_key = self.state.get_config().cluster.get_secret_key()?;
 
-            let cluster_transport =
-                cluster::UdpGossipTransport::new(&self.state.get_config().cluster.listen, secret_key).await?;
+            let cluster_transport = cluster::UdpGossipTransport::new(
+                &self.state.get_config().cluster.listen,
+                secret_key,
+            )
+            .await?;
             let cluster_client = cluster::GossipClient::new(state, cluster_transport)
                 .with_gossip_factor(self.state.get_config().cluster.gossip_factor)
                 .with_gossip_interval(self.state.get_config().cluster.gossip_interval)

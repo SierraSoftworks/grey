@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display};
 
-use serde::{de::Visitor, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::Visitor};
 
 #[derive(Debug, Clone, Default)]
 pub struct Sample {
