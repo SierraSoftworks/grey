@@ -164,7 +164,7 @@ jobs:
             cross: true
             flags: --features openssl_src
 
-          # Apple MacOS builds
+          # Apple macOS builds
           - arch: amd64
             run_on: macos-latest
             os: darwin
