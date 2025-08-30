@@ -139,3 +139,29 @@ How frequently to run the garbage collector to remove stale peers and expired pr
 cluster:
   gc_interval: 300s  # Default (5 minutes)
 ```
+
+#### gc_probe_expiry
+How long to retain information about a probe before it is considered stale and removed
+in the next garbage collection cycle.
+
+Every time you start Grey, it starts reporting probe state under a new node identifier,
+so it is normal and expected that application restarts will result in probe state for
+old instances not being updated and eventually needing to be removed. Once removed,
+the aggregated probe metrics will be adjusted to account for the loss of this data.
+
+```yaml
+cluster:
+  gc_probe_expiry: 7d  # Default (7 days)
+```
+
+#### gc_peer_expiry
+How long to attempt to contact a known peer after it was last seen before considering
+it to be offline and removing it from the local member list.
+
+We recommend you keep this value relatively low to avoid sending unnecessary broadcasts
+to inactive peers, however having it set too short can result negatively impact cluster stability
+under load.
+
+```yaml
+cluster:
+  gc_peer_expiry: 30m  # Default (30 minutes)

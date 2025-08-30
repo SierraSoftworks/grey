@@ -183,8 +183,8 @@ impl State {
             let mut table_peers = txn.open_table(CLUSTER_PEERS_TABLE)?;
             let mut table_fields = txn.open_table(CLUSTER_FIELDS_TABLE)?;
 
-            let history_expiry_threshold = chrono::Utc::now() - chrono::Duration::days(2);
-            let peer_drop_threshold = chrono::Utc::now() - chrono::Duration::minutes(30);
+            let history_expiry_threshold = chrono::Utc::now() - self.get_config().cluster.gc_probe_expiry;
+            let peer_drop_threshold = chrono::Utc::now() - self.get_config().cluster.gc_peer_expiry;
 
             table_peers.retain(|addr, (peer_id, last_seen)| {
                 let peer_id = NodeID::from(peer_id);

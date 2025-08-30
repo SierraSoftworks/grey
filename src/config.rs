@@ -84,20 +84,25 @@ pub struct UiConfig {
 pub struct ClusterConfig {
     #[serde(default)]
     pub enabled: bool,
-    #[serde(default = "default::cluster::public_address")]
-    pub public_address: String,
     #[serde(default = "default::cluster::listen")]
     pub listen: String,
     pub peers: Vec<String>,
     pub secret: String,
+
     #[serde(default = "default::cluster::gossip_interval")]
     #[serde(with = "humantime_serde")]
     pub gossip_interval: std::time::Duration,
     #[serde(default = "default::cluster::gossip_factor")]
     pub gossip_factor: usize,
+
     #[serde(default = "default::cluster::gc_interval")]
     #[serde(with = "humantime_serde")]
     pub gc_interval: std::time::Duration,
+    #[serde(default = "default::cluster::gc_probe_expiry")]
+    #[serde(with = "humantime_serde")]
+    pub gc_probe_expiry: std::time::Duration,
+    #[serde(with = "humantime_serde")]
+    pub gc_peer_expiry: std::time::Duration,
 }
 
 impl ClusterConfig {
@@ -148,10 +153,6 @@ mod default {
     }
 
     pub mod cluster {
-        pub fn public_address() -> String {
-            format!("{}:8888", gethostname::gethostname().to_string_lossy().to_string())
-        }
-
         pub fn listen() -> String {
             "0.0.0.0:8888".into()
         }
@@ -165,7 +166,15 @@ mod default {
         }
 
         pub fn gc_interval() -> std::time::Duration {
-            std::time::Duration::from_secs(300)
+            std::time::Duration::from_secs(5 * 60)
+        }
+
+        pub fn gc_probe_expiry() -> std::time::Duration {
+            std::time::Duration::from_secs(7 * 24 * 60 * 60)
+        }
+
+        pub fn gc_peer_expiry() -> std::time::Duration {
+            std::time::Duration::from_secs(30 * 60)
         }
     }
 }
