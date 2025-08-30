@@ -64,13 +64,13 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build UI using trunk
-        run: cd ui && trunk build --release
+        run: cd api && trunk build --release
 
       - name: Upload build artifacts for use in other build stages
         uses: actions/upload-artifact@v4
         with:
-          name: ui-build
-          path: ./ui/dist
+          name: api-build
+          path: ./api/dist
 
   test:
     name: Test
@@ -103,8 +103,8 @@ jobs:
       - name: Fetch UI build artifacts
         uses: actions/download-artifact@v5
         with:
-          name: ui-build
-          path: ./ui/dist
+          name: api-build
+          path: ./api/dist
 
       - name: Setup Cache
         uses: Swatinem/rust-cache@v2
@@ -207,8 +207,8 @@ jobs:
       - name: Fetch UI build artifacts
         uses: actions/download-artifact@v5
         with:
-          name: ui-build
-          path: ./ui/dist
+          name: api-build
+          path: ./api/dist
 
       - name: Setup Cache
         uses: Swatinem/rust-cache@v2

@@ -104,7 +104,7 @@
             # serve it, so we pass it as an environment variable at build time
             CLIENT_DIST = grey-ui;
             preBuild = ''
-              cp -r $CLIENT_DIST ./ui/dist
+              cp -r $CLIENT_DIST ./api/dist
             '';
             doCheck = false;
           }
@@ -115,8 +115,8 @@
         # it's not possible to build the server on the
         # wasm32 target, so we only build the client.
         wasmArgs = commonArgs // {
-          pname = "grey-ui";
-          cargoExtraArgs = "--package=grey-ui --features=wasm";
+          pname = "grey-api";
+          cargoExtraArgs = "--package=grey-api --features=wasm";
           CARGO_BUILD_TARGET = "wasm32-unknown-unknown";
         };
 
@@ -132,10 +132,10 @@
         grey-ui = craneLib.buildTrunkPackage (
           wasmArgs
           // {
-            pname = "grey-ui";
+            pname = "grey-api";
             cargoArtifacts = cargoArtifactsWasm;
             preBuild = ''
-              cd ./ui
+              cd ./api
             '';
             # After building, move the `dist` artifacts and restore the working directory
             postBuild = ''

@@ -20,7 +20,7 @@ mod sample;
 mod serializers;
 mod state;
 mod targets;
-mod ui;
+mod api;
 mod utils;
 mod validators;
 
