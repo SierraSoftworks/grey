@@ -1,5 +1,4 @@
 use std::{hash::Hash, net::SocketAddr, str::FromStr, sync::Arc};
-use tracing_batteries::prelude::*;
 
 use super::*;
 

@@ -8,14 +8,16 @@ use crate::{Mergeable, ProbeHistoryBucket};
 pub struct Probe {
     pub name: String,
 
-    pub policy: Policy,
+    #[serde(default)]
+    pub policy: Option<Policy>,
 
+    #[serde(default)]
     pub target: String,
 
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[serde(default)]
     pub tags: HashMap<String, String>,
 
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[serde(default)]
     pub validators: HashMap<String, String>,
 
     pub sample_count: u64,
@@ -64,6 +66,14 @@ impl Probe {
 
 impl Mergeable for Probe {
     fn merge(&mut self, other: &Self) {
+        if other.last_updated > self.last_updated {
+            self.name = other.name.clone();
+            self.policy = other.policy.clone();
+            self.target = other.target.clone();
+            self.tags = other.tags.clone();
+            self.validators = other.validators.clone();
+        }
+
         self.sample_count += other.sample_count;
         self.successful_samples += other.successful_samples;
         self.last_updated = self.last_updated.max(other.last_updated);

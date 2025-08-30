@@ -27,6 +27,8 @@ pub async fn get_notices(data: web::Data<AppState>) -> Result<HttpResponse> {
 
 pub async fn get_probes(data: web::Data<AppState>) -> Result<HttpResponse> {
     let api_probes = data.state.get_probe_states().await?;
+    let mut probes: Vec<grey_api::Probe> = api_probes.into_values().collect();
+    probes.sort_by_key(|p| p.name.clone());
 
-    Ok(HttpResponse::Ok().json(api_probes.values().collect::<Vec<_>>()))
+    Ok(HttpResponse::Ok().json(probes))
 }

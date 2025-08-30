@@ -8,7 +8,8 @@ pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
     let probe_histories = data.state.get_probe_states().await?;
 
     let config = data.state.get_config();
-    let probes = probe_histories.into_values().collect();
+    let mut probes: Vec<grey_api::Probe> = probe_histories.into_values().collect();
+    probes.sort_by_key(|p| p.name.clone());
 
     // Read the embedded HTML template
     let html_template = ASSETS_DIR

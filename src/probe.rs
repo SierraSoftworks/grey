@@ -25,11 +25,11 @@ impl Into<grey_api::Probe> for &Probe {
     fn into(self) -> grey_api::Probe {
         grey_api::Probe {
             name: self.name.clone(),
-            policy: grey_api::Policy {
+            policy: Some(grey_api::Policy {
                 interval: std::time::Duration::from_millis(self.policy.interval.as_millis() as u64),
                 retries: self.policy.retries,
                 timeout: std::time::Duration::from_millis(self.policy.timeout.as_millis() as u64),
-            },
+            }),
             target: format!("{}", &self.target),
             tags: self.tags.clone(),
             validators: self

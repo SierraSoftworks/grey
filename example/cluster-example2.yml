@@ -14,7 +14,7 @@ cluster:
   peers:
     - 127.0.0.1:13001
   secret: shared-cluster-join-secret
-  #gossip_interval: 1s
+  gossip_interval: 5s
 
 probes:
   - name: common
@@ -40,4 +40,16 @@ probes:
       dns.answers: !NotEquals []
     tags:
       domain: google.com
+      service: Agent 2
+  - name: agent2.new
+    policy:
+      interval: 5000ms
+      timeout: 2s
+      retries: 3
+    target: !Dns
+      domain: github.com
+    validators:
+      dns.answers: !NotEquals []
+    tags:
+      domain: github.com
       service: Agent 2

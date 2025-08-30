@@ -136,7 +136,10 @@ impl Engine {
                                 // Probe configuration has changed
                                 info!(name: "config.reload.probe", { probe.name=name, action = "update" }, "Reloaded configuration for probe {}", name);
                                 if let Some(p) = probes.read().unwrap().get(*name) {
-                                    p.update((*new_probe).clone())
+                                    p.update((*new_probe).clone());
+                                    if let Err(err) = state.update_probe_config(*new_probe).await {
+                                        error!(name: "config.reload.probe", { probe.name=name, action = "update", exception = err }, "Failed to update stored configuration for probe '{name}'");
+                                    }
                                 }
                             }
                         } else {

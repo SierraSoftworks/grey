@@ -1,9 +1,5 @@
 use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    path::PathBuf,
-    sync::{Arc, Mutex, RwLock},
-    time::Duration,
+    collections::HashMap, net::SocketAddr, path::PathBuf, sync::{Arc, Mutex, RwLock}, time::Duration
 };
 
 use grey_api::{Mergeable, Probe};
@@ -12,7 +8,7 @@ use tracing::info;
 use tracing_batteries::prelude::*;
 
 use crate::{
-    cluster::{self, ClusterStateDigest, NodeID, VersionedField},
+    cluster::{self, ClusterStateDigest, NodeID, Versioned},
     result::ProbeResult,
     Config,
 };
@@ -23,6 +19,9 @@ const CLUSTER_PEERS_TABLE: TableDefinition<String, (u128, u64)> =
 // Maps a (NodeID, Probe Name) to a tuple of (Version, MsgPack Snapshot)
 const CLUSTER_FIELDS_TABLE: TableDefinition<(u128, String), (u64, &[u8])> =
     TableDefinition::new("cluster_fields");
+
+type ProbeState = Probe;
+
 
 #[derive(Clone)]
 pub struct State {
@@ -84,10 +83,10 @@ impl State {
             let (key, value) = entry;
             let (_node_id, probe_name) = key.value();
             let (_, data) = value.value();
-            if let Ok(snapshot) = rmp_serde::from_slice::<Probe>(data) {
+            if let Ok(snapshot) = rmp_serde::from_slice::<ProbeState>(data) {
                 histories
                     .entry(probe_name.clone())
-                    .and_modify(|existing: &mut Probe| {
+                    .and_modify(|existing: &mut ProbeState| {
                         existing.merge(&snapshot);
                     })
                     .or_insert_with(|| snapshot.clone());
@@ -95,6 +94,39 @@ impl State {
         }
 
         Ok(histories)
+    }
+
+    pub async fn update_probe_config(
+        &self,
+        probe: &crate::Probe,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let txn = self.database.begin_write()?;
+        {
+            let mut table = txn.open_table(CLUSTER_FIELDS_TABLE)?;
+
+            let mut snapshot = table
+                .get((self.node_id.into(), probe.name.clone()))?
+                .map(|existing| {
+                    let (_version, data) = existing.value();
+                    let mut snapshot = rmp_serde::from_slice::<ProbeState>(data)
+                        .unwrap_or_else(|_| probe.into());
+                    snapshot
+                }).unwrap_or_else(|| probe.into());
+
+            let mut updated_probe: ProbeState = probe.into();
+            updated_probe.last_updated = snapshot.last_updated + chrono::Duration::milliseconds(1);
+
+            snapshot.merge(&updated_probe);
+
+            table.insert(
+                (self.node_id.into(), probe.name.clone()),
+                (snapshot.version(), rmp_serde::to_vec(&snapshot)?.as_slice()),
+            )?;
+        }
+
+        txn.commit()?;
+
+        Ok(())
     }
 
     pub async fn update_probe_state(
@@ -113,11 +145,11 @@ impl State {
             let result = {
                 let mut table = txn.open_table(CLUSTER_FIELDS_TABLE)?;
 
-                let (mut snapshot, version) = table
+                let (mut snapshot, _version) = table
                     .get((self.node_id.into(), probe.name.clone()))?
                     .map(|existing| {
                         let (version, data) = existing.value();
-                        match rmp_serde::from_slice::<Probe>(data) {
+                        match rmp_serde::from_slice::<ProbeState>(data) {
                             Ok(snapshot) => (snapshot, version),
                             Err(err) => {
                                 warn!("Failed to deserialize probe snapshot for '{probe_name}', resetting the state: {:?}", err);
@@ -131,7 +163,7 @@ impl State {
                 let new_data = rmp_serde::to_vec(&snapshot)?;
                 table.insert(
                     (self.node_id.into(), probe.name.clone()),
-                    (version + 1, new_data.as_slice()),
+                    (snapshot.version(), new_data.as_slice()),
                 )?;
 
                 Ok(())
@@ -152,29 +184,32 @@ impl State {
             let mut table_fields = txn.open_table(CLUSTER_FIELDS_TABLE)?;
 
             let history_expiry_threshold = chrono::Utc::now() - chrono::Duration::days(2);
-            let peer_drop_threshold =
-                (chrono::Utc::now() - chrono::Duration::minutes(30)).timestamp() as u64;
+            let peer_drop_threshold = chrono::Utc::now() - chrono::Duration::minutes(30);
 
             table_peers.retain(|addr, (peer_id, last_seen)| {
+                let peer_id = NodeID::from(peer_id);
+                let last_seen = chrono::DateTime::from_timestamp(last_seen as i64, 0).unwrap_or_default();
                 if last_seen >= peer_drop_threshold {
                     true
                 } else {
                     info!(
-                        "Removing stale peer {}: {} (last seen: {})",
-                        NodeID::from(peer_id),
-                        addr,
-                        last_seen
+                        name: "state.gc.peer",
+                        {
+                            peer.id = %peer_id,
+                            peer.addr = %addr,
+                            peer.last_seen = %last_seen,
+                        },
+                        "Removing stale peer from database."
                     );
                     false
                 }
             })?;
 
             let mut dropped_probe_records = 0;
-            table_fields.retain(|_, (_version, data)| {
-                if rmp_serde::from_slice(data)
-                    .map(|history: Probe| history.last_updated < history_expiry_threshold)
-                    .unwrap_or(false)
-                {
+            table_fields.retain(|(_, probe_name), (version, _data)| {
+                let last_updated = chrono::DateTime::from_timestamp(version as i64, 0).unwrap_or_default();
+                if last_updated < history_expiry_threshold {
+                    info!(name: "state.gc.probe", { probe.name = %probe_name, %last_updated }, "Dropping stale probe record");
                     true
                 } else {
                     dropped_probe_records += 1;
@@ -182,7 +217,9 @@ impl State {
                 }
             })?;
 
-            info!("Dropped {} stale probe records", dropped_probe_records);
+            if dropped_probe_records > 0 {
+                info!(name: "state.gc.summary", { dropped_probe_records = %dropped_probe_records }, "Dropped stale probe records");
+            }
         }
 
         txn.commit()?;
@@ -196,7 +233,7 @@ impl State {
                 warn!("Failed to perform state GC: {:?}", err);
             }
 
-            tokio::time::sleep(Duration::from_secs(300)).await;
+            tokio::time::sleep(self.get_config().cluster.gc_interval).await;
         }
     }
 }
@@ -204,7 +241,7 @@ impl State {
 impl cluster::GossipStore for State {
     type Peer = NodeID;
     type Address = SocketAddr;
-    type State = Probe;
+    type State = ProbeState;
 
     async fn get_self_id(&self) -> Result<Self::Peer, Box<dyn std::error::Error>> {
         Ok(self.node_id)
@@ -233,10 +270,12 @@ impl cluster::GossipStore for State {
             digest.update(node_id.into(), version);
         }
 
+        trace!(name: "state.get_digest", { host.node_id = %self.node_id, digest = %digest }, "Composed new cluster state digest.");
+
         Ok(digest)
     }
 
-    async fn get_delta(
+    async fn get_diff(
         &self,
         digest: cluster::ClusterStateDigest<Self::Peer>,
     ) -> Result<cluster::ClusterStateDiff<Self::Peer, Self::State>, Box<dyn std::error::Error>>
@@ -247,25 +286,27 @@ impl cluster::GossipStore for State {
         let table = txn.open_table(CLUSTER_FIELDS_TABLE)?;
         let iter = table.iter()?;
         for (key, value) in iter.filter_map(|r| r.ok()) {
-            let (node_id, field) = key.value();
+            let (node_id, probe) = key.value();
             let (version, data) = value.value();
 
             let peer: Self::Peer = node_id.into();
+            let remote_version = digest.get_max_version(&peer).unwrap_or_default();
 
-            if let Some(remote_version) = digest.get_max_version(&peer) {
-                if version <= remote_version {
-                    continue;
-                }
+            if version <= remote_version {
+                continue;
             }
-
-            let data = rmp_serde::from_slice(data)?;
-
-            delta.update(
-                peer.clone(),
-                &field,
-                VersionedField::new(data).with_version(version),
-            );
+            
+            let data: ProbeState = rmp_serde::from_slice(data)?;
+            if let Some(diff) = data.diff(remote_version) {
+                delta.update(
+                    peer.clone(),
+                    probe,
+                    diff,
+                );
+            }
         }
+
+        trace!(name: "state.get_diff", { host.node_id = %self.node_id, digest = %digest, delta = ?delta }, "Composed new cluster state diff.");
 
         Ok(delta)
     }
@@ -275,6 +316,7 @@ impl cluster::GossipStore for State {
         diff: cluster::ClusterStateDiff<Self::Peer, Self::State>,
         address: Self::Address,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        trace!(name: "state.apply_diff", { host.node_id = %self.node_id, peer.address = %address, diff = ?diff }, "Applying cluster state diff.");
         let txn = self.database.begin_write()?;
         {
             let mut table_peers = txn.open_table(CLUSTER_PEERS_TABLE)?;
@@ -289,12 +331,12 @@ impl cluster::GossipStore for State {
                     )?;
                 }
 
-                for (field, versioned) in node_diff.into_inner() {
+                for (field, probe_state) in node_diff {
                     table_fields.insert(
                         (peer_id, field.clone()),
                         (
-                            versioned.version,
-                            rmp_serde::to_vec(&versioned.value)?.as_slice(),
+                            probe_state.version(),
+                            rmp_serde::to_vec_named(&probe_state)?.as_slice(),
                         ),
                     )?;
                 }
@@ -304,5 +346,37 @@ impl cluster::GossipStore for State {
         txn.commit()?;
 
         Ok(())
+    }
+}
+
+impl Versioned for Probe {
+    fn version(&self) -> u64 {
+        self.last_updated.timestamp() as u64
+    }
+
+    fn diff(&self, version: u64) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        if self.version() > version {
+            Some(Self {
+                name: self.name.clone(),
+                policy: None,
+                target: self.target.clone(),
+                tags: self.tags.clone(),
+                validators: HashMap::new(),
+                sample_count: self.sample_count,
+                successful_samples: self.successful_samples,
+                last_updated: self.last_updated,
+                observers: 0,
+                history: self.history.iter().filter(|h| h.start_time > self.last_updated - chrono::Duration::hours(2)).cloned().collect(),
+            })
+        } else {
+            None
+        }
+    }
+
+    fn apply(&mut self, other: &Self) {
+        self.merge(other);
     }
 }

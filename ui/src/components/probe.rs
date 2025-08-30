@@ -27,12 +27,16 @@ pub fn probe(props: &ProbeProps) -> Html {
         _ => "ok",
     };
 
-    let policy = format!(
-        "interval: {}, timeout: {}, retries: {}",
-        humantime::format_duration(props.probe.policy.interval),
-        humantime::format_duration(props.probe.policy.timeout),
-        props.probe.policy.retries.unwrap_or(0)
-    );
+    let policy = if let Some(policy) = &props.probe.policy {
+        format!(
+            "interval: {}, timeout: {}, retries: {}",
+            humantime::format_duration(policy.interval),
+            humantime::format_duration(policy.timeout),
+            policy.retries.unwrap_or(0)
+        )
+    } else {
+        "".into()
+    };
 
     html! {
         <div class="probe">

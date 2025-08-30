@@ -13,7 +13,7 @@ cluster:
   listen: 127.0.0.1:13001
   peers: []
   secret: shared-cluster-join-secret
-  #gossip_interval: 1s
+  gossip_interval: 5s
 
 probes:
   - name: common

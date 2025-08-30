@@ -12,9 +12,9 @@ pub struct ProbeHistoryBucket {
     pub total_latency: std::time::Duration,
     pub attempts: u64,
     pub pass: bool,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub message: String,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    #[serde(default)]
     pub validations: HashMap<String, ValidationResult>,
     /// Number of samples this entry represents (1 for recent, >1 for compressed)
     pub sample_count: u64,

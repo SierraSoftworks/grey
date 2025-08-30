@@ -84,17 +84,20 @@ pub struct UiConfig {
 pub struct ClusterConfig {
     #[serde(default)]
     pub enabled: bool,
-    #[serde(default = "default::cluster::hostname")]
-    pub hostname: String,
+    #[serde(default = "default::cluster::public_address")]
+    pub public_address: String,
     #[serde(default = "default::cluster::listen")]
     pub listen: String,
+    pub peers: Vec<String>,
+    pub secret: String,
     #[serde(default = "default::cluster::gossip_interval")]
     #[serde(with = "humantime_serde")]
     pub gossip_interval: std::time::Duration,
     #[serde(default = "default::cluster::gossip_factor")]
     pub gossip_factor: usize,
-    pub peers: Vec<String>,
-    pub secret: String,
+    #[serde(default = "default::cluster::gc_interval")]
+    #[serde(with = "humantime_serde")]
+    pub gc_interval: std::time::Duration,
 }
 
 mod default {
@@ -123,8 +126,8 @@ mod default {
     }
 
     pub mod cluster {
-        pub fn hostname() -> String {
-            gethostname::gethostname().to_string_lossy().to_string()
+        pub fn public_address() -> String {
+            format!("{}:8888", gethostname::gethostname().to_string_lossy().to_string())
         }
 
         pub fn listen() -> String {
@@ -137,6 +140,10 @@ mod default {
 
         pub fn gossip_factor() -> usize {
             2
+        }
+
+        pub fn gc_interval() -> std::time::Duration {
+            std::time::Duration::from_secs(300)
         }
     }
 }
