@@ -60,52 +60,6 @@ impl From<&str> for AliasedNodeID {
     }
 }
 
-// #[derive(Clone, Debug, Serialize, Deserialize)]
-// pub struct AddressableNodeID<A> {
-//     id: NodeID,
-//     address: A,
-// }
-
-// impl<A> AddressableNodeID<A> {
-//     pub fn new(id: NodeID, address: A) -> Self {
-//         Self { id, address }
-//     }
-
-//     pub fn id(&self) -> NodeID {
-//         self.id
-//     }
-
-//     pub fn address(&self) -> &A {
-//         &self.address
-//     }
-// }
-
-// impl<A: Display> Display for AddressableNodeID<A> {
-//     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-//         write!(f, "{}@{}", self.id, self.address)
-//     }
-// }
-
-// impl<A> AsRef<A> for AddressableNodeID<A> {
-//     fn as_ref(&self) -> &A {
-//         &self.address
-//     }
-// }
-
-// impl<A: Hash> Hash for AddressableNodeID<A> {
-//     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-//         self.id.hash(state);
-//     }
-// }
-
-// impl<A> Eq for AddressableNodeID<A> {}
-
-// impl<A> PartialEq<AddressableNodeID<A>> for AddressableNodeID<A> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.id == other.id
-//     }
-// }
-
 #[cfg(test)]
 mod tests {
     use super::*;
