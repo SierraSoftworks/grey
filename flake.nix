@@ -104,7 +104,7 @@
             # serve it, so we pass it as an environment variable at build time
             CLIENT_DIST = grey-ui;
             preBuild = ''
-              cp -r $CLIENT_DIST ./api/dist
+              cp -r $CLIENT_DIST ./ui/dist
             '';
             doCheck = false;
           }
