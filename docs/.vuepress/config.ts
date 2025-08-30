@@ -131,9 +131,9 @@ export default defineUserConfig({
         {
           text: "User Interface",
           children: [
-            '/api/README.md',
-            '/api/links.md',
-            '/api/notices.md',
+            '/ui/README.md',
+            '/ui/links.md',
+            '/ui/notices.md',
           ]
         }
       ]
