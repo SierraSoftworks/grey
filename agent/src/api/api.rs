@@ -32,3 +32,10 @@ pub async fn get_probes(data: web::Data<AppState>) -> Result<HttpResponse> {
 
     Ok(HttpResponse::Ok().json(probes))
 }
+
+pub async fn get_peers(data: web::Data<AppState>) -> Result<HttpResponse> {
+    let mut peers = data.state.get_peers().await?;
+    peers.sort_by_key(|p| p.id.clone());
+
+    Ok(HttpResponse::Ok().json(peers))
+}

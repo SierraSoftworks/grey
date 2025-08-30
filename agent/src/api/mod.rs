@@ -55,6 +55,7 @@ pub fn create_app() -> App<
         .route("/", web::get().to(page::index))
         .route("/api/v1/probes", web::get().to(api::get_probes))
         .route("/api/v1/notices", web::get().to(api::get_notices))
+        .route("/api/v1/cluster/peers", web::get().to(api::get_peers))
         .route("/static/{filename:.*}", web::get().to(serve_static))
 }
 

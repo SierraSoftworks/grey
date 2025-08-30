@@ -132,7 +132,6 @@
         grey-ui = craneLib.buildTrunkPackage (
           wasmArgs
           // {
-            pname = "grey-ui";
             cargoArtifacts = cargoArtifactsWasm;
             preBuild = ''
               cd ./ui

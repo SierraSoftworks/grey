@@ -129,40 +129,48 @@ impl ProbeRunner {
             .record("probe.tags", debug(&probe.tags));
 
         let result = async {
-            while sample.attempts < total_attempts
-                && !self.cancel.load(std::sync::atomic::Ordering::Relaxed)
-            {
-                sample.start_time = chrono::Utc::now();
-                sample.attempts += 1;
-                debug!(
-                    "Running probe attempt {}/{}...",
-                    sample.attempts, total_attempts,
-                );
-                match tokio::time::timeout(
-                    probe.policy.timeout,
-                    self.run_attempt(&probe, &mut sample),
-                )
-                .await
-                {
-                    Ok(Ok(res)) => return Ok(res),
-                    Ok(Err(err)) => {
-                        debug!("Probe failed: {}", err);
+            match tokio::time::timeout(
+                probe.policy.timeout,
+                async {
+                    while !self.cancel.load(std::sync::atomic::Ordering::Relaxed)
+                    {
+                        sample.start_time = chrono::Utc::now();
+                        sample.attempts += 1;
+                        debug!(
+                            "Running probe attempt {}/{}...",
+                            sample.attempts, total_attempts,
+                        );
+                        match self.run_attempt(&probe, &mut sample).await
+                        {
+                            Ok(res) => return Ok(res),
+                            Err(err) => {
+                                debug!("Probe failed: {}", err);
+                                if sample.attempts >= total_attempts {
+                                    warn!("Probe failed after {} attempts: {}", sample.attempts, err);
+                                    sample.message = err.to_string();
+                                    return Err(err);
+                                }
+                            }
+                        }
+                    }
+
+                    Err(format!("Probe was cancelled.").into())
+            }).await {
+                Ok(Ok(res)) => return Ok(res),
+                Ok(Err(err)) => {
+                    debug!("Probe failed: {}", err);
                         if sample.attempts == total_attempts {
                             warn!("Probe failed after {} attempts: {}", sample.attempts, err);
                             sample.message = err.to_string();
                             return Err(err);
                         }
-                    }
-                    Err(_) => {
-                        debug!("Probe timed out");
-                        if sample.attempts == total_attempts {
-                            warn!("Probe timed out after {} attempts", sample.attempts);
-                            sample.message = format!(
-                                "Probe timed out after {} milliseconds.",
-                                probe.policy.timeout.as_millis()
-                            );
-                            return Err(sample.message.clone().into());
-                        }
+                }
+                Err(err) => {
+                    debug!("Probe timed out: {}", err);
+                    if sample.attempts == total_attempts {
+                        warn!("Probe timed out after {} attempts: {}", sample.attempts, err);
+                        sample.message = err.to_string();
+                        return Err(format!("Probe timed out after {} attempts.", sample.attempts).into());
                     }
                 }
             }

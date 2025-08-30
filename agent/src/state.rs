@@ -178,6 +178,26 @@ impl State {
         }
     }
 
+    pub async fn get_peers(&self) -> Result<Vec<grey_api::Peer>, Box<dyn std::error::Error>> {
+        let mut peers = Vec::new();
+
+        let txn = self.database.begin_read()?;
+        let table = txn.open_table(CLUSTER_PEERS_TABLE)?;
+        for entry in table.iter()?.filter_map(|r| r.ok()) {
+            let (_addr, info) = entry;
+            let (peer_id, last_seen) = info.value();
+            let peer_id = NodeID::from(peer_id);
+            let last_seen =
+                chrono::DateTime::from_timestamp(last_seen as i64, 0).unwrap_or_default();
+            peers.push(grey_api::Peer {
+                id: peer_id.to_string(),
+                last_seen,
+            });
+        }
+
+        Ok(peers)
+    }
+
     pub async fn gc(&self) -> Result<(), Box<dyn std::error::Error>> {
         let txn = self.database.begin_write()?;
         {
@@ -214,7 +234,7 @@ impl State {
                 if last_updated >= history_expiry_threshold {
                     true
                 } else {
-                    info!(name: "state.gc.probe", { probe.name = %probe_name, %last_updated }, "Dropping stale probe record");
+                    info!(name: "state.gc.probe", { probe.name = %probe_name, %last_updated, expired_at=%history_expiry_threshold }, "Dropping stale probe record");
                     dropped_probe_records += 1;
                     false
                 }

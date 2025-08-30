@@ -89,7 +89,7 @@ impl Engine {
                 self.state.get_config().ui.listen.as_str()
             );
 
-            crate::ui::start_server(self.state.clone()).await?;
+            crate::api::start_server(self.state.clone()).await?;
         } else {
             while !cancel.load(std::sync::atomic::Ordering::Relaxed) {
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;

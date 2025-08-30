@@ -1,0 +1,71 @@
+@use 'variables' as *;
+
+$tooltip-offset: 8px;
+
+// Attribute-driven tooltips, matching the visual style of the history control
+// Usage: <button tooltip="Hello world">…</button>
+// The tooltip content comes from a custom `tooltip` attribute.
+
+[tooltip] {
+    position: relative; // Ensure positioned ancestor for the tooltip
+}
+
+// Tooltip bubble
+[tooltip]::after {
+    content: attr(tooltip);
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + $tooltip-offset);
+    transform: translateX(-50%);
+    background-color: $color-tooltip-background;
+    color: $color-tooltip-text;
+    padding: 0.75rem;
+    border-radius: $border-radius-medium;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    font-size: 0.75rem;
+    line-height: 1.4;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+    overflow: hidden;
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+    border: 1px solid $color-tooltip-border;
+    min-width: 200px;
+    max-width: 40vw;
+    pointer-events: none; // Avoid hover flicker when moving over tooltip
+}
+
+// Tooltip arrow
+[tooltip]::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    // Position the arrow at the same vertical offset as the bubble's bottom
+    bottom: calc(100% - $tooltip-offset);
+    transform: translateX(-50%);
+    border: $tooltip-offset solid transparent;
+    // Match history tooltip arrow color
+    border-top-color: $color-tooltip-background;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+    opacity: 0;
+    visibility: hidden;
+    z-index: 999; // Slightly below bubble so the border overlaps cleanly
+    pointer-events: none;
+}
+
+// Don't render tooltip chrome when tooltip is empty
+[tooltip='']::after,
+[tooltip='']::before {
+    display: none;
+}
+
+// Show on hover/focus for accessibility
+[tooltip]:hover::after,
+[tooltip]:hover::before,
+[tooltip]:focus-visible::after,
+[tooltip]:focus-visible::before {
+    opacity: 1;
+    visibility: visible;
+}

@@ -64,7 +64,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build UI using trunk
-        run: cd ui && trunk build --release
+        run: trunk build --release
 
       - name: Upload build artifacts for use in other build stages
         uses: actions/upload-artifact@v4
@@ -113,7 +113,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --all-features --no-fail-fast
+          args: --all-features --no-fail-fast --workspace
         env:
             RUSTFLAGS: -Cinstrument-coverage
 
@@ -164,7 +164,7 @@ jobs:
             cross: true
             flags: --features openssl_src
 
-          # Apple MacOS builds
+          # Apple macOS builds
           - arch: amd64
             run_on: macos-latest
             os: darwin

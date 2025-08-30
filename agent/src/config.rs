@@ -57,7 +57,7 @@ impl Config {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct UiConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -80,7 +80,21 @@ pub struct UiConfig {
     pub reload_interval: std::time::Duration,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq)]
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            listen: default::ui::listen(),
+            title: default::ui::title(),
+            logo: default::ui::logo(),
+            notices: vec![],
+            links: vec![],
+            reload_interval: default::ui::reload_interval(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ClusterConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -104,6 +118,22 @@ pub struct ClusterConfig {
     #[serde(default = "default::cluster::gc_peer_expiry")]
     #[serde(with = "humantime_serde")]
     pub gc_peer_expiry: std::time::Duration,
+}
+
+impl Default for ClusterConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            listen: default::cluster::listen(),
+            peers: vec![],
+            secret: "".into(),
+            gossip_interval: default::cluster::gossip_interval(),
+            gossip_factor: default::cluster::gossip_factor(),
+            gc_interval: default::cluster::gc_interval(),
+            gc_probe_expiry: default::cluster::gc_probe_expiry(),
+            gc_peer_expiry: default::cluster::gc_peer_expiry(),
+        }
+    }
 }
 
 impl ClusterConfig {

@@ -1,4 +1,5 @@
 use super::History;
+use crate::formatters::availability;
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
@@ -47,7 +48,11 @@ pub fn probe(props: &ProbeProps) -> Html {
                         </div>
                     }
                 </div>
-                <div class="availability">{format!("{:.3}%", props.probe.availability())}</div>
+                <div class="probe-observers" tooltip="The number of agents which have contributed to this status report.">
+                    <span class="icon-eye"></span>
+                    {format!("{}", props.probe.observers)}
+                </div>
+                <div class="availability">{availability(props.probe.availability())}</div>
             </div>
             <History samples={props.probe.history.clone()} />
         </div>
