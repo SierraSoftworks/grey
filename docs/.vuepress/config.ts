@@ -28,7 +28,7 @@ export default defineUserConfig({
     }],
   ],
 
-  extendsPage(page, app) {
+  extendsPage(page, _app) {
     const fixedHeaders = page.headers || []
     fixedHeaders.forEach(header => fixPageHeader(header))
   },
