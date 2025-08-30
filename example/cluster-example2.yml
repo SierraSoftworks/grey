@@ -1,0 +1,55 @@
+---
+state: ./state2.redb
+
+ui:
+  enabled: true
+  listen: 127.0.0.1:3002
+
+  title: Cluster Secondary
+
+
+cluster:
+  enabled: true
+  listen: 127.0.0.1:13002
+  peers:
+    - 127.0.0.1:13001
+  secret: /pL7XKDj1UrAGjNMv3t9jmb9leDOZT+64KkYE8k7UH8=
+  gossip_interval: 5s
+
+probes:
+  - name: common
+    policy:
+      interval: 5000ms
+      timeout: 2s
+      retries: 3
+    target: !Dns
+      domain: google.com
+    validators:
+      dns.answers: !NotEquals []
+    tags:
+      domain: google.com
+      service: Common Probes
+  - name: agent2
+    policy:
+      interval: 5000ms
+      timeout: 2s
+      retries: 3
+    target: !Dns
+      domain: google.com
+    validators:
+      dns.answers: !NotEquals []
+    tags:
+      domain: google.com
+      service: Agent 2
+  - name: agent2.new
+    policy:
+      interval: 5000ms
+      timeout: 2s
+      retries: 3
+    target: !Dns
+      domain: bing.com
+    validators:
+      dns.answers: !NotEquals []
+    tags:
+      domain: bing.com
+      service: Agent 2

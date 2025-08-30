@@ -1,12 +1,11 @@
 use super::Probe as ProbeComponent;
-use crate::contexts::{use_probe_history, use_probes};
+use crate::contexts::use_probes;
 use std::collections::HashMap;
 use yew::prelude::*;
 
 #[function_component(ProbeList)]
 pub fn probe_list() -> Html {
     let probes_ctx = use_probes();
-    let history_ctx = use_probe_history();
 
     // Group probes by service tag
     let mut service_groups: HashMap<String, Vec<&grey_api::Probe>> = HashMap::new();
@@ -18,10 +17,7 @@ pub fn probe_list() -> Html {
             .cloned()
             .unwrap_or_else(|| "Other".to_string());
 
-        service_groups
-            .entry(service)
-            .or_default()
-            .push(probe);
+        service_groups.entry(service).or_default().push(probe);
     }
 
     // Sort service names, but put "Other" at the end
@@ -39,7 +35,7 @@ pub fn probe_list() -> Html {
                 let probes = service_groups.get(service_name).unwrap();
 
                 // Calculate service health and availability
-                let (service_health, service_availability) = calculate_service_health_and_availability(probes, &history_ctx.probe_histories);
+                let (service_health, service_availability) = calculate_service_health_and_availability(probes);
 
                 html! {
                     <div class={format!("section service-group {}", service_health)}>
@@ -51,7 +47,6 @@ pub fn probe_list() -> Html {
                             html! {
                                 <ProbeComponent
                                     probe={(*probe).clone()}
-                                    history={history_ctx.probe_histories.get(&probe.name).cloned().unwrap_or_default()}
                                 />
                             }
                         })}
@@ -62,10 +57,7 @@ pub fn probe_list() -> Html {
     }
 }
 
-fn calculate_service_health_and_availability(
-    probes: &[&grey_api::Probe],
-    probe_histories: &HashMap<String, Vec<grey_api::ProbeHistory>>,
-) -> (String, f64) {
+fn calculate_service_health_and_availability(probes: &[&grey_api::Probe]) -> (String, f64) {
     if probes.is_empty() {
         return ("unknown".to_string(), 0.0);
     }
@@ -75,15 +67,13 @@ fn calculate_service_health_and_availability(
     let mut total_probes = 0;
 
     for probe in probes {
-        total_availability += probe.availability;
+        total_availability += probe.availability();
         total_probes += 1;
 
         // Check if the probe is currently healthy based on recent history
-        if let Some(history) = probe_histories.get(&probe.name) {
-            if let Some(recent_result) = history.last() {
-                if recent_result.pass {
-                    healthy_probes += 1;
-                }
+        if let Some(recent_result) = probe.history.last() {
+            if recent_result.pass {
+                healthy_probes += 1;
             }
         }
     }

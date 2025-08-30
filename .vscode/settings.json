@@ -18,10 +18,15 @@
         "behaviour",
         "cachix",
         "chrono",
+        "ciphertext",
         "Csvg",
         "gloo",
+        "humantime",
         "nixos",
         "nixpkgs",
+        "onmouseenter",
+        "onmouseleave",
+        "redb",
         "sierrasoftworks",
         "Softworks"
     ]

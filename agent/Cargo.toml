@@ -1,0 +1,65 @@
+[package]
+name = "grey"
+edition = "2024"
+version.workspace = true
+description.workspace = true
+documentation.workspace = true
+readme.workspace = true
+
+[[bin]]
+name = "grey"
+path = "./src/main.rs"
+
+[dependencies]
+grey-ui = { workspace = true, features = ["ssr"] }
+grey-api.workspace = true
+
+chrono.workspace = true
+circular-buffer.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+yew.workspace = true
+sys_traits.workspace = true
+rmp-serde.workspace = true
+redb.workspace = true
+radix_fmt.workspace = true
+gethostname.workspace = true
+aes-gcm.workspace = true
+base64.workspace = true
+
+actix-web.workspace = true
+async-trait.workspace = true
+clap.workspace = true
+ctrlc.workspace = true
+boa_engine = { workspace = true, optional = true }
+boa_gc = { workspace = true, optional = true }
+boa_runtime = { workspace = true, features = ["reqwest-blocking"], optional = true }
+futures.workspace = true
+futures-concurrency.workspace = true
+futures-lite.workspace = true
+http.workspace = true
+humantime.workspace = true
+humantime-serde.workspace = true
+include_dir.workspace = true
+lazy_static.workspace = true
+openssl-sys = { workspace = true, optional = true }
+rand.workspace = true
+reqwest.workspace = true
+serde_yaml.workspace = true
+tonic.workspace = true
+tonic-health.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-batteries.workspace = true
+trust-dns-resolver.workspace = true
+
+[features]
+default = ["scripts"]
+pure_tests = []
+scripts = ["dep:boa_engine", "dep:boa_gc", "dep:boa_runtime"]
+openssl_src = ["dep:openssl-sys"]
+
+[dev-dependencies]
+tempfile.workspace = true
+
+
