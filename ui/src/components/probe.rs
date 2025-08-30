@@ -27,17 +27,6 @@ pub fn probe(props: &ProbeProps) -> Html {
         _ => "ok",
     };
 
-    let policy = if let Some(policy) = &props.probe.policy {
-        format!(
-            "interval: {}, timeout: {}, retries: {}",
-            humantime::format_duration(policy.interval),
-            humantime::format_duration(policy.timeout),
-            policy.retries.unwrap_or(0)
-        )
-    } else {
-        "".into()
-    };
-
     html! {
         <div class="probe">
             <div class="probe-title">
@@ -59,10 +48,6 @@ pub fn probe(props: &ProbeProps) -> Html {
                     }
                 </div>
                 <div class="availability">{format!("{:.3}%", props.probe.availability())}</div>
-            </div>
-            <div class="probe-config">
-                <span class="probe-target">{&props.probe.target}</span>
-                <span class="probe-policy">{policy}</span>
             </div>
             <History samples={props.probe.history.clone()} />
         </div>

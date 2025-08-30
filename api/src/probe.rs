@@ -9,16 +9,7 @@ pub struct Probe {
     pub name: String,
 
     #[serde(default)]
-    pub policy: Option<Policy>,
-
-    #[serde(default)]
-    pub target: String,
-
-    #[serde(default)]
     pub tags: HashMap<String, String>,
-
-    #[serde(default)]
-    pub validators: HashMap<String, String>,
 
     pub sample_count: u64,
     pub successful_samples: u64,
@@ -68,10 +59,7 @@ impl Mergeable for Probe {
     fn merge(&mut self, other: &Self) {
         if other.last_updated > self.last_updated {
             self.name = other.name.clone();
-            self.policy = other.policy.clone();
-            self.target = other.target.clone();
             self.tags = other.tags.clone();
-            self.validators = other.validators.clone();
         }
 
         self.sample_count += other.sample_count;

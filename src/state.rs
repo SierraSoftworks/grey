@@ -360,10 +360,7 @@ impl Versioned for Probe {
         if self.version() > version {
             Some(Self {
                 name: self.name.clone(),
-                policy: None,
-                target: self.target.clone(),
                 tags: self.tags.clone(),
-                validators: HashMap::new(),
                 sample_count: self.sample_count,
                 successful_samples: self.successful_samples,
                 last_updated: self.last_updated,
