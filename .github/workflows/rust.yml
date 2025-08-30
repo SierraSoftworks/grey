@@ -36,7 +36,7 @@ jobs:
 
   build-ui:
     name: Build User Interface
-    runs-on: darwin-latest
+    runs-on: macos-latest
 
     steps:
       - name: Get Rust Stable
