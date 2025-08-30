@@ -175,7 +175,7 @@ mod in_memory {
                     .or_insert_with(|| NodeState::new(address.clone()));
 
                 if node_state.address.value != address {
-                    node_state.address = VersionedField::new(address.clone())
+                    node_state.address = LastWriteWinsValue::new(address.clone())
                         .with_version(node_state.max_version + 1);
                 }
 
@@ -218,7 +218,7 @@ mod in_memory {
 
     #[derive(Debug, Clone, PartialEq)]
     struct NodeState<T, A> {
-        pub address: VersionedField<A>,
+        pub address: LastWriteWinsValue<A>,
         pub fields: HashMap<String, T>,
         pub max_version: u64,
     }
@@ -226,7 +226,7 @@ mod in_memory {
     impl<T, A> NodeState<T, A> {
         pub fn new(address: A) -> Self {
             Self {
-                address: VersionedField::new(address),
+                address: LastWriteWinsValue::new(address),
                 fields: HashMap::new(),
                 max_version: 0,
             }
@@ -241,10 +241,10 @@ mod tests {
     #[tokio::test]
     async fn test_in_memory_gossip_store() {
         let node_id = NodeID::new();
-        let store = InMemoryGossipStore::<_, _, VersionedField<i32>>::new(node_id, node_id);
+        let store = InMemoryGossipStore::<_, _, LastWriteWinsValue<i32>>::new(node_id, node_id);
 
         store
-            .update("test", VersionedField::new(1).with_version(1))
+            .update("test", LastWriteWinsValue::new(1).with_version(1))
             .await;
         assert_eq!(store.get(&node_id, "test").await.unwrap().value, 1);
 
@@ -261,7 +261,7 @@ mod tests {
             diff,
             ClusterStateDiff::new().with_node(
                 node_id,
-                vec![("test".into(), VersionedField::new(1).with_version(1))]
+                vec![("test".into(), LastWriteWinsValue::new(1).with_version(1))]
                     .into_iter()
                     .collect()
             )
@@ -270,7 +270,7 @@ mod tests {
         let new_node = NodeID::new();
         let diff = ClusterStateDiff::new().with_node(
             new_node,
-            vec![("test".into(), VersionedField::new(42).with_version(1))]
+            vec![("test".into(), LastWriteWinsValue::new(42).with_version(1))]
                 .into_iter()
                 .collect(),
         );

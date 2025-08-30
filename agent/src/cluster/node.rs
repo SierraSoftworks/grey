@@ -32,6 +32,7 @@ impl Into<u128> for NodeID {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AliasedNodeID(String);
 
+#[allow(dead_code)]
 impl AliasedNodeID {
     pub fn new(alias: String) -> Self {
         Self(alias)

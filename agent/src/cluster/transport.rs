@@ -131,7 +131,7 @@ mod udp {
     use std::net::SocketAddr;
     use tokio::time::{timeout, Duration, sleep};
     use crate::cluster::message::{Message, ClusterStateDigest};
-    use crate::cluster::versioned::VersionedField;
+    use crate::cluster::versioned::LastWriteWinsValue;
     use serde::{Serialize, Deserialize};
 
         #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -151,14 +151,14 @@ mod udp {
             let (addr1_str, addr1) = random_local_addr();
             let (addr2_str, addr2) = random_local_addr();
 
-            let transport1 = UdpGossipTransport::<TestPeer, VersionedField<i32>>::new(&addr1_str, shared_secret).await.unwrap();
-            let transport2 = UdpGossipTransport::<TestPeer, VersionedField<i32>>::new(&addr2_str, shared_secret).await.unwrap();
+            let transport1 = UdpGossipTransport::<TestPeer, LastWriteWinsValue<i32>>::new(&addr1_str, shared_secret).await.unwrap();
+            let transport2 = UdpGossipTransport::<TestPeer, LastWriteWinsValue<i32>>::new(&addr2_str, shared_secret).await.unwrap();
 
             // Build a simple Syn message
             let peer1 = TestPeer("peer1".to_string());
             let mut digest = ClusterStateDigest::new();
             digest.update(peer1.clone(), 1);
-            let msg: Message<TestPeer, VersionedField<i32>> = Message::Syn(peer1.clone(), digest.clone());
+            let msg: Message<TestPeer, LastWriteWinsValue<i32>> = Message::Syn(peer1.clone(), digest.clone());
 
             // Send from transport1 to transport2
             transport1.send(addr2, msg).await.unwrap();
@@ -191,13 +191,13 @@ mod udp {
             let (addr1_str, _addr1) = random_local_addr();
             let (addr2_str, addr2) = random_local_addr();
 
-            let transport1 = UdpGossipTransport::<TestPeer, VersionedField<i32>>::new(&addr1_str, shared_secret1).await.unwrap();
-            let transport2 = UdpGossipTransport::<TestPeer, VersionedField<i32>>::new(&addr2_str, shared_secret2).await.unwrap();
+            let transport1 = UdpGossipTransport::<TestPeer, LastWriteWinsValue<i32>>::new(&addr1_str, shared_secret1).await.unwrap();
+            let transport2 = UdpGossipTransport::<TestPeer, LastWriteWinsValue<i32>>::new(&addr2_str, shared_secret2).await.unwrap();
 
             let peer1 = TestPeer("peer1".to_string());
             let mut digest = ClusterStateDigest::new();
             digest.update(peer1.clone(), 1);
-            let msg: Message<TestPeer, VersionedField<i32>> = Message::Syn(peer1, digest);
+            let msg: Message<TestPeer, LastWriteWinsValue<i32>> = Message::Syn(peer1, digest);
 
             transport1.send(addr2, msg).await.unwrap();
 

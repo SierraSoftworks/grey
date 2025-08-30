@@ -14,12 +14,13 @@ pub trait Versioned: Sized {
     fn apply(&mut self, diff: &Self::Diff);
 }
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct VersionedField<T> {
+pub struct LastWriteWinsValue<T> {
     pub version: u64,
     pub value: T,
 }
 
-impl<T> VersionedField<T> {
+#[allow(dead_code)]
+impl<T> LastWriteWinsValue<T> {
     pub fn new(value: T) -> Self {
         Self { version: 1, value }
     }
@@ -29,7 +30,7 @@ impl<T> VersionedField<T> {
     }
 }
 
-impl<T> From<(u64, T)> for VersionedField<T> {
+impl<T> From<(u64, T)> for LastWriteWinsValue<T> {
     fn from(value: (u64, T)) -> Self {
         Self {
             version: value.0,
@@ -38,7 +39,7 @@ impl<T> From<(u64, T)> for VersionedField<T> {
     }
 }
 
-impl<T: Clone + Debug + Serialize + DeserializeOwned> Versioned for VersionedField<T> {
+impl<T: Clone + Debug + Serialize + DeserializeOwned> Versioned for LastWriteWinsValue<T> {
     type Diff = Self;
 
     fn version(&self) -> u64 {
