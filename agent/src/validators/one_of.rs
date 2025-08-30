@@ -45,3 +45,28 @@ impl Display for OneOf {
         write!(f, "]")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate() {
+        let validator = OneOf(vec![
+            SampleValue::String("value1".into()),
+            SampleValue::String("value2".into()),
+        ]);
+
+        assert!(validator.validate("field", &SampleValue::String("value1".into())).is_ok());
+        assert!(validator.validate("field", &SampleValue::String("value3".into())).is_err());
+    }
+
+    #[test]
+    fn display() {
+        let validator = OneOf(vec![
+            SampleValue::String("value1".into()),
+            SampleValue::String("value2".into()),
+        ]);
+        assert_eq!(format!("{}", validator), "in [value1, value2]");
+    }
+}

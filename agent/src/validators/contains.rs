@@ -51,7 +51,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_validate() {
+    fn validate() {
         let validator = Contains(SampleValue::String("world".to_string()));
 
         assert!(
@@ -86,5 +86,11 @@ mod tests {
                 )
                 .is_err()
         );
+    }
+
+    #[test]
+    fn display() {
+        let validator = Contains(SampleValue::String("world".to_string()));
+        assert_eq!(format!("{}", validator), "contains world");
     }
 }
