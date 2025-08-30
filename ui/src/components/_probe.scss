@@ -2,7 +2,7 @@
 
 // Probe component styles
 .probe {
-    padding: 1.5rem 0rem 1.5rem 2rem;
+    padding: 1.5rem 0 1.5rem 2rem;
     border-bottom: solid 1px $color-separator;
 
     &:last-child {
@@ -21,11 +21,30 @@
     align-items: center;
     gap: 0.5rem;
     flex-wrap: wrap;
+    margin-right: auto;
 }
 
 .probe-name {
     font-weight: inherit;
     margin: 0;
+}
+
+.probe-observers {
+    font-size: 0.9rem;
+    font-weight: bold;
+    color: $color-text;
+    margin-right: 0.5rem;
+
+    &::before {
+        content: "";
+        display: inline-block;
+        width: 1rem;
+        height: 1rem;
+        background-image: url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'%3E%3C/path%3E%3Ccircle cx='12' cy='12' r='3'%3E%3C/circle%3E%3C/svg%3E");
+        background-size: contain;
+        background-repeat: no-repeat;
+        margin-right: 3px;
+    }
 }
 
 .service-group {

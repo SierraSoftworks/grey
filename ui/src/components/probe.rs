@@ -47,6 +47,9 @@ pub fn probe(props: &ProbeProps) -> Html {
                         </div>
                     }
                 </div>
+                <div class="probe-observers">
+                    {format!("{}", props.probe.observers)}
+                </div>
                 <div class="availability">{format!("{:.3}%", props.probe.availability())}</div>
             </div>
             <History samples={props.probe.history.clone()} />
