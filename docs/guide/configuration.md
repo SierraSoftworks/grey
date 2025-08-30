@@ -5,17 +5,19 @@ and how to use them to configure your probes.
 
 ## Top-Level Configuration
 
-### State Directory
-The `state` option configures a directory where Grey will store probe execution state
+### State Database
+The `state` option configures a database file where Grey will store probe execution state
 for persistence across application restarts. When configured, probe history, availability
-metrics, and state transitions are automatically saved to disk.
+metrics, and state transitions are automatically saved to disk using a high-performance
+embedded database.
 
 ```yaml
-state: ./state/
+state: ./state.redb
 ```
 
 If not specified, probe state will only be kept in memory and will be lost when the
-application restarts.
+application restarts. The database file uses the `.redb` extension and will be created
+automatically if it doesn't exist.
 
 ## Probes
 Probes are the core of Grey's configuration. Each probe defines a single target and a set
@@ -86,3 +88,39 @@ section of the documentation.
 You can read more about the fields available for each target in the [Targets](../targets/README.md)
 section of the documentation.
 :::
+
+## Status Dashboard
+Grey includes an optional web-based user interface that provides real-time visibility
+into probe status and execution history. The UI can be enabled on any node and integrates
+seamlessly with clustering to provide a unified view of your service health. It's a great
+way to provide a status page for your users.
+
+```yaml
+ui:
+  enabled: true
+  listen: 0.0.0.0:3000
+  title: "Grey Health Monitor"
+  logo: "https://example.com/logo.svg"
+```
+
+You can read more about UI configuration options in the [User Interface](../ui/README.md)
+section of the documentation.
+
+## Clustering
+Grey supports distributed probing through its clustering feature, which enables multiple
+Grey instances to coordinate probe execution and share results. This is particularly useful
+for scaling probe execution across multiple nodes, providing redundancy, and enabling probes
+to be executed from different network locations while maintaining a centralized view through
+the web UI.
+
+```yaml
+cluster:
+  enabled: true
+  listen: 0.0.0.0:8888
+  peers:
+    - 10.0.0.2:8888
+    - 10.0.0.3:8888
+  secret: /pL7XKDj1UrAGjNMv3t9jmb9leDOZT+64KkYE8k7UH8=
+```
+
+You can read more about clustering in the [Clustering](../clustering/README.md) section of the documentation.

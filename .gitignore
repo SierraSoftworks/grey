@@ -3,3 +3,4 @@
 /result
 /state
 .direnv
+*.redb

@@ -76,8 +76,6 @@
           ++ lib.optionals pkgs.stdenv.isDarwin [
             # Additional darwin specific inputs can be set here
             pkgs.libiconv
-            pkgs.darwin.apple_sdk.frameworks.Security
-            pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
           ];
 
           buildInputs = [
@@ -136,7 +134,14 @@
           // {
             pname = "grey-ui";
             cargoArtifacts = cargoArtifactsWasm;
-            trunkIndexPath = "./ui/index.html";
+            preBuild = ''
+              cd ./ui
+            '';
+            # After building, move the `dist` artifacts and restore the working directory
+            postBuild = ''
+              mv ./dist ..
+              cd ..
+            '';
             # The version of wasm-bindgen-cli here must match the one from Cargo.lock.
             # When updating to a new version replace the hash values with lib.fakeHash,
             # then try to do a build, which will fail but will print out the correct value

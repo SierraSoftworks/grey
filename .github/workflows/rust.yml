@@ -36,7 +36,7 @@ jobs:
 
   build-ui:
     name: Build User Interface
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
 
     steps:
       - name: Get Rust Stable
@@ -64,7 +64,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build UI using trunk
-        run: trunk build --release
+        run: cd ui && trunk build --release
 
       - name: Upload build artifacts for use in other build stages
         uses: actions/upload-artifact@v4

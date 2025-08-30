@@ -97,6 +97,7 @@ export default defineUserConfig({
           children: [
             '/guide/README.md',
             `/guide/configuration.md`,
+            '/guide/clustering.md',
             '/guide/telemetry.md',
             '/guide/azure-msi.md',
           ]
