@@ -170,10 +170,10 @@ mod tests {
         let node1 = NodeID::new();
         let node2 = NodeID::new();
 
-        let (transport1, transport2) = InMemoryGossipTransport::new(node1, node2);
-        let store1 = InMemoryGossipStore::new(node1, node1);
-        let store2 = InMemoryGossipStore::new(node2, node2);
-        store2.set("test", VersionedField::new("value2")).await;
+        let (transport1, transport2) = InMemoryGossipTransport::<_, VersionedField<String>>::new(node1, node2);
+        let store1 = InMemoryGossipStore::<_, _, VersionedField<String>>::new(node1, node1);
+        let store2 = InMemoryGossipStore::<_, _, VersionedField<String>>::new(node2, node2);
+        store2.update("test", VersionedField::new("value2".to_string())).await;
 
         let client1 = GossipClient::new(store1.clone(), transport1)
             .with_gossip_interval(Duration::from_millis(10));
@@ -188,7 +188,7 @@ mod tests {
 
             local_set
                 .run_until(async {
-                    store1.set("test", VersionedField::new("value1")).await;
+                    store1.update("test", VersionedField::new("value1".to_string())).await;
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 })
                 .await;

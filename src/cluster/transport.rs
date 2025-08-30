@@ -10,7 +10,7 @@ use tokio::net::UdpSocket;
 pub trait GossipTransport {
     type Peer: Eq + Hash;
     type Address;
-    type State;
+    type State: Versioned;
 
     fn send(
         &self,
@@ -85,7 +85,7 @@ impl<P, T> UdpGossipTransport<P, T> {
     }
 }
 
-impl<P: Eq + Hash + Serialize + DeserializeOwned, T: Serialize + DeserializeOwned> GossipTransport
+impl<P: Eq + Hash + Serialize + DeserializeOwned, T: Versioned + Serialize + DeserializeOwned> GossipTransport
     for UdpGossipTransport<P, T>
 {
     type Peer = P;
@@ -127,14 +127,14 @@ mod tests {
     use super::*;
     use tokio::sync::{Mutex, mpsc};
 
-    pub struct InMemoryGossipTransport<P: Eq + Hash, T> {
+    pub struct InMemoryGossipTransport<P: Eq + Hash, T: Versioned> {
         sender: mpsc::Sender<Message<P, T>>,
         receiver: Mutex<mpsc::Receiver<Message<P, T>>>,
         peer_address: P,
         _phantom: std::marker::PhantomData<P>,
     }
 
-    impl<P: Eq + Hash + Clone, T> InMemoryGossipTransport<P, T> {
+    impl<P: Eq + Hash + Clone, T: Versioned> InMemoryGossipTransport<P, T> {
         pub fn new(addr1: P, addr2: P) -> (Self, Self) {
             let (tx1, rx1) = mpsc::channel(10);
             let (tx2, rx2) = mpsc::channel(10);
@@ -159,7 +159,7 @@ mod tests {
     impl<P, T> GossipTransport for InMemoryGossipTransport<P, T>
     where
         P: Eq + Hash + Clone + Send + 'static,
-        T: Clone + Send + 'static,
+        T: Versioned + Send + 'static,
     {
         type Peer = P;
         type Address = Self::Peer;

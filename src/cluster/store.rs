@@ -37,7 +37,7 @@ pub trait GossipStore {
 #[cfg(test)]
 mod in_memory {
     use super::*;
-    use serde::{Deserialize, Serialize};
+    use serde::{de::DeserializeOwned, Deserialize, Serialize};
     use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::Arc};
     use tokio::sync::RwLock;
 
@@ -48,7 +48,7 @@ mod in_memory {
         state: Arc<RwLock<HashMap<P, NodeState<T, A>>>>,
     }
 
-    impl<P: Eq + Hash + Clone, A: Clone + Eq, T: Clone + Versioned> InMemoryGossipStore<P, A, T> {
+    impl<P: Eq + Hash + Clone, A: Clone + Eq + Debug + Serialize + DeserializeOwned, T: Clone + Versioned> InMemoryGossipStore<P, A, T> {
         pub fn new(node_id: P, address: A) -> Self {
             Self {
                 node_id,
@@ -68,7 +68,7 @@ mod in_memory {
                 .and_then(|node| node.fields.get(field).cloned())
         }
 
-        pub async fn set<S: ToString>(&self, field: S, value: T) {
+        pub async fn update<S: ToString>(&self, field: S, value: T::Diff) {
             let field = field.to_string();
 
             let mut state = self.state.write().await;
@@ -81,7 +81,7 @@ mod in_memory {
                 .fields
                 .entry(field)
                 .and_modify(|f| f.apply(&value))
-                .or_insert(value);
+                .or_insert(value.into());
 
             node_state.max_version = node_state
                 .fields
@@ -93,7 +93,7 @@ mod in_memory {
         }
     }
 
-    impl<P: Eq + Hash + Clone, A: Clone + PartialEq, T: Clone + Versioned> GossipStore
+    impl<P: Eq + Hash + Clone, A: Clone + PartialEq + Debug + Serialize + DeserializeOwned, T: Clone + Versioned> GossipStore
         for InMemoryGossipStore<P, A, T>
     {
         type Peer = P;
@@ -149,13 +149,14 @@ mod in_memory {
                         let diff = state
                             .fields
                             .iter()
-                            .filter(|(_, value)| value.version() > max_version)
-                            .map(|(key, value)| (key.clone(), value.clone()))
+                            .filter_map(|(key, value)| value.diff(max_version).map(|diff| (key.clone(), diff)))
                             .collect();
 
                         Some((node_id.clone(), diff))
                     } else {
-                        Some((node_id.clone(), state.fields.clone()))
+                        Some((node_id.clone(), state.fields.iter()
+                            .filter_map(|(k, v)| v.diff(0).map(|d| (k.clone(), d)))
+                            .collect()))
                     }
                 })
                 .collect::<HashMap<_, _>>()
@@ -185,7 +186,7 @@ mod in_memory {
                         .and_modify(|f| {
                             f.apply(&value);
                         })
-                        .or_insert(value);
+                        .or_insert(value.into());
                 }
 
                 node_state.max_version = node_state
@@ -257,12 +258,14 @@ mod in_memory {
         }
     }
 
-    impl<T: Clone> Versioned for VersionedField<T> {
+    impl<T: Clone + Debug + Serialize + DeserializeOwned> Versioned for VersionedField<T> {
+        type Diff = Self;
+
         fn version(&self) -> u64 {
             self.version
         }
 
-        fn diff(&self, version: u64) -> Option<Self> {
+        fn diff(&self, version: u64) -> Option<Self::Diff> {
             if version < self.version {
                 Some(self.clone())
             } else {
@@ -270,9 +273,9 @@ mod in_memory {
             }
         }
 
-        fn apply(&mut self, other: &Self) {
-            if other.version > self.version {
-                *self = other.clone();
+        fn apply(&mut self, diff: &Self::Diff) {
+            if diff.version > self.version {
+                *self = diff.clone();
             }
         }
     }
@@ -285,10 +288,10 @@ mod tests {
     #[tokio::test]
     async fn test_in_memory_gossip_store() {
         let node_id = NodeID::new();
-        let store = InMemoryGossipStore::new(node_id, node_id);
+        let store = InMemoryGossipStore::<_, _, VersionedField<i32>>::new(node_id, node_id);
 
         store
-            .set("test", VersionedField::new(1).with_version(1))
+            .update("test", VersionedField::new(1).with_version(1))
             .await;
         assert_eq!(store.get(&node_id, "test").await.unwrap().value, 1);
 

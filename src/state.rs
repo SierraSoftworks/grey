@@ -330,14 +330,22 @@ impl cluster::GossipStore for State {
                     )?;
                 }
 
-                for (field, probe_state) in node_diff {
-                    table_fields.insert(
-                        (peer_id, field.clone()),
-                        (
-                            probe_state.version(),
-                            rmp_serde::to_vec_named(&probe_state)?.as_slice(),
-                        ),
-                    )?;
+                for (probe_name, probe_state) in node_diff {
+                    if let Ok(Some(mut existing)) = table_fields.get_mut((peer_id, probe_name.clone())) {
+                        let (_version, data) = existing.value();
+
+                        let mut current: ProbeState = rmp_serde::from_slice(data)?;
+                        current.apply(&probe_state);
+                        existing.insert((current.version(), rmp_serde::to_vec(&current)?.as_slice()))?;
+                    } else {
+                        table_fields.insert(
+                            (peer_id, probe_name.clone()),
+                            (
+                                probe_state.version(),
+                                rmp_serde::to_vec(&probe_state)?.as_slice(),
+                            ),
+                        )?;
+                    }
                 }
             }
         }
@@ -349,11 +357,13 @@ impl cluster::GossipStore for State {
 }
 
 impl Versioned for Probe {
+    type Diff = Probe;
+
     fn version(&self) -> u64 {
         self.last_updated.timestamp() as u64
     }
 
-    fn diff(&self, version: u64) -> Option<Self>
+    fn diff(&self, version: u64) -> Option<Self::Diff>
     where
         Self: Sized,
     {
@@ -377,7 +387,7 @@ impl Versioned for Probe {
         }
     }
 
-    fn apply(&mut self, other: &Self) {
-        self.merge(other);
+    fn apply(&mut self, diff: &Self::Diff) {
+        self.merge(diff);
     }
 }

@@ -1,53 +1,74 @@
-use std::{collections::HashMap, fmt::Display, hash::Hash};
+use std::{collections::HashMap, fmt::{Debug, Display}, hash::Hash};
 
 use serde::{Deserialize, Serialize};
 
 use crate::cluster::Versioned;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum Message<P: Eq + Hash, T> {
-    Syn(P, ClusterStateDigest<P>),
-    Ack(P, ClusterStateDiff<P, T>),
-    SynAck(P, ClusterStateDigest<P>, ClusterStateDiff<P, T>),
+pub enum Message<Peer, Value>
+where
+    Peer: Eq + Hash,
+    Value: Versioned,
+    Value::Diff: Serialize + Debug + Clone,
+    for <'dde> Value::Diff: Deserialize<'dde>,
+{
+    Syn(Peer, ClusterStateDigest<Peer>),
+    Ack(Peer, ClusterStateDiff<Peer, Value>),
+    SynAck(Peer, ClusterStateDigest<Peer>, ClusterStateDiff<Peer, Value>),
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct ClusterStateDiff<Peer: Eq + Hash, Value>(HashMap<Peer, HashMap<String, Value>>);
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ClusterStateDiff<Peer, Value>
+where
+    Peer: Eq + Hash,
+    Value: Versioned,
+    Value::Diff: Serialize,
+    for <'dde> Value::Diff: Deserialize<'dde>,
+{
+    inner: HashMap<Peer, HashMap<String, Value::Diff>>
+}
 
-impl<P: Eq + Hash, T: Versioned> ClusterStateDiff<P, T> {
+impl<Peer, Value> ClusterStateDiff<Peer, Value>
+where
+    Peer: Eq + Hash,
+    Value: Versioned,
+    Value::Diff: Serialize,
+    for <'dde> Value::Diff: Deserialize<'dde>,
+{
     pub fn new() -> Self {
-        Self(HashMap::new())
+        Self {
+            inner: HashMap::new()
+        }
     }
 
-    pub fn update(&mut self, node_id: P, field: String, value: T)
-    where
-        T: Clone,
-    {
-        self.0
+    pub fn update(&mut self, node_id: Peer, field: String, value: Value::Diff) {
+        self.inner
             .entry(node_id)
             .or_default()
-            .entry(field)
-            .and_modify(|v| {
-                v.apply(&value);
-            })
-            .or_insert(value);
+            .insert(field, value);
     }
 
     #[cfg(test)]
-    pub fn with_node(self, node_id: P, state: HashMap<String, T>) -> Self {
-        let mut map = self.0;
+    pub fn with_node(self, node_id: Peer, state: HashMap<String, Value::Diff>) -> Self {
+        let mut map = self.inner;
         map.insert(node_id, state);
-        Self(map)
+        Self { inner: map }
     }
 
-    pub fn into_inner(self) -> HashMap<P, HashMap<String, T>> {
-        self.0
+    pub fn into_inner(self) -> HashMap<Peer, HashMap<String, Value::Diff>> {
+        self.inner
     }
 }
 
-impl<P: Eq + Hash, T: Versioned> From<HashMap<P, HashMap<String, T>>> for ClusterStateDiff<P, T> {
-    fn from(value: HashMap<P, HashMap<String, T>>) -> Self {
-        Self(value)
+impl<Peer, Value> From<HashMap<Peer, HashMap<String, Value::Diff>>> for ClusterStateDiff<Peer, Value>
+where
+    Peer: Eq + Hash,
+    Value: Versioned,
+    Value::Diff: Serialize,
+    for <'dde> Value::Diff: Deserialize<'dde>,
+{
+    fn from(value: HashMap<Peer, HashMap<String, Value::Diff>>) -> Self {
+        Self { inner: value }
     }
 }
 
