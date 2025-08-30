@@ -234,7 +234,7 @@ impl State {
                 if last_updated >= history_expiry_threshold {
                     true
                 } else {
-                    info!(name: "state.gc.probe", { probe.name = %probe_name, %last_updated }, "Dropping stale probe record");
+                    info!(name: "state.gc.probe", { probe.name = %probe_name, %last_updated, expired_at=%history_expiry_threshold }, "Dropping stale probe record");
                     dropped_probe_records += 1;
                     false
                 }
