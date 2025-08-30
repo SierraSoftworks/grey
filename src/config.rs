@@ -101,6 +101,7 @@ pub struct ClusterConfig {
     #[serde(default = "default::cluster::gc_probe_expiry")]
     #[serde(with = "humantime_serde")]
     pub gc_probe_expiry: std::time::Duration,
+    #[serde(default = "default::cluster::gc_peer_expiry")]
     #[serde(with = "humantime_serde")]
     pub gc_peer_expiry: std::time::Duration,
 }
