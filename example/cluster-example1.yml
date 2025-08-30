@@ -12,7 +12,7 @@ cluster:
   enabled: true
   listen: 127.0.0.1:13001
   peers: []
-  secret: shared-cluster-join-secret
+  secret: /pL7XKDj1UrAGjNMv3t9jmb9leDOZT+64KkYE8k7UH8=
   gossip_interval: 5s
 
 probes:

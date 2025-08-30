@@ -29,18 +29,56 @@ pub trait GossipTransport {
 
 pub struct UdpGossipTransport<P, T> {
     socket: Arc<UdpSocket>,
+    shared_secret: [u8; 32],
     _phantom: std::marker::PhantomData<(P, T)>,
 }
 
 impl<P, T> UdpGossipTransport<P, T> {
-    pub async fn new(addr: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new(addr: &str, shared_secret: [u8; 32]) -> Result<Self, Box<dyn std::error::Error>> {
         let addr = SocketAddr::from_str(addr)?;
         let socket = UdpSocket::bind(addr).await?;
 
         Ok(Self {
             socket: Arc::new(socket),
+            shared_secret,
             _phantom: std::marker::PhantomData,
         })
+    }
+
+    fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        use aes_gcm::{Aes256Gcm, Key, KeyInit};
+        use aes_gcm::aead::{Aead, AeadCore, OsRng};
+
+        let key: &Key<Aes256Gcm> = &self.shared_secret.into();
+        let cipher = Aes256Gcm::new(&key);
+
+        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+        let ciphertext = cipher.encrypt(&nonce, plaintext)
+            .map_err(|e| format!("Failed to encrypt gossip packet, ensure that you have provided a valid shared secret: {e:?}"))?;
+
+        let mut result = nonce.to_vec();
+        result.reserve_exact(ciphertext.len());
+        result.extend(ciphertext);
+        Ok(result)
+    }
+
+    fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        use aes_gcm::{Aes256Gcm, Key, KeyInit};
+        use aes_gcm::aead::{Aead, Nonce};
+
+        if ciphertext.len() < 12 {
+            return Err("Ciphertext too short to contain nonce".into());
+        }
+
+        let key: &Key<Aes256Gcm> = &self.shared_secret.into();
+        let cipher = Aes256Gcm::new(&key);
+
+        let (nonce_bytes, ciphertext) = ciphertext.split_at(12);
+        let nonce = Nonce::<Aes256Gcm>::from_slice(nonce_bytes);
+
+        let plaintext = cipher.decrypt(&nonce, ciphertext)
+            .map_err(|e| format!("Failed to decrypt gossip packet, ensure that you have provided the correct shared secret: {e:?}"))?;
+        Ok(plaintext)
     }
 }
 
@@ -57,7 +95,8 @@ impl<P: Eq + Hash + Serialize + DeserializeOwned, T: Serialize + DeserializeOwne
         msg: Message<Self::Peer, Self::State>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let data = rmp_serde::to_vec(&msg)?;
-        self.socket.send_to(&data, address).await?;
+        let encrypted_data = self.encrypt(&data)?;
+        self.socket.send_to(&encrypted_data, address).await?;
         Ok(())
     }
 
@@ -68,7 +107,8 @@ impl<P: Eq + Hash + Serialize + DeserializeOwned, T: Serialize + DeserializeOwne
         let mut buf = [0; 65507];
         match self.socket.try_recv_from(&mut buf) {
             Ok((size, addr)) => {
-                let msg: Message<P, T> = rmp_serde::from_slice(&buf[..size])?;
+                let decrypted_data = self.decrypt(&buf[..size])?;
+                let msg: Message<P, T> = rmp_serde::from_slice(&decrypted_data)?;
                 Ok(Some((addr, msg)))
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(None),

@@ -58,8 +58,10 @@ impl Engine {
 
         if self.state.get_config().cluster.enabled {
             let state = self.state.clone();
+            let secret_key = self.state.get_config().cluster.get_secret_key()?;
+
             let cluster_transport =
-                cluster::UdpGossipTransport::new(&self.state.get_config().cluster.listen).await?;
+                cluster::UdpGossipTransport::new(&self.state.get_config().cluster.listen, secret_key).await?;
             let cluster_client = cluster::GossipClient::new(state, cluster_transport)
                 .with_gossip_factor(self.state.get_config().cluster.gossip_factor)
                 .with_gossip_interval(self.state.get_config().cluster.gossip_interval)

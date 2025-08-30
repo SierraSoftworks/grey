@@ -18,6 +18,7 @@
         "behaviour",
         "cachix",
         "chrono",
+        "ciphertext",
         "Csvg",
         "gloo",
         "humantime",
