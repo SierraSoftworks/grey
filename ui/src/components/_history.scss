@@ -28,36 +28,25 @@
         border-bottom-right-radius: $border-radius-small;
     }
 
+    &:hover {
+        border-left: 0.5px solid $color-separator;
+        border-right: 0.5px solid $color-separator;
+    }
+
     &.ok {
         background-color: $color-status-ok;
-
-        &:hover {
-            background-color: darken($color-status-ok, 10%);
-        }
     }
 
     &.warn {
         background-color: $color-status-warn;
-
-        &:hover {
-            background-color: darken($color-status-warn, 10%);
-        }
     }
 
     &.error {
         background-color: $color-status-error;
-
-        &:hover {
-            background-color: darken($color-status-error, 10%);
-        }
     }
 
     &.unknown {
         background-color: $color-status-unknown;
-
-        &:hover {
-            background-color: darken($color-status-unknown, 10%);
-        }
     }
 
     &.tooltip-target .tooltip {
