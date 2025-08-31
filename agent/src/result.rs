@@ -24,6 +24,18 @@ impl Default for ProbeResult {
 }
 
 impl ProbeResult {
+    #[cfg(test)]
+    pub fn test() -> Self {
+        Self {
+            start_time: Utc::now(),
+            duration: Duration::zero(),
+            attempts: 0,
+            pass: true,
+            message: "Test probe".into(),
+            validations: HashMap::new(),
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             start_time: Utc::now(),

@@ -16,6 +16,17 @@ pub struct Probe {
 }
 
 impl Probe {
+    #[cfg(test)]
+    pub fn test() -> Self {
+        Self {
+            name: "test".into(),
+            policy: crate::Policy { interval: std::time::Duration::from_secs(60), timeout: std::time::Duration::from_secs(5), retries: Some(3) },
+            target: crate::targets::TargetType::test(),
+            tags: HashMap::new(),
+            validators: vec![("output.test".into(), crate::validators::ValidatorType::test())].into_iter().collect(),
+        }
+    }
+
     pub fn next_start_time(&self) -> Instant {
         Instant::now() + random_start_offset(self.policy.interval)
     }

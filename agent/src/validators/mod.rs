@@ -21,6 +21,14 @@ pub enum ValidatorType {
     OneOf(one_of::OneOf),
 }
 
+impl ValidatorType {
+    #[cfg(test)]
+    pub fn test() -> Self {
+        let value: SampleValue = true.into();
+        ValidatorType::Equals(value.into())
+    }
+}
+
 impl Validator for ValidatorType {
     fn validate(
         &self,
