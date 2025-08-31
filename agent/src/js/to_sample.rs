@@ -2,11 +2,7 @@ use boa_engine::{Context, JsError, JsObject, JsResult, JsValue, js_string};
 
 use crate::{Sample, SampleValue};
 
-pub fn jsobject_to_sample(output: &JsObject, context: &mut Context) -> JsResult<Sample> {
-    output.js_into(context)
-}
-
-trait JsInto<T> {
+pub trait JsInto<T> {
     fn js_into(&self, context: &mut Context) -> JsResult<T>;
 }
 
@@ -74,5 +70,54 @@ impl JsInto<SampleValue> for JsObject {
                 .to_std_string_lossy();
             Ok(SampleValue::String(value))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use boa_engine::{Context, Source};
+
+    #[test]
+    fn test_js_primitives_into_sample_value() {
+        assert_eq!(get_sample_value("null"), SampleValue::None);
+        assert_eq!(get_sample_value("true"), SampleValue::Bool(true));
+        assert_eq!(get_sample_value("false"), SampleValue::Bool(false));
+        assert_eq!(get_sample_value("42"), SampleValue::Int(42));
+        assert_eq!(get_sample_value("3.14"), SampleValue::Double(3.14));
+        assert_eq!(get_sample_value(r#""hello""#), SampleValue::String("hello".into()));
+    }
+
+    #[test]
+    fn test_js_array_into_sample_value() {
+        assert_eq!(
+            get_sample_value("[1, 2, 3]"),
+            SampleValue::List(vec![
+                SampleValue::Int(1),
+                SampleValue::Int(2),
+                SampleValue::Int(3)
+            ])
+        );
+        assert_eq!(
+            get_sample_value(r#"["a", "b", "c"]"#),
+            SampleValue::List(vec![
+                SampleValue::String("a".into()),
+                SampleValue::String("b".into()),
+                SampleValue::String("c".into())
+            ])
+        );
+    }
+
+    #[test]
+    fn test_js_object_into_sample() {
+        let sample = get_sample_value(r#"({ "key1": "value1", "key2": 42, "key3": true })"#);
+        assert_eq!(sample, SampleValue::String(r#"{"key1":"value1","key2":42,"key3":true}"#.into()));
+    }
+
+    fn get_sample_value(script: &str) -> SampleValue {
+        let mut context = Context::default();
+        let js_value = context.eval(Source::from_bytes(script)).unwrap();
+
+        js_value.js_into(&mut context).unwrap()
     }
 }

@@ -45,3 +45,26 @@ impl Logger for TraceLogger {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use boa_engine::{Context, Source};
+
+    #[test]
+    fn test_console_logging() {
+        let mut context = Context::default();
+        boa_runtime::register((boa_runtime::extensions::ConsoleExtension(TraceLogger),), None, &mut context).unwrap();
+        
+        context
+            .eval(Source::from_bytes(
+                r#"
+            console.log("This is a log message");
+            console.info("This is an info message");
+            console.warn("This is a warning message");
+            console.error("This is an error message");
+        "#,
+            ))
+            .unwrap();
+    }
+}
