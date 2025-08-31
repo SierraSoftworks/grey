@@ -48,6 +48,6 @@ mod tests {
     #[test]
     fn display() {
         let validator = NotEquals("test".into());
-        assert_eq!(validator.to_string(), "!= test");
+        assert_eq!(validator.to_string(), "!= \"test\"");
     }
 }

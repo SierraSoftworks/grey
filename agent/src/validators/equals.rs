@@ -54,6 +54,6 @@ mod tests {
     #[test]
     fn display() {
         let validator = Equals("test".into());
-        assert_eq!(validator.to_string(), "== test");
+        assert_eq!(validator.to_string(), "== \"test\"");
     }
 }
