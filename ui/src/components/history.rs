@@ -161,6 +161,11 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket) -> Html {
 
     let samples = si_magnitude(overall_stats.total_samples as f64, "");
 
+    let mut relevant_observations = probe_result.observations.iter().collect::<Vec<_>>();
+    relevant_observations.sort_by(|a, b| a.1.success_rate().partial_cmp(&b.1.success_rate()).unwrap_or(std::cmp::Ordering::Equal)); // (|(_, obs)| obs.success_rate());
+    relevant_observations.truncate(probe_result.validations.len().max(3));
+
+
     html! {
         <div class="tooltip visible">
             <div class="tooltip-header">
@@ -201,7 +206,7 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket) -> Html {
                     if probe_result.observations.len() > 1 {
                         <div class="tooltip-section">
                             <div class="tooltip-section-title">{"Observers"}</div>
-                            {for probe_result.observations.iter().map(|(name, observation)| {
+                            {for relevant_observations.iter().map(|(name, observation)| {
                                 let validation_class = if observation.success_rate() > 99.0 { "ok" } else { "error" };
                                 html! {
                                     <div class="tooltip-section-entry">
@@ -213,6 +218,12 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket) -> Html {
                                     </div>
                                 }
                             })}
+
+                            if probe_result.observations.len() > relevant_observations.len() {
+                                <div class="tooltip-section-entry">
+                                    <span class="tooltip-section-entry-extra">{format!("and {} more...", probe_result.observations.len() - relevant_observations.len())}</span>
+                                </div>
+                            }
                         </div>
                     }
 
