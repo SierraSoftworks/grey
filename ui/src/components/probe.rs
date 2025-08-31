@@ -9,17 +9,7 @@ pub struct ProbeProps {
 
 #[function_component(Probe)]
 pub fn probe(props: &ProbeProps) -> Html {
-    let (successful, total) = props
-        .probe
-        .history
-        .iter()
-        .map(|history| (history.successful_samples, history.sample_count))
-        .fold((0, 0), |acc, x| (acc.0 + x.0, acc.1 + x.1));
-    let recent_availability = if total == 0 {
-        100.0
-    } else {
-        100.0 * successful as f64 / total as f64
-    };
+    let recent_availability = props.probe.recent_availability(2);
 
     let probe_class = match props.probe.history.last() {
         Some(h) if h.pass => "ok",
