@@ -62,9 +62,11 @@ mod tests {
         assert_eq!(resp.headers().get("content-type").and_then(|v| v.to_str().ok()), Some("text/html"));
         let body_bytes = resp.into_body().try_into_bytes().unwrap();
         let body = String::from_utf8_lossy(&body_bytes);
-        assert!(body.contains("<!DOCTYPE html>"), "Body did not include the HTML doctype");
+        println!("{body}");
+        assert!(body.trim().starts_with("<!DOCTYPE html>"), "Body did not start with the HTML doctype");
         assert!(body.contains("<title>Grey</title>"), "Failed to find title in HTML body");
         assert!(body.contains(r#"data-probes="[{&quot;"#), "Failed to find probes data in HTML body");
         assert!(body.contains(r#"data-config="{&quot;"#), "Failed to find config data in HTML body");
+        assert!(body.trim().ends_with("</html>"), "Body did not end with the HTML closing tag");
     }
 }
