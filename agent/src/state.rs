@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex, RwLock},
 };
-
+use std::error::Error;
 use grey_api::{Mergeable, Probe};
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 use tracing::info;
@@ -15,6 +15,7 @@ use crate::{
     cluster::{self, ClusterStateDigest, NodeID, Versioned},
     result::ProbeResult,
 };
+use crate::cluster::GossipStore;
 
 // Maps a node's address to a tuple of its (NodeID, Last Seen Timestamp)
 const CLUSTER_PEERS_TABLE: TableDefinition<String, (u128, u64)> =
@@ -37,7 +38,30 @@ pub struct State {
 }
 
 impl State {
-    pub async fn new<P: Into<PathBuf>>(config_path: P) -> Result<Self, Box<dyn std::error::Error>> {
+    #[cfg(test)]
+    pub async fn test(temp_dir: PathBuf) -> Self {
+        let config_path = temp_dir.join("config.yml");
+        let config = Config::test(&temp_dir);
+        let this = Self {
+            config_path,
+            config_last_modified: Arc::new(Mutex::new(std::time::SystemTime::now())),
+            config: Arc::new(RwLock::new(Arc::new(config))),
+            node_id: NodeID::new(),
+            database: Arc::new(Database::create(temp_dir.join("state.redb")).unwrap()),
+        };
+
+        let test_probe = &this.get_config().probes[0];
+
+        this.heartbeat(NodeID::new(), "127.0.0.1:12345".parse().unwrap())
+            .await
+            .unwrap();
+        this.update_probe_config(test_probe).await.unwrap();
+        this.update_probe_state(&test_probe.name, &&ProbeResult::test()).await.unwrap();
+
+        this
+    }
+
+    pub async fn new<P: Into<PathBuf>>(config_path: P) -> Result<Self, Box<dyn Error>> {
         let config_path = config_path.into();
         let config = Config::load_from_path(&config_path).await?;
 
@@ -54,7 +78,7 @@ impl State {
         })
     }
 
-    pub async fn reload(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn reload(&self) -> Result<(), Box<dyn Error>> {
         let last_modified = *self.config_last_modified.lock().unwrap();
         if let Some((config, modified)) =
             Config::load_if_modified_since(&self.config_path, last_modified).await?
@@ -72,7 +96,7 @@ impl State {
 
     pub async fn get_probe_states(
         &self,
-    ) -> Result<HashMap<String, Probe>, Box<dyn std::error::Error>> {
+    ) -> Result<HashMap<String, Probe>, Box<dyn Error>> {
         let mut histories = HashMap::new();
         for probe in self.get_config().probes.iter() {
             histories.insert(probe.name.clone(), probe.into());
@@ -101,7 +125,7 @@ impl State {
     pub async fn update_probe_config(
         &self,
         probe: &crate::Probe,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn Error>> {
         let txn = self.database.begin_write()?;
         {
             let mut table = txn.open_table(CLUSTER_FIELDS_TABLE)?;
@@ -134,7 +158,7 @@ impl State {
         &self,
         probe_name: &str,
         probe_result: &ProbeResult,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn Error>> {
         let txn = self.database.begin_write()?;
 
         if let Some(probe) = self
@@ -178,7 +202,7 @@ impl State {
         }
     }
 
-    pub async fn get_peers(&self) -> Result<Vec<grey_api::Peer>, Box<dyn std::error::Error>> {
+    pub async fn get_peers(&self) -> Result<Vec<grey_api::Peer>, Box<dyn Error>> {
         let mut peers = Vec::new();
 
         let txn = self.database.begin_read()?;
@@ -198,7 +222,7 @@ impl State {
         Ok(peers)
     }
 
-    pub async fn gc(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn gc(&self) -> Result<(), Box<dyn Error>> {
         let txn = self.database.begin_write()?;
         {
             let mut table_peers = txn.open_table(CLUSTER_PEERS_TABLE)?;
@@ -262,15 +286,29 @@ impl State {
 }
 
 impl cluster::GossipStore for State {
-    type Peer = NodeID;
+    type Id = NodeID;
     type Address = SocketAddr;
     type State = ProbeState;
 
-    async fn get_self_id(&self) -> Result<Self::Peer, Box<dyn std::error::Error>> {
+    async fn id(&self) -> Result<Self::Id, Box<dyn Error>> {
         Ok(self.node_id)
     }
 
-    async fn get_peer_addresses(&self) -> Result<Vec<Self::Address>, Box<dyn std::error::Error>> {
+    async fn heartbeat(&self, peer: Self::Id, address: Self::Address) -> Result<(), Box<dyn Error>> {
+        trace!(name: "state.register_peer", { host.node_id = %self.node_id, peer.id = %peer, peer.address = %address }, "Registering address for peer.");
+        let txn = self.database.begin_write()?;
+        {
+            let mut table_peers = txn.open_table(CLUSTER_PEERS_TABLE)?;
+            table_peers.insert(
+                address.to_string(),
+                (peer.into(), chrono::Utc::now().timestamp() as u64),
+            )?;
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    async fn get_peer_addresses(&self) -> Result<Vec<Self::Address>, Box<dyn Error>> {
         let txn = self.database.begin_read()?;
         let table = txn.open_table(CLUSTER_PEERS_TABLE)?;
         Ok(table
@@ -280,9 +318,9 @@ impl cluster::GossipStore for State {
             .collect())
     }
 
-    async fn get_digest(
+    async fn digest(
         &self,
-    ) -> Result<cluster::ClusterStateDigest<Self::Peer>, Box<dyn std::error::Error>> {
+    ) -> Result<ClusterStateDigest<Self::Id>, Box<dyn Error>> {
         let mut digest = ClusterStateDigest::new();
 
         let txn = self.database.begin_read()?;
@@ -298,10 +336,10 @@ impl cluster::GossipStore for State {
         Ok(digest)
     }
 
-    async fn get_diff(
+    async fn diff(
         &self,
-        digest: cluster::ClusterStateDigest<Self::Peer>,
-    ) -> Result<cluster::ClusterStateDiff<Self::Peer, Self::State>, Box<dyn std::error::Error>>
+        digest: ClusterStateDigest<Self::Id>,
+    ) -> Result<cluster::ClusterStateDiff<Self::Id, Self::State>, Box<dyn Error>>
     {
         let mut delta = cluster::ClusterStateDiff::new();
 
@@ -312,7 +350,7 @@ impl cluster::GossipStore for State {
             let (node_id, probe) = key.value();
             let (version, data) = value.value();
 
-            let peer: Self::Peer = node_id.into();
+            let peer: Self::Id = node_id.into();
             let remote_version = digest.get_max_version(&peer).unwrap_or_default();
 
             if version <= remote_version {
@@ -330,25 +368,17 @@ impl cluster::GossipStore for State {
         Ok(delta)
     }
 
-    async fn apply_diff(
+    async fn apply(
         &self,
-        diff: cluster::ClusterStateDiff<Self::Peer, Self::State>,
-        address: Self::Address,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        trace!(name: "state.apply_diff", { host.node_id = %self.node_id, peer.address = %address, diff = ?diff }, "Applying cluster state diff.");
+        diff: cluster::ClusterStateDiff<Self::Id, Self::State>,
+    ) -> Result<(), Box<dyn Error>> {
+        trace!(name: "state.apply_diff", { host.node_id = %self.node_id, diff = ?diff }, "Applying cluster state diff.");
         let txn = self.database.begin_write()?;
         {
-            let mut table_peers = txn.open_table(CLUSTER_PEERS_TABLE)?;
             let mut table_fields = txn.open_table(CLUSTER_FIELDS_TABLE)?;
 
             for (peer, node_diff) in diff.into_inner() {
                 let peer_id: u128 = peer.into();
-                if peer != self.node_id {
-                    table_peers.insert(
-                        address.to_string(),
-                        (peer_id, chrono::Utc::now().timestamp() as u64),
-                    )?;
-                }
 
                 for (probe_name, probe_state) in node_diff {
                     if let Ok(Some(mut existing)) = table_fields.get_mut((peer_id, probe_name.clone())) {

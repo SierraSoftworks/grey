@@ -21,7 +21,7 @@ pub struct HistoryProps {
 struct TooltipData {
     pub visible: bool,
     pub element_index: usize,
-    pub probe_result: Option<grey_api::ProbeHistoryBucket>,
+    pub probe_result: Option<ProbeHistoryBucket>,
 }
 
 #[function_component(History)]
@@ -38,7 +38,7 @@ pub fn history(props: &HistoryProps) -> Html {
                     // Get the JSON data from the element
                     if let Some(json_data) = element.get_attribute("data-probe-result") {
                         if let Ok(probe_result) =
-                            serde_json::from_str::<grey_api::ProbeHistoryBucket>(&json_data)
+                            serde_json::from_str::<ProbeHistoryBucket>(&json_data)
                         {
                             let element_index = element
                                 .get_attribute("data-index")
@@ -137,7 +137,7 @@ pub fn history(props: &HistoryProps) -> Html {
     }
 }
 
-fn render_tooltip(probe_result: &grey_api::ProbeHistoryBucket) -> Html {
+fn render_tooltip(probe_result: &ProbeHistoryBucket) -> Html {
     let status_text = if probe_result.pass {
         "Passed"
     } else {

@@ -6,20 +6,20 @@ pub use tests::InMemoryGossipTransport;
 pub use udp::UdpGossipTransport;
 
 pub trait GossipTransport {
-    type Peer: Eq + Hash;
+    type Id: Eq + Hash;
     type Address;
     type State: Versioned;
 
     fn send(
         &self,
         address: Self::Address,
-        msg: Message<Self::Peer, Self::State>,
+        msg: Message<Self::Id, Self::State>,
     ) -> impl std::future::Future<Output = Result<(), Box<dyn std::error::Error>>>;
     fn try_receive(
         &self,
     ) -> impl std::future::Future<
         Output = Result<
-            Option<(Self::Address, Message<Self::Peer, Self::State>)>,
+            Option<(Self::Address, Message<Self::Id, Self::State>)>,
             Box<dyn std::error::Error>,
         >,
     >;
@@ -92,14 +92,14 @@ mod udp {
     impl<P: Eq + Hash + Serialize + DeserializeOwned, T: Versioned + Serialize + DeserializeOwned> GossipTransport
         for UdpGossipTransport<P, T>
     {
-        type Peer = P;
+        type Id = P;
         type Address = SocketAddr;
         type State = T;
 
         async fn send(
             &self,
             address: Self::Address,
-            msg: Message<Self::Peer, Self::State>,
+            msg: Message<Self::Id, Self::State>,
         ) -> Result<(), Box<dyn std::error::Error>> {
             let data = rmp_serde::to_vec(&msg)?;
             let encrypted_data = self.encrypt(&data)?;
@@ -109,7 +109,7 @@ mod udp {
 
         async fn try_receive(
             &self,
-        ) -> Result<Option<(Self::Address, Message<Self::Peer, Self::State>)>, Box<dyn std::error::Error>>
+        ) -> Result<Option<(Self::Address, Message<Self::Id, Self::State>)>, Box<dyn std::error::Error>>
         {
             let mut buf = [0; 65507];
             match self.socket.try_recv_from(&mut buf) {
@@ -266,8 +266,8 @@ mod tests {
         P: Eq + Hash + Clone + Send + 'static,
         T: Versioned + Send + 'static,
     {
-        type Peer = P;
-        type Address = Self::Peer;
+        type Id = P;
+        type Address = Self::Id;
         type State = T;
 
         async fn send(

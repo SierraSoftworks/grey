@@ -33,6 +33,12 @@ impl Display for Equals {
     }
 }
 
+impl From<SampleValue> for Equals {
+    fn from(value: SampleValue) -> Self {
+        Equals(value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

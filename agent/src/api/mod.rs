@@ -18,6 +18,11 @@ impl AppState {
     pub fn new(state: State) -> Self {
         Self { state }
     }
+
+    #[cfg(test)]
+    pub async fn test(temp_path: std::path::PathBuf) -> Self {
+        Self { state: State::test(temp_path).await }
+    }
 }
 
 // Custom handler for serving embedded static files

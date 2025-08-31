@@ -24,6 +24,18 @@ pub struct Config {
 }
 
 impl Config {
+    #[cfg(test)]
+    pub fn test(temp_dir: &PathBuf) -> Self {
+        Self {
+            probes: vec![
+                Probe::test(),
+            ],
+            ui: UiConfig::default(),
+            cluster: ClusterConfig::default(),
+            state: temp_dir.join("test_state.redb"),
+        }
+    }
+
     #[tracing::instrument(name = "config.load", skip(path), err(Debug))]
     pub async fn load_from_path(path: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         let config = tokio::fs::read_to_string(path).await.map_err(|e| {

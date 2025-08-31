@@ -41,3 +41,32 @@ pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
         "{index_html_before}{ssr_content}{index_html_after}"
     )))
 }
+
+#[cfg(test)]
+mod tests {
+    use actix_web::body::MessageBody;
+    use tempfile::tempdir;
+    use actix_web::http::StatusCode;
+
+    use super::*;
+
+    #[actix_web::test]
+    async fn test_index() {
+        let temp_dir = tempdir().unwrap();
+
+        let app_state = AppState::test(temp_dir.path().to_path_buf()).await;
+        let resp = index(web::Data::new(app_state)).await;
+
+        let resp = resp.expect("Failed to render index");
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers().get("content-type").and_then(|v| v.to_str().ok()), Some("text/html"));
+        let body_bytes = resp.into_body().try_into_bytes().unwrap();
+        let body = String::from_utf8_lossy(&body_bytes);
+        println!("{body}");
+        assert!(body.trim().to_ascii_lowercase().starts_with("<!doctype html>"), "Body did not start with the HTML doctype");
+        assert!(body.contains("<title>Grey</title>"), "Failed to find title in HTML body");
+        assert!(body.contains(r#"data-probes="[{&quot;"#), "Failed to find probes data in HTML body");
+        assert!(body.contains(r#"data-config="{&quot;"#), "Failed to find config data in HTML body");
+        assert!(body.trim().ends_with("</html>"), "Body did not end with the HTML closing tag");
+    }
+}

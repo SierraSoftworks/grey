@@ -7,7 +7,7 @@ use super::*;
 pub struct GossipClient<S, T>
 where
     S: GossipStore,
-    T: GossipTransport<Peer = S::Peer, Address = S::Address, State = S::State>,
+    T: GossipTransport<Id = S::Id, Address = S::Address, State = S::State>,
 {
     store: S,
     transport: T,
@@ -21,8 +21,8 @@ where
 impl<S, T> GossipClient<S, T>
 where
     S: GossipStore,
-    T: GossipTransport<Peer = S::Peer, Address = S::Address, State = S::State>,
-    S::Peer: Display + Clone + Send + 'static,
+    T: GossipTransport<Id = S::Id, Address = S::Address, State = S::State>,
+    S::Id: Display + Clone + Send + 'static,
     S::Address: Display + Clone + Eq + Send + 'static,
 {
     pub fn new(store: S, transport: T) -> Self {
@@ -85,8 +85,8 @@ where
             return Ok(());
         }
 
-        let self_id = self.store.get_self_id().await?;
-        let digest = self.store.get_digest().await?;
+        let self_id = self.store.id().await?;
+        let digest = self.store.digest().await?;
 
         for addr in peer_addresses {
             self.transport
@@ -124,14 +124,15 @@ where
     async fn handle_message(
         &self,
         addr: &S::Address,
-        msg: Message<S::Peer, S::State>,
+        msg: Message<S::Id, S::State>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match msg {
             Message::Syn(peer_id, digest) => {
                 trace!("Received gossip syn from {peer_id}: {digest}");
-                let self_id = self.store.get_self_id().await?;
-                let delta = self.store.get_diff(digest).await?;
-                let digest = self.store.get_digest().await?;
+                let self_id = self.store.id().await?;
+                let delta = self.store.diff(digest).await?;
+                let digest = self.store.digest().await?;
+                self.store.heartbeat(peer_id.clone(), addr.clone()).await?;
                 self.transport
                     .send(
                         addr.clone(),
@@ -141,9 +142,10 @@ where
             }
             Message::SynAck(peer_id, digest, diff) => {
                 trace!("Received gossip synack from {peer_id}: {digest}");
-                let self_id = self.store.get_self_id().await?;
-                let delta = self.store.get_diff(digest).await?;
-                self.store.apply_diff(diff, addr.clone()).await?;
+                let self_id = self.store.id().await?;
+                let delta = self.store.diff(digest).await?;
+                self.store.apply(diff).await?;
+                self.store.heartbeat(peer_id.clone(), addr.clone()).await?;
 
                 self.transport
                     .send(addr.clone(), Message::Ack(self_id.clone(), delta))
@@ -151,7 +153,8 @@ where
             }
             Message::Ack(peer_id, delta) => {
                 trace!("Received gossip ack from {peer_id}");
-                self.store.apply_diff(delta, addr.clone()).await?;
+                self.store.apply(delta).await?;
+                self.store.heartbeat(peer_id.clone(), addr.clone()).await?;
             }
         }
 

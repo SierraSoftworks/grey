@@ -6,31 +6,40 @@ use super::*;
 pub use in_memory::InMemoryGossipStore;
 
 pub trait GossipStore {
-    type Peer: Eq + Hash;
+    /// The type used to uniquely identify a peer node in the cluster.
+    type Id: Eq + Hash;
     type Address;
     type State: Versioned;
 
-    fn get_self_id(&self) -> impl Future<Output = Result<Self::Peer, Box<dyn std::error::Error>>>;
+    /// Returns the unique identifier of the local node.
+    fn id(&self) -> impl Future<Output = Result<Self::Id, Box<dyn std::error::Error>>>;
 
+    /// Records a heartbeat from a peer node, updating its address if necessary.
+    fn heartbeat(&self, peer: Self::Id, address: Self::Address) -> impl Future<Output = Result<(), Box<dyn std::error::Error>>>;
+
+    /// Retrieves the addresses of all known peer nodes.
     fn get_peer_addresses(
         &self,
     ) -> impl Future<Output = Result<Vec<Self::Address>, Box<dyn std::error::Error>>>;
 
-    fn get_digest(
+    /// Compiles a digest of the current cluster state, summarizing the maximum version of each peer's state.
+    fn digest(
         &self,
-    ) -> impl Future<Output = Result<ClusterStateDigest<Self::Peer>, Box<dyn std::error::Error>>>;
+    ) -> impl Future<Output = Result<ClusterStateDigest<Self::Id>, Box<dyn std::error::Error>>>;
 
-    fn get_diff(
+    /// Computes the difference between the local state and a provided digest, returning the updates
+    /// needed to bring the remote digest up to date with the local state.
+    fn diff(
         &self,
-        digest: ClusterStateDigest<Self::Peer>,
+        digest: ClusterStateDigest<Self::Id>,
     ) -> impl Future<
-        Output = Result<ClusterStateDiff<Self::Peer, Self::State>, Box<dyn std::error::Error>>,
+        Output = Result<ClusterStateDiff<Self::Id, Self::State>, Box<dyn std::error::Error>>,
     >;
 
-    fn apply_diff(
+    /// Applies a diff received from a peer node to the local state, merging updates as necessary.
+    fn apply(
         &self,
-        diff: ClusterStateDiff<Self::Peer, Self::State>,
-        address: Self::Address,
+        diff: ClusterStateDiff<Self::Id, Self::State>,
     ) -> impl Future<Output = Result<(), Box<dyn std::error::Error>>>;
 }
 
@@ -39,21 +48,24 @@ mod in_memory {
     use super::*;
     use serde::{de::DeserializeOwned, Serialize};
     use std::{collections::HashMap, fmt::Debug, hash::Hash, sync::Arc};
+    use std::error::Error;
     use tokio::sync::RwLock;
 
     #[derive(Clone)]
     pub struct InMemoryGossipStore<P: Eq + Hash, A, T: Versioned> {
         node_id: P,
-        address: A,
-        state: Arc<RwLock<HashMap<P, NodeState<T, A>>>>,
+        peers: Arc<RwLock<HashMap<P, A>>>,
+        state: Arc<RwLock<HashMap<P, NodeState<T>>>>,
+        _phantom: std::marker::PhantomData<A>,
     }
 
     impl<P: Eq + Hash + Clone, A: Clone + Eq + Debug + Serialize + DeserializeOwned, T: Clone + Versioned> InMemoryGossipStore<P, A, T> {
-        pub fn new(node_id: P, address: A) -> Self {
+        pub fn new(node_id: P, _address: A) -> Self {
             Self {
                 node_id,
-                address,
                 state: Arc::new(RwLock::new(HashMap::new())),
+                peers: Arc::new(RwLock::new(HashMap::new())),
+                _phantom: Default::default(),
             }
         }
 
@@ -75,7 +87,7 @@ mod in_memory {
 
             let node_state = state
                 .entry(self.node_id.clone())
-                .or_insert_with(|| NodeState::new(self.address.clone()));
+                .or_insert_with(|| NodeState::new());
 
             node_state
                 .fields
@@ -88,33 +100,38 @@ mod in_memory {
                 .values()
                 .map(|v| v.version())
                 .max()
-                .unwrap_or_default()
-                .max(node_state.address.version());
+                .unwrap_or_default();
         }
     }
 
     impl<P: Eq + Hash + Clone, A: Clone + PartialEq + Debug + Serialize + DeserializeOwned, T: Clone + Versioned> GossipStore
         for InMemoryGossipStore<P, A, T>
     {
-        type Peer = P;
+        type Id = P;
         type Address = A;
         type State = T;
 
-        async fn get_self_id(&self) -> Result<Self::Peer, Box<dyn std::error::Error>> {
+        async fn id(&self) -> Result<Self::Id, Box<dyn Error>> {
             Ok(self.node_id.clone())
+        }
+
+        async fn heartbeat(&self, peer: Self::Id, address: Self::Address) -> Result<(), Box<dyn Error>> {
+            let mut peers = self.peers.write().await;
+            peers.insert(peer, address);
+            Ok(())
         }
 
         async fn get_peer_addresses(
             &self,
-        ) -> Result<Vec<Self::Address>, Box<dyn std::error::Error>> {
+        ) -> Result<Vec<Self::Address>, Box<dyn Error>> {
             Ok(self
-                .state
+                .peers
                 .read()
                 .await
                 .iter()
-                .filter_map(|(id, state)| {
+                .filter_map(|(id, addr)| {
                     if *id != self.node_id {
-                        Some(state.address.value.clone())
+                        Some(addr.clone())
                     } else {
                         None
                     }
@@ -122,9 +139,9 @@ mod in_memory {
                 .collect())
         }
 
-        async fn get_digest(
+        async fn digest(
             &self,
-        ) -> Result<ClusterStateDigest<Self::Peer>, Box<dyn std::error::Error>> {
+        ) -> Result<ClusterStateDigest<Self::Id>, Box<dyn Error>> {
             Ok(self
                 .state
                 .read()
@@ -135,10 +152,10 @@ mod in_memory {
                 .into())
         }
 
-        async fn get_diff(
+        async fn diff(
             &self,
-            digest: ClusterStateDigest<Self::Peer>,
-        ) -> Result<ClusterStateDiff<Self::Peer, Self::State>, Box<dyn std::error::Error>> {
+            digest: ClusterStateDigest<Self::Id>,
+        ) -> Result<ClusterStateDiff<Self::Id, Self::State>, Box<dyn Error>> {
             Ok(self
                 .state
                 .read()
@@ -163,21 +180,15 @@ mod in_memory {
                 .into())
         }
 
-        async fn apply_diff(
+        async fn apply(
             &self,
-            diff: ClusterStateDiff<Self::Peer, Self::State>,
-            address: Self::Address,
-        ) -> Result<(), Box<dyn std::error::Error>> {
+            diff: ClusterStateDiff<Self::Id, Self::State>,
+        ) -> Result<(), Box<dyn Error>> {
             let mut state = self.state.write().await;
             for (node_id, node_diff) in diff.into_inner() {
                 let node_state = state
                     .entry(node_id)
-                    .or_insert_with(|| NodeState::new(address.clone()));
-
-                if node_state.address.value != address {
-                    node_state.address = LastWriteWinsValue::new(address.clone())
-                        .with_version(node_state.max_version + 1);
-                }
+                    .or_insert_with(|| NodeState::new());
 
                 for (field, value) in node_diff {
                     node_state
@@ -194,8 +205,7 @@ mod in_memory {
                     .values()
                     .map(|v| v.version())
                     .max()
-                    .unwrap_or_default()
-                    .max(node_state.address.version());
+                    .unwrap_or_default();
             }
 
             Ok(())
@@ -217,16 +227,14 @@ mod in_memory {
     }
 
     #[derive(Debug, Clone, PartialEq)]
-    struct NodeState<T, A> {
-        pub address: LastWriteWinsValue<A>,
+    struct NodeState<T> {
         pub fields: HashMap<String, T>,
         pub max_version: u64,
     }
 
-    impl<T, A> NodeState<T, A> {
-        pub fn new(address: A) -> Self {
+    impl<T> NodeState<T> {
+        pub fn new() -> Self {
             Self {
-                address: LastWriteWinsValue::new(address),
                 fields: HashMap::new(),
                 max_version: 0,
             }
@@ -249,12 +257,12 @@ mod tests {
         assert_eq!(store.get(&node_id, "test").await.unwrap().value, 1);
 
         assert_eq!(
-            store.get_digest().await.unwrap(),
+            store.digest().await.unwrap(),
             ClusterStateDigest::new().with_max_version(node_id, 1)
         );
 
         let diff = store
-            .get_diff(ClusterStateDigest::new().with_max_version(node_id, 0))
+            .diff(ClusterStateDigest::new().with_max_version(node_id, 0))
             .await
             .unwrap();
         assert_eq!(
@@ -275,7 +283,7 @@ mod tests {
                 .collect(),
         );
         store
-            .apply_diff(diff, new_node)
+            .apply(diff)
             .await
             .expect("diff to be applied");
         assert_eq!(store.get(&new_node, "test").await.unwrap().value, 42);

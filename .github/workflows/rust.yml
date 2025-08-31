@@ -109,13 +109,29 @@ jobs:
       - name: Setup Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Run tests
+      - name: Run Tests for Grey
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --all-features --no-fail-fast --workspace
+          args: --no-fail-fast -p grey
         env:
             RUSTFLAGS: -Cinstrument-coverage
+
+      - name: Run Tests for Grey UI
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --no-fail-fast -p grey-ui
+        env:
+          RUSTFLAGS: -Cinstrument-coverage
+
+      - name: Run Tests for Grey API
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --no-fail-fast -p grey-api
+        env:
+          RUSTFLAGS: -Cinstrument-coverage
 
       - name: grcov
         run: grcov . --binary-path target/debug/deps/ -s . -t lcov --ignore-not-existing --ignore '../**' --ignore '/*' --ignore 'C:/' -o ./lcov.info
