@@ -151,13 +151,15 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket) -> Html {
         .format("%Y-%m-%d %H:%M:%S UTC")
         .to_string();
 
+    let overall_stats = probe_result.total();
+
     // Format duration
     let duration_text = format!(
         "{}",
-        humantime::format_duration(probe_result.average_latency())
+        humantime::format_duration(overall_stats.average_latency())
     );
 
-    let samples = si_magnitude(probe_result.sample_count as f64, "");
+    let samples = si_magnitude(overall_stats.total_samples as f64, "");
 
     html! {
         <div class="tooltip visible">
@@ -176,11 +178,11 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket) -> Html {
                 </div>
                 <div class="tooltip-row">
                     <span class="tooltip-label">{"Availability:"}</span>
-                    <span>{availability(probe_result.availability())}</span>
+                    <span>{availability(overall_stats.success_rate())}</span>
                 </div>
                 <div class="tooltip-row">
                     <span class="tooltip-label">{"Retry Rate:"}</span>
-                    <span>{format!("{:.1}%", probe_result.retry_rate())}</span>
+                    <span>{format!("{:.1}%", overall_stats.retry_rate())}</span>
                 </div>
                 <div class="tooltip-row">
                     <span class="tooltip-label">{"Samples:"}</span>
@@ -194,7 +196,7 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket) -> Html {
                 }
                 if !probe_result.validations.is_empty() {
                     <div class="tooltip-section">
-                        <div class="tooltip-label tooltip-section-title">{"Validations:"}</div>
+                        <div class="tooltip-label tooltip-section-title">{"Validations"}</div>
                         {for probe_result.validations.iter().map(|(name, validation)| {
                             let validation_class = if validation.pass { "ok" } else { "error" };
                             html! {
@@ -209,6 +211,23 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket) -> Html {
                                             <div class="tooltip-validation-extra">{msg}</div>
                                         </div>
                                     }
+                                </div>
+                            }
+                        })}
+                    </div>
+                }
+                if probe_result.observations.len() > 1 {
+                    <div class="tooltip-section">
+                        <div class="tooltip-label tooltip-section-title">{"Observers"}</div>
+                        {for probe_result.observations.iter().map(|(name, observation)| {
+                            let validation_class = if observation.success_rate() > 99.0 { "ok" } else { "error" };
+                            html! {
+                                <div class="tooltip-validation">
+                                    <div class="tooltip-validation-header">
+                                        <div class={format!("tooltip-status-dot {}", validation_class)}></div>
+                                        <span class="tooltip-validation-name">{availability(observation.success_rate())}</span>
+                                        <span class="tooltip-validation-message">{name}</span>
+                                    </div>
                                 </div>
                             }
                         })}

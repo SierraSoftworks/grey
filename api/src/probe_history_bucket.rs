@@ -2,63 +2,57 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Display};
 
 use crate::Mergeable;
+use crate::observation::Observation;
 
 /// Probe result from the history endpoint
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct ProbeHistoryBucket {
     #[serde(with = "chrono::serde::ts_seconds")]
     pub start_time: chrono::DateTime<chrono::Utc>,
-    #[serde(with = "crate::serializers::duration_ms")]
-    pub total_latency: std::time::Duration,
-    pub attempts: u64,
     pub pass: bool,
     #[serde(default)]
     pub message: String,
     #[serde(default)]
     pub validations: HashMap<String, ValidationResult>,
-    /// Number of samples this entry represents (1 for recent, >1 for compressed)
-    pub sample_count: u64,
-    /// Number of successful samples within this entry
-    pub successful_samples: u64,
+    /// Observations collected from this probe, keyed by observer ID
+    #[serde(default)]
+    pub observations: HashMap<String, Observation>,
 }
 
 impl ProbeHistoryBucket {
+    /// Aggregate all observations into a single total observation
+    pub fn total(&self) -> Observation {
+        self.observations.values().fold(Observation::default(), |mut acc, obs| {
+            acc.merge(obs);
+            acc
+        })
+    }
+
     /// Calculate availability percentage based on successful vs total samples
     pub fn availability(&self) -> f64 {
-        if self.sample_count == 0 {
-            100.0
-        } else {
-            100.0 * self.successful_samples as f64 / self.sample_count as f64
-        }
+        self.total().success_rate()
     }
 
     /// Calculates the average per-request latency for this time bucket.
     pub fn average_latency(&self) -> std::time::Duration {
-        std::time::Duration::from_millis(self.total_latency.as_millis() as u64 / self.sample_count)
+        self.total().average_latency()
     }
 
     /// Calculate retry rate based on attempts (1 attempt = 0 retries, 2 attempts = 1 retry, etc.)
     pub fn retry_rate(&self) -> f64 {
-        if self.sample_count == 0 {
-            0.0
-        } else {
-            100.0 * (self.attempts - self.sample_count) as f64 / self.sample_count as f64
-        }
+        self.total().retry_rate()
     }
 }
 
 impl Mergeable for ProbeHistoryBucket {
     fn merge(&mut self, other: &Self) {
-        self.total_latency += other.total_latency;
-        self.attempts += other.attempts;
-        self.sample_count += other.sample_count;
-        self.successful_samples += other.successful_samples;
-
         if self.pass && !other.pass {
             self.pass = false;
             self.message = other.message.clone();
             self.validations = other.validations.clone();
         }
+        
+        self.observations.extend(other.observations.clone());
     }
 }
 

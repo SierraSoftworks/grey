@@ -9,12 +9,12 @@ pub struct ProbeProps {
 
 #[function_component(Probe)]
 pub fn probe(props: &ProbeProps) -> Html {
-    let recent_availability = props.probe.recent_availability(2);
+    let recent_availability = props.probe.recent(2).success_rate();
 
     let probe_class = match props.probe.history.last() {
         Some(h) if h.pass => "ok",
-        Some(h) if !h.pass && recent_availability > 0.8 => "warn",
-        Some(h) if !h.pass && recent_availability <= 0.8 => "error",
+        Some(h) if !h.pass && recent_availability > 80.0 => "warn",
+        Some(h) if !h.pass && recent_availability <= 80.0 => "error",
         _ => "ok",
     };
 
@@ -40,7 +40,7 @@ pub fn probe(props: &ProbeProps) -> Html {
                 </div>
                 <div class="probe-observers" tooltip="The number of agents which have contributed to this status report.">
                     <span class="icon-eye"></span>
-                    {format!("{}", props.probe.observers)}
+                    {format!("{}", props.probe.observations.len())}
                 </div>
                 <div class="availability">{availability(props.probe.availability())}</div>
             </div>
