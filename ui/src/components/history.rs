@@ -194,46 +194,52 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket) -> Html {
                         <span>{&probe_result.message}</span>
                     </div>
                 }
-                if !probe_result.validations.is_empty() {
-                    <div class="tooltip-section">
-                        <div class="tooltip-label tooltip-section-title">{"Validations"}</div>
-                        {for probe_result.validations.iter().map(|(name, validation)| {
-                            let validation_class = if validation.pass { "ok" } else { "error" };
-                            html! {
-                                <div class="tooltip-validation">
-                                    <div class="tooltip-validation-header">
-                                        <div class={format!("tooltip-status-dot {}", validation_class)}></div>
-                                        <span class="tooltip-validation-name">{name}</span>
-                                        <span class="tooltip-validation-message">{&validation.condition}</span>
-                                    </div>
-                                    if let Some(ref msg) = validation.message {
-                                        <div class="tooltip-validation-details">
-                                            <div class="tooltip-validation-extra">{msg}</div>
-                                        </div>
-                                    }
-                                </div>
-                            }
-                        })}
-                    </div>
-                }
-                if probe_result.observations.len() > 1 {
-                    <div class="tooltip-section">
-                        <div class="tooltip-label tooltip-section-title">{"Observers"}</div>
-                        {for probe_result.observations.iter().map(|(name, observation)| {
-                            let validation_class = if observation.success_rate() > 99.0 { "ok" } else { "error" };
-                            html! {
-                                <div class="tooltip-validation">
-                                    <div class="tooltip-validation-header">
-                                        <div class={format!("tooltip-status-dot {}", validation_class)}></div>
-                                        <span class="tooltip-validation-name">{availability(observation.success_rate())}</span>
-                                        <span class="tooltip-validation-message">{name}</span>
-                                    </div>
-                                </div>
-                            }
-                        })}
-                    </div>
-                }
             </div>
+
+            if !probe_result.validations.is_empty() || probe_result.observations.len() > 1 {
+                <div class="tooltip-context">
+                    if probe_result.observations.len() > 1 {
+                        <div class="tooltip-section">
+                            <div class="tooltip-section-title">{"Observers"}</div>
+                            {for probe_result.observations.iter().map(|(name, observation)| {
+                                let validation_class = if observation.success_rate() > 99.0 { "ok" } else { "error" };
+                                html! {
+                                    <div class="tooltip-section-entry">
+                                        <div class="tooltip-section-entry-header">
+                                            <div class={format!("tooltip-status-dot {}", validation_class)}></div>
+                                            <span class="tooltip-section-entry-name">{availability(observation.success_rate())}</span>
+                                            <span class="tooltip-section-entry-message">{name}</span>
+                                        </div>
+                                    </div>
+                                }
+                            })}
+                        </div>
+                    }
+
+                    if !probe_result.validations.is_empty() {
+                        <div class="tooltip-section">
+                            <div class="tooltip-section-title">{"Validations"}</div>
+                            {for probe_result.validations.iter().map(|(name, validation)| {
+                                let validation_class = if validation.pass { "ok" } else { "error" };
+                                html! {
+                                    <div class="tooltip-section-entry">
+                                        <div class="tooltip-section-entry-header">
+                                            <div class={format!("tooltip-status-dot {}", validation_class)}></div>
+                                            <span class="tooltip-section-entry-name">{name}</span>
+                                            <span class="tooltip-section-entry-message">{&validation.condition}</span>
+                                        </div>
+                                        if let Some(ref msg) = validation.message {
+                                            <div class="tooltip-section-entry-details">
+                                                <div class="tooltip-section-entry-extra">{msg}</div>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            })}
+                        </div>
+                    }
+                </div>
+            }
         </div>
     }
 }
