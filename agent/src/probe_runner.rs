@@ -135,18 +135,17 @@ impl ProbeRunner {
                     while !self.cancel.load(std::sync::atomic::Ordering::Relaxed)
                     {
                         sample.start_time = chrono::Utc::now();
-                        sample.attempts += 1;
                         debug!(
                             "Running probe attempt {}/{}...",
-                            sample.attempts, total_attempts,
+                            sample.retries + 1, total_attempts,
                         );
                         match self.run_attempt(&probe, &mut sample).await
                         {
                             Ok(res) => return Ok(res),
                             Err(err) => {
                                 debug!("Probe failed: {}", err);
-                                if sample.attempts >= total_attempts {
-                                    warn!("Probe failed after {} attempts: {}", sample.attempts, err);
+                                sample.retries += 1;
+                                if sample.retries >= total_attempts {
                                     sample.message = err.to_string();
                                     return Err(err);
                                 }
@@ -154,23 +153,25 @@ impl ProbeRunner {
                         }
                     }
 
-                    Err(format!("Probe was cancelled.").into())
+                    Err("Probe was cancelled.".into())
             }).await {
                 Ok(Ok(res)) => return Ok(res),
                 Ok(Err(err)) => {
                     debug!("Probe failed: {}", err);
-                        if sample.attempts == total_attempts {
-                            warn!("Probe failed after {} attempts: {}", sample.attempts, err);
+                        if sample.retries + 1 == total_attempts {
+                            warn!("Probe failed after {} retries: {}", sample.retries, err);
                             sample.message = err.to_string();
                             return Err(err);
                         }
                 }
                 Err(err) => {
                     debug!("Probe timed out: {}", err);
-                    if sample.attempts == total_attempts {
-                        warn!("Probe timed out after {} attempts: {}", sample.attempts, err);
-                        sample.message = err.to_string();
-                        return Err(format!("Probe timed out after {} attempts.", sample.attempts).into());
+                    if sample.retries == total_attempts {
+                        warn!("Probe timed out after {} retries: {}", sample.retries, err);
+                        if sample.message.is_empty() {
+                            sample.message = format!("Probe timed out after {} retries .", sample.retries);
+                        }
+                        return Err(format!("Probe timed out after {} retries.", sample.retries).into());
                     }
                 }
             }
@@ -181,7 +182,7 @@ impl ProbeRunner {
 
         sample.duration = chrono::Utc::now() - sample.start_time;
 
-        Span::current().record("probe.attempts", sample.attempts);
+        Span::current().record("probe.attempts", sample.retries);
 
         let result = match result {
             Ok(_) => {

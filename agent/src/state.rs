@@ -184,7 +184,7 @@ impl State {
                     })
                     .unwrap_or_else(|| (probe.into(), 0));
 
-                probe_result.apply(&mut snapshot);
+                probe_result.apply(self.node_id, &mut snapshot);
                 let new_data = rmp_serde::to_vec(&snapshot)?;
                 table.insert(
                     (self.node_id.into(), probe.name.clone()),
@@ -285,7 +285,7 @@ impl State {
     }
 }
 
-impl cluster::GossipStore for State {
+impl GossipStore for State {
     type Id = NodeID;
     type Address = SocketAddr;
     type State = ProbeState;
@@ -421,16 +421,14 @@ impl Versioned for Probe {
             Some(Self {
                 name: self.name.clone(),
                 tags: self.tags.clone(),
-                sample_count: self.sample_count,
-                successful_samples: self.successful_samples,
                 last_updated: self.last_updated,
-                observers: 0,
                 history: self
                     .history
                     .iter()
                     .filter(|h| h.start_time > self.last_updated - chrono::Duration::hours(2))
                     .cloned()
                     .collect(),
+                observations: self.observations.clone(),
             })
         } else {
             None

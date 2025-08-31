@@ -37,11 +37,9 @@ impl Into<grey_api::Probe> for &Probe {
         grey_api::Probe {
             name: self.name.clone(),
             tags: self.tags.clone(),
-            sample_count: 0,
-            successful_samples: 0,
             last_updated: chrono::DateTime::UNIX_EPOCH,
             history: Vec::new(),
-            observers: 1,
+            observations: HashMap::new(),
         }
     }
 }

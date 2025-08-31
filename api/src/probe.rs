@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::{Mergeable, ProbeHistoryBucket};
+use crate::observation::Observation;
 
 /// Raw probe data as returned by the /api/v1/probes endpoint
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
@@ -11,47 +12,44 @@ pub struct Probe {
     #[serde(default)]
     pub tags: HashMap<String, String>,
 
-    pub sample_count: u64,
-    pub successful_samples: u64,
-
     #[serde(with = "chrono::serde::ts_seconds")]
     pub last_updated: chrono::DateTime<chrono::Utc>,
 
     #[serde(default)]
     pub history: Vec<ProbeHistoryBucket>,
 
-    // The number of unique observers which are running this probe
-    pub observers: u32,
+    /// Observations collected from this probe, keyed by observer ID
+    #[serde(default)]
+    pub observations: HashMap<String, Observation>,
 }
 
 impl Probe {
+    /// Aggregate all observations into a single total observation
+    pub fn total(&self) -> Observation {
+        self.observations.values().fold(Observation::default(), |mut acc, obs| {
+            acc.merge(obs);
+            acc
+        })
+    }
+
     /// Calculate availability percentage based on successful vs total samples
     pub fn availability(&self) -> f64 {
-        if self.sample_count == 0 {
-            100.0
-        } else {
-            100.0 * self.successful_samples as f64 / self.sample_count as f64
-        }
+        self.total().success_rate()
     }
 
     /// Calculate recent availability percentage based on successful vs total samples
-    pub fn recent_availability(&self, max_hours: usize) -> f64 {
-        let (samples, success) = self
+    pub fn recent(&self, max_hours: usize) -> Observation {
+        self
             .history
             .iter()
             .filter(|h| {
                 h.start_time > chrono::Utc::now() - chrono::Duration::hours(max_hours as i64)
             })
-            .map(|h| (h.sample_count, h.successful_samples))
-            .fold((0u64, 0u64), |acc, (samples, success)| {
-                (acc.0 + samples, acc.1 + success)
-            });
-
-        if samples == 0 {
-            100.0
-        } else {
-            100.0 * success as f64 / samples as f64
-        }
+            .map(|h| h.total())
+            .fold(Observation::default(), |mut acc, obs| {
+                acc.merge(&obs);
+                acc
+            })
     }
 }
 
@@ -62,10 +60,8 @@ impl Mergeable for Probe {
             self.tags = other.tags.clone();
         }
 
-        self.sample_count += other.sample_count;
-        self.successful_samples += other.successful_samples;
         self.last_updated = self.last_updated.max(other.last_updated);
-        self.observers += other.observers;
+        self.observations.extend(other.observations.clone());
 
         let mut i = 0;
         let mut j = 0;
