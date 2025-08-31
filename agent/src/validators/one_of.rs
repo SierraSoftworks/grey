@@ -67,6 +67,6 @@ mod tests {
             SampleValue::String("value1".into()),
             SampleValue::String("value2".into()),
         ]);
-        assert_eq!(format!("{}", validator), "in [value1, value2]");
+        assert_eq!(format!("{}", validator), "in [\"value1\", \"value2\"]");
     }
 }

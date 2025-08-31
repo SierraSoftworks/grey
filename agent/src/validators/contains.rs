@@ -91,6 +91,6 @@ mod tests {
     #[test]
     fn display() {
         let validator = Contains(SampleValue::String("world".to_string()));
-        assert_eq!(format!("{}", validator), "contains world");
+        assert_eq!(format!("{}", validator), "contains \"world\"");
     }
 }
