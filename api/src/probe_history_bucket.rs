@@ -32,6 +32,13 @@ impl ProbeHistoryBucket {
     pub fn availability(&self) -> f64 {
         self.total().success_rate()
     }
+    
+    pub fn max_availability(&self) -> f64 {
+        if self.observations.is_empty() {
+            return 100.0;
+        }
+        self.observations.values().map(|o| o.success_rate()).fold(f64::NAN, f64::max)
+    }
 
     /// Calculates the average per-request latency for this time bucket.
     pub fn average_latency(&self) -> std::time::Duration {

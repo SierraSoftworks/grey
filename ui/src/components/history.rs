@@ -92,7 +92,7 @@ pub fn history(props: &HistoryProps) -> Html {
     html! {
         <div class="history">
             {for props.samples.iter().enumerate().map(|(index, sample)| {
-                let sample_class = match sample.availability() {
+                let sample_class = match sample.max_availability() {
                     sli if sli > 99.9 => "ok",
                     sli if sli < 90.0 => "error",
                     _ => "warn",
@@ -138,7 +138,7 @@ pub fn history(props: &HistoryProps) -> Html {
 }
 
 fn render_tooltip(probe_result: &ProbeHistoryBucket) -> Html {
-    let status_text = if probe_result.pass {
+    let status_text = if probe_result.max_availability() == 100.0 {
         "Passed"
     } else {
         "Failed"
