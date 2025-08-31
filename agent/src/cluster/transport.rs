@@ -158,7 +158,7 @@ mod udp {
             let peer1 = TestPeer("peer1".to_string());
             let mut digest = ClusterStateDigest::new();
             digest.update(peer1.clone(), 1);
-            let msg: Message<TestPeer, LastWriteWinsValue<i32>> = Message::Syn(peer1.clone(), digest.clone());
+            let msg: Message<TestPeer, LastWriteWinsValue<i32>> = Message::Syn(MessageMetadata::new(peer1.clone()), digest.clone());
 
             // Send from transport1 to transport2
             transport1.send(addr2, msg).await.unwrap();
@@ -175,8 +175,8 @@ mod udp {
 
             let (src_addr, received_msg) = received.expect("timed out waiting for message");
             match received_msg {
-                Message::Syn(p, d) => {
-                    assert_eq!(p, peer1);
+                Message::Syn(meta, d) => {
+                    assert_eq!(meta.from, peer1);
                     assert_eq!(d, digest);
                 }
                 _ => panic!("unexpected message variant"),
@@ -197,7 +197,7 @@ mod udp {
             let peer1 = TestPeer("peer1".to_string());
             let mut digest = ClusterStateDigest::new();
             digest.update(peer1.clone(), 1);
-            let msg: Message<TestPeer, LastWriteWinsValue<i32>> = Message::Syn(peer1, digest);
+            let msg: Message<TestPeer, LastWriteWinsValue<i32>> = Message::Syn(MessageMetadata::new(peer1), digest);
 
             transport1.send(addr2, msg).await.unwrap();
 

@@ -1,7 +1,8 @@
 use std::{collections::HashMap, fmt::{Debug, Display}, hash::Hash};
 
 use serde::{Deserialize, Serialize};
-
+use tracing::Span;
+use tracing_batteries::prelude::OpenTelemetrySpanExt;
 use crate::cluster::Versioned;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -12,9 +13,67 @@ where
     Value::Diff: Serialize + Debug + Clone,
     for <'dde> Value::Diff: Deserialize<'dde>,
 {
-    Syn(Peer, ClusterStateDigest<Peer>),
-    Ack(Peer, ClusterStateDiff<Peer, Value>),
-    SynAck(Peer, ClusterStateDigest<Peer>, ClusterStateDiff<Peer, Value>),
+    Syn(MessageMetadata<Peer>, ClusterStateDigest<Peer>),
+    Ack(MessageMetadata<Peer>, ClusterStateDiff<Peer, Value>),
+    SynAck(MessageMetadata<Peer>, ClusterStateDigest<Peer>, ClusterStateDiff<Peer, Value>),
+}
+
+impl<Peer, Value> Message<Peer, Value>
+where
+    Peer: Eq + Hash,
+    Value: Versioned,
+    Value::Diff: Serialize + Debug + Clone,
+    for <'dde> Value::Diff: Deserialize<'dde>,
+{
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Message::Syn(_, _) => "syn",
+            Message::Ack(_, _) => "ack",
+            Message::SynAck(_, _, _) => "synack",
+        }
+    }
+
+    pub fn metadata(&self) -> &MessageMetadata<Peer> {
+        match self {
+            Message::Syn(meta, _) => meta,
+            Message::Ack(meta, _) => meta,
+            Message::SynAck(meta, _, _) => meta,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MessageMetadata<Peer> {
+    pub from: Peer,
+    pub traceparent: Option<String>,
+    pub baggage: Option<String>,
+}
+
+impl<Peer> MessageMetadata<Peer> {
+    /// Create new message metadata with the given peer as the sender.
+    pub fn new(from: Peer) -> Self {
+        Self {
+            from,
+            traceparent: None,
+            baggage: None,
+        }
+    }
+
+    /// Inject the current trace context into the message metadata.
+    pub fn with_trace_context(mut self) -> Self {
+        tracing_batteries::prelude::opentelemetry::global::get_text_map_propagator(|p| {
+            p.inject_context(&Span::current().context(), &mut self)
+        });
+
+        self
+    }
+
+    /// Extract the trace context from the message metadata.
+    pub fn trace_context(&self) -> tracing_batteries::prelude::opentelemetry::Context {
+        tracing_batteries::prelude::opentelemetry::global::get_text_map_propagator(|p| {
+            p.extract(self)
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -113,5 +172,37 @@ impl<P: Eq + Hash + Display> Display for ClusterStateDigest<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let entries: Vec<String> = self.0.iter().map(|(k, v)| format!("{}@{}", k, v)).collect();
         write!(f, "[{}]", entries.join(", "))
+    }
+}
+
+impl<Peer> tracing_batteries::prelude::opentelemetry::propagation::Extractor for MessageMetadata<Peer> {
+    fn get(&self, key: &str) -> Option<&str> {
+        match key {
+            "traceparent" => self.traceparent.as_deref(),
+            "baggage" => self.baggage.as_deref(),
+            _ => None,
+        }
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        let mut keys = Vec::new();
+        if self.traceparent.is_some() {
+            keys.push("traceparent");
+        }
+        if self.baggage.is_some() {
+            keys.push("baggage");
+        }
+        keys
+    }
+}
+
+
+impl<Peer> tracing_batteries::prelude::opentelemetry::propagation::Injector for MessageMetadata<Peer> {
+    fn set(&mut self, key: &str, value: String) {
+        match key {
+            "traceparent" => self.traceparent = Some(value),
+            "baggage" => self.baggage = Some(value),
+            _ => {}
+        }
     }
 }
