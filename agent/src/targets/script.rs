@@ -5,6 +5,7 @@ use tracing::instrument;
 use tracing_batteries::prelude::*;
 
 use crate::{Sample, js::JobQueue, targets::Target};
+use crate::js::JsInto;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct ScriptTarget {
@@ -35,7 +36,7 @@ impl Target for ScriptTarget {
         let output = context.eval(Source::from_bytes("output"))?;
 
         let mut sample = if let Some(output) = output.as_object() {
-            crate::js::jsobject_to_sample(&output, context)?
+            output.js_into(context)?
         } else {
             Sample::default()
         };
