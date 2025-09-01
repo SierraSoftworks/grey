@@ -114,6 +114,8 @@ pub struct ClusterConfig {
     pub listen: String,
     pub peers: Vec<String>,
     pub secret: String,
+    #[serde(default)]
+    pub secrets: Vec<String>,
 
     #[serde(default = "default::cluster::gossip_interval")]
     #[serde(with = "humantime_serde")]
@@ -139,40 +141,13 @@ impl Default for ClusterConfig {
             listen: default::cluster::listen(),
             peers: vec![],
             secret: "".into(),
+            secrets: vec![],
             gossip_interval: default::cluster::gossip_interval(),
             gossip_factor: default::cluster::gossip_factor(),
             gc_interval: default::cluster::gc_interval(),
             gc_probe_expiry: default::cluster::gc_probe_expiry(),
             gc_peer_expiry: default::cluster::gc_peer_expiry(),
         }
-    }
-}
-
-impl ClusterConfig {
-    pub fn get_secret_key(&self) -> Result<[u8; 32], Box<dyn std::error::Error>> {
-        use aes_gcm::{
-            Aes256Gcm,
-            aead::{KeyInit, OsRng},
-        };
-        use base64::prelude::*;
-
-        let secret_bytes = BASE64_STANDARD
-            .decode(self.secret.as_bytes())
-            .unwrap_or_default();
-        if secret_bytes.len() < 32 {
-            let example_key = Aes256Gcm::generate_key(OsRng);
-            let key: &[u8] = example_key.as_slice();
-
-            return Err(format!(
-                "Cluster secret key must contain 32-bytes of base64-encoded data (such as '{}')",
-                BASE64_STANDARD.encode(key)
-            )
-            .into());
-        }
-
-        let mut key = [0u8; 32];
-        key.copy_from_slice(&secret_bytes[..32]);
-        Ok(key)
     }
 }
 
