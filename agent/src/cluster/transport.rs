@@ -126,7 +126,8 @@ mod udp {
 
     #[cfg(test)]
     mod tests {
-    use super::*;
+        use std::collections::HashMap;
+        use super::*;
     use rand::Rng;
     use std::net::SocketAddr;
     use tokio::time::{timeout, Duration, sleep};
@@ -156,32 +157,50 @@ mod udp {
 
             // Build a simple Syn message
             let peer1 = TestPeer("peer1".to_string());
-            let mut digest = ClusterStateDigest::new();
-            digest.update(peer1.clone(), 1);
-            let msg: Message<TestPeer, LastWriteWinsValue<i32>> = Message::Syn(MessageMetadata::new(peer1.clone()), digest.clone());
 
-            // Send from transport1 to transport2
-            transport1.send(addr2, msg).await.unwrap();
+            let peer1_digest = ClusterStateDigest::new().with_max_version(peer1.clone(), 1);
+            let peer1_diff = ClusterStateDiff::new().with_node(peer1.clone(), vec![
+                ("key1".to_string(), LastWriteWinsValue::new(1).with_version(1))
+            ].into_iter().collect());
 
-            // Try to receive on transport2
-            let received = timeout(Duration::from_secs(1), async {
-                loop {
-                    if let Some((src, m)) = transport2.try_receive().await.unwrap() {
-                        break (src, m);
+            let messages = vec![
+                Message::<TestPeer, LastWriteWinsValue<i32>>::Syn(MessageMetadata::new(peer1.clone()), peer1_digest.clone()),
+                Message::Ack(MessageMetadata::new(peer1.clone()), peer1_diff.clone()),
+                Message::SynAck(MessageMetadata::new(peer1.clone()), peer1_digest.clone(), peer1_diff.clone()),
+            ];
+
+            for msg in messages {
+                // Send from transport1 to transport2
+                transport1.send(addr2, msg).await.unwrap();
+
+                // Try to receive on transport2
+                let received = timeout(Duration::from_secs(1), async {
+                    loop {
+                        if let Some((src, m)) = transport2.try_receive().await.unwrap() {
+                            break (src, m);
+                        }
+                        tokio::task::yield_now().await;
                     }
-                    tokio::task::yield_now().await;
-                }
-            }).await;
+                }).await;
 
-            let (src_addr, received_msg) = received.expect("timed out waiting for message");
-            match received_msg {
-                Message::Syn(meta, d) => {
-                    assert_eq!(meta.from, peer1);
-                    assert_eq!(d, digest);
+                let (src_addr, received_msg) = received.expect("timed out waiting for message");
+                match received_msg {
+                    Message::Syn(meta, d) => {
+                        assert_eq!(meta.from, peer1);
+                        assert_eq!(&d, &peer1_digest);
+                    },
+                    Message::Ack(meta, diff) => {
+                        assert_eq!(meta.from, peer1);
+                        assert_eq!(&diff, &peer1_diff);
+                    },
+                    Message::SynAck(meta, d, diff) => {
+                        assert_eq!(meta.from, peer1);
+                        assert_eq!(&d, &peer1_digest);
+                        assert_eq!(&diff, &peer1_diff);
+                    },
                 }
-                _ => panic!("unexpected message variant"),
+                assert_eq!(src_addr.ip(), addr1.ip());
             }
-            assert_eq!(src_addr.ip(), addr1.ip());
         }
 
         #[tokio::test]

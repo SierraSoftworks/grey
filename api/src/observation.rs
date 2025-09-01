@@ -117,4 +117,19 @@ mod tests {
         assert_eq!(obs.retry_rate(), 20.0);
         assert_eq!(obs.average_latency(), std::time::Duration::from_millis(50));
     }
+    
+    #[test]
+    fn test_msgpack_roundtrip() {
+        let obs = Observation {
+            total_samples: 10,
+            successful_samples: 8,
+            total_retries: 2,
+            total_latency: std::time::Duration::from_millis(500),
+        };
+
+        let packed = rmp_serde::to_vec(&obs).unwrap();
+        let unpacked: Observation = rmp_serde::from_slice(&packed).unwrap();
+
+        assert_eq!(obs, unpacked);
+    }
 }
