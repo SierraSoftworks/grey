@@ -126,7 +126,6 @@ mod udp {
 
     #[cfg(test)]
     mod tests {
-        use std::collections::HashMap;
         use super::*;
     use rand::Rng;
     use std::net::SocketAddr;
