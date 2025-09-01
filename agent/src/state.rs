@@ -145,7 +145,7 @@ impl State {
 
             table.insert(
                 (self.node_id.into(), probe.name.clone()),
-                (snapshot.version(), rmp_serde::to_vec(&snapshot)?.as_slice()),
+                (snapshot.version(), rmp_serde::to_vec_named(&snapshot)?.as_slice()),
             )?;
         }
 
@@ -185,7 +185,7 @@ impl State {
                     .unwrap_or_else(|| (probe.into(), 0));
 
                 probe_result.apply(self.node_id, &mut snapshot);
-                let new_data = rmp_serde::to_vec(&snapshot)?;
+                let new_data = rmp_serde::to_vec_named(&snapshot)?;
                 table.insert(
                     (self.node_id.into(), probe.name.clone()),
                     (snapshot.version(), new_data.as_slice()),
@@ -295,7 +295,7 @@ impl GossipStore for State {
     }
 
     async fn heartbeat(&self, peer: Self::Id, address: Self::Address) -> Result<(), Box<dyn Error>> {
-        trace!(name: "state.register_peer", { host.node_id = %self.node_id, peer.id = %peer, peer.address = %address }, "Registering address for peer.");
+        trace!(name: "state.heartbeat", { host.node_id = %self.node_id, peer.id = %peer, peer.address = %address }, "Registering address for peer.");
         let txn = self.database.begin_write()?;
         {
             let mut table_peers = txn.open_table(CLUSTER_PEERS_TABLE)?;
@@ -331,7 +331,7 @@ impl GossipStore for State {
             digest.update(node_id.into(), version);
         }
 
-        trace!(name: "state.get_digest", { host.node_id = %self.node_id, digest = %digest }, "Composed new cluster state digest.");
+        trace!(name: "state.digest", { host.node_id = %self.node_id, digest = %digest }, "Composed new cluster state digest.");
 
         Ok(digest)
     }
@@ -357,13 +357,14 @@ impl GossipStore for State {
                 continue;
             }
 
-            let data: ProbeState = rmp_serde::from_slice(data)?;
+            let data: ProbeState = rmp_serde::from_slice(data)
+                .map_err(|e| format!("Failed to parse probe state for diff: {e:?}"))?;
             if let Some(diff) = data.diff(remote_version) {
                 delta.update(peer.clone(), probe, diff);
             }
         }
 
-        trace!(name: "state.get_diff", { host.node_id = %self.node_id, digest = %digest, delta = ?delta }, "Composed new cluster state diff.");
+        trace!(name: "state.diff", { host.node_id = %self.node_id, digest = %digest, delta = ?delta }, "Composed new cluster state diff.");
 
         Ok(delta)
     }
@@ -372,7 +373,7 @@ impl GossipStore for State {
         &self,
         diff: cluster::ClusterStateDiff<Self::Id, Self::State>,
     ) -> Result<(), Box<dyn Error>> {
-        trace!(name: "state.apply_diff", { host.node_id = %self.node_id, diff = ?diff }, "Applying cluster state diff.");
+        trace!(name: "state.apply", { host.node_id = %self.node_id, diff = ?diff }, "Applying cluster state diff.");
         let txn = self.database.begin_write()?;
         {
             let mut table_fields = txn.open_table(CLUSTER_FIELDS_TABLE)?;
@@ -384,17 +385,22 @@ impl GossipStore for State {
                     if let Ok(Some(mut existing)) = table_fields.get_mut((peer_id, probe_name.clone())) {
                         let (_version, data) = existing.value();
 
-                        let mut current: ProbeState = rmp_serde::from_slice(data)?;
+                        let mut current: ProbeState = rmp_serde::from_slice(data)
+                            .map_err(|e| format!("Failed to parse existing probe state for update: {e:?}"))?;
                         current.apply(&probe_state);
-                        existing.insert((current.version(), rmp_serde::to_vec(&current)?.as_slice()))?;
+                        existing.insert((current.version(), rmp_serde::to_vec_named(&current)
+                            .map_err(|e| format!("Failed to serialize new probe state for update: {e:?}"))?.as_slice()))
+                            .map_err(|e| format!("Failed to store new probe state: {e:?}"))?;
                     } else {
                         table_fields.insert(
                             (peer_id, probe_name.clone()),
                             (
                                 probe_state.version(),
-                                rmp_serde::to_vec(&probe_state)?.as_slice(),
+                                rmp_serde::to_vec_named(&probe_state)
+                                    .map_err(|e| format!("Failed to serialize new probe state for insertion: {e:?}"))?.as_slice(),
                             ),
-                        )?;
+                        )
+                            .map_err(|e| format!("Failed to store new probe state: {e:?}"))?;
                     }
                 }
             }

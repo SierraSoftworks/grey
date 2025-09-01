@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use tracing::instrument;
 use tracing_batteries::prelude::*;
 
@@ -22,8 +22,9 @@ impl<S, T> GossipClient<S, T>
 where
     S: GossipStore,
     T: GossipTransport<Id = S::Id, Address = S::Address, State = S::State>,
-    S::Id: Display + Clone + Send + 'static,
-    S::Address: Display + Clone + Eq + Send + 'static,
+    S::Id: Display + Debug + Clone + Send + 'static,
+    S::Address: Display + Debug + Clone + Eq + Send + 'static,
+    S::State: Debug,
 {
     pub fn new(store: S, transport: T) -> Self {
         Self {
@@ -129,10 +130,12 @@ where
                     );
                     span.set_parent(meta.trace_context());
 
+                    trace!(name: "gossip.receive", "Received gossip {} message from {}: {:?}", msg.kind(), addr, msg);
+
                     match self.handle_message(self_id.clone(), &addr, msg).instrument(span).await {
                         Ok(()) => {}
                         Err(err) => {
-                            warn!("Failed to handle gossip message from {addr}: {err:?}");
+                            warn!(name: "gossip.handle", "Failed to handle gossip message from {addr}: {err:?}");
                         }
                     }
                 },
@@ -160,31 +163,40 @@ where
         let result = {
             match msg {
                 Message::Syn(meta, digest) => {
-                    trace!("Received gossip syn from {}: {digest}", meta.from);
-                    self.store.heartbeat(meta.from.clone(), addr.clone()).await?;
-                    let delta = self.store.diff(digest).await?;
-                    let digest = self.store.digest().await?;
+                    self.store.heartbeat(meta.from.clone(), addr.clone()).await
+                        .map_err(|e| format!("Failed to store peer heartbeat: {e:?}"))?;
+                    let delta = self.store.diff(digest).await
+                        .map_err(|e| format!("Failed to compute diff for peer {}: {e:?}", meta.from))?;
+                    let digest = self.store.digest().await
+                        .map_err(|e| format!("Failed to compute digest for node: {e:?}"))?;
                     self.transport
                         .send(
                             addr.clone(),
                             Message::SynAck(MessageMetadata::new(self_id.clone()).with_trace_context(), digest, delta),
                         )
-                        .await?;
+                        .await
+                        .map_err(|e| format!("Failed to send synack gossip message to peer {} at {addr}: {e:?}", meta.from))?;
+                    trace!("Sent synack to {} at {}", meta.from, addr);
                 }
                 Message::SynAck(meta, digest, diff) => {
-                    trace!("Received gossip synack from {}: {digest}", meta.from);
-                    let delta = self.store.diff(digest).await?;
-                    self.store.heartbeat(meta.from.clone(), addr.clone()).await?;
+                    self.store.heartbeat(meta.from.clone(), addr.clone()).await
+                        .map_err(|e| format!("Failed to store peer heartbeat: {e:?}"))?;
+                    let delta = self.store.diff(digest).await
+                        .map_err(|e| format!("Failed to compute diff for peer {}: {e:?}", meta.from))?;
                     self.store.apply(diff).await?;
 
                     self.transport
                         .send(addr.clone(), Message::Ack(MessageMetadata::new(self_id.clone()).with_trace_context(), delta))
-                        .await?;
+                        .await
+                        .map_err(|e| format!("Failed to send ack gossip message to peer {} at {addr}: {e:?}", meta.from))?;
+
+                    trace!("Sent ack to {} at {}", meta.from, addr);
                 }
                 Message::Ack(meta, delta) => {
-                    trace!("Received gossip ack from {}", meta.from);
-                    self.store.heartbeat(meta.from.clone(), addr.clone()).await?;
-                    self.store.apply(delta).await?;
+                    self.store.heartbeat(meta.from.clone(), addr.clone()).await
+                        .map_err(|e| format!("Failed to store peer heartbeat: {e:?}"))?;
+                    self.store.apply(delta).await
+                        .map_err(|e| format!("Failed to apply delta from peer {}: {e:?}", meta.from))?;
                 }
             }
 

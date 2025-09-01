@@ -101,7 +101,7 @@ mod udp {
             address: Self::Address,
             msg: Message<Self::Id, Self::State>,
         ) -> Result<(), Box<dyn std::error::Error>> {
-            let data = rmp_serde::to_vec_named(&msg)?;
+            let data = rmp_serde::to_vec(&msg)?;
             let encrypted_data = self.encrypt(&data)?;
             self.socket.send_to(&encrypted_data, address).await?;
             Ok(())
