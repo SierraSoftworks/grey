@@ -1,5 +1,5 @@
-use std::fmt::Display;
-
+use std::fmt::{Debug, Display};
+use tracing::instrument;
 use tracing_batteries::prelude::*;
 
 use super::*;
@@ -22,8 +22,9 @@ impl<S, T> GossipClient<S, T>
 where
     S: GossipStore,
     T: GossipTransport<Id = S::Id, Address = S::Address, State = S::State>,
-    S::Id: Display + Clone + Send + 'static,
-    S::Address: Display + Clone + Eq + Send + 'static,
+    S::Id: Display + Debug + Clone + Send + 'static,
+    S::Address: Display + Debug + Clone + Eq + Send + 'static,
+    S::State: Debug,
 {
     pub fn new(store: S, transport: T) -> Self {
         Self {
@@ -77,7 +78,11 @@ where
         }
     }
 
+    #[instrument(skip(self), fields(otel.kind = "producer", node.id = EmptyField))]
     async fn gossip(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let self_id = self.store.id().await?;
+        tracing::Span::current().record("node.id", &self_id.to_string().as_str());
+
         let mut peer_addresses = self.store.get_peer_addresses().await.unwrap_or_default();
         peer_addresses.extend(self.seed_peers.iter().cloned());
         peer_addresses.dedup();
@@ -85,12 +90,17 @@ where
             return Ok(());
         }
 
-        let self_id = self.store.id().await?;
         let digest = self.store.digest().await?;
 
         for addr in peer_addresses {
+            let span = info_span!("gossip.peer", otel.kind = "client", node.id = %self_id, peer.addr=%addr);
+            let meta = span.in_scope(|| {
+                MessageMetadata::new(self_id.clone()).with_trace_context()
+            });
+
             self.transport
-                .send(addr, Message::Syn(self_id.clone(), digest.clone()))
+                .send(addr, Message::Syn(meta, digest.clone()))
+                .instrument(span)
                 .await?;
         }
 
@@ -98,12 +108,35 @@ where
     }
 
     async fn receive_loop(&self) {
+        let self_id = match self.store.id().await {
+            Ok(id) => id,
+            Err(err) => {
+                error!("Failed to get own node ID from store, clustering is disabled: {err:?}");
+                return;
+            }
+        };
+
         loop {
             match self.transport.try_receive().await {
-                Ok(Some((addr, msg))) => match self.handle_message(&addr, msg).await {
-                    Ok(()) => {}
-                    Err(err) => {
-                        warn!("Failed to handle gossip message from {addr}: {err:?}");
+                Ok(Some((addr, msg))) => {
+                    let meta = msg.metadata();
+                    let span = info_span!(
+                        "gossip.receive",
+                        otel.kind = "server",
+                        otel.name=format!("gossip.{}", msg.kind()),
+                        node.id=%self_id,
+                        peer.id=%meta.from,
+                        peer.addr=%addr
+                    );
+                    span.set_parent(meta.trace_context());
+
+                    trace!(name: "gossip.receive", "Received gossip {} message from {}: {:?}", msg.kind(), addr, msg);
+
+                    match self.handle_message(self_id.clone(), &addr, msg).instrument(span).await {
+                        Ok(()) => {}
+                        Err(err) => {
+                            warn!(name: "gossip.handle", "Failed to handle gossip message from {addr}: {err:?}");
+                        }
                     }
                 },
                 Ok(_) => {
@@ -123,42 +156,64 @@ where
 
     async fn handle_message(
         &self,
+        self_id: S::Id,
         addr: &S::Address,
         msg: Message<S::Id, S::State>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        match msg {
-            Message::Syn(peer_id, digest) => {
-                trace!("Received gossip syn from {peer_id}: {digest}");
-                let self_id = self.store.id().await?;
-                let delta = self.store.diff(digest).await?;
-                let digest = self.store.digest().await?;
-                self.store.heartbeat(peer_id.clone(), addr.clone()).await?;
-                self.transport
-                    .send(
-                        addr.clone(),
-                        Message::SynAck(self_id.clone(), digest, delta),
-                    )
-                    .await?;
-            }
-            Message::SynAck(peer_id, digest, diff) => {
-                trace!("Received gossip synack from {peer_id}: {digest}");
-                let self_id = self.store.id().await?;
-                let delta = self.store.diff(digest).await?;
-                self.store.apply(diff).await?;
-                self.store.heartbeat(peer_id.clone(), addr.clone()).await?;
+        let result = {
+            match msg {
+                Message::Syn(meta, digest) => {
+                    self.store.heartbeat(meta.from.clone(), addr.clone()).await
+                        .map_err(|e| format!("Failed to store peer heartbeat: {e:?}"))?;
+                    let delta = self.store.diff(digest).await
+                        .map_err(|e| format!("Failed to compute diff for peer {}: {e:?}", meta.from))?;
+                    let digest = self.store.digest().await
+                        .map_err(|e| format!("Failed to compute digest for node: {e:?}"))?;
+                    self.transport
+                        .send(
+                            addr.clone(),
+                            Message::SynAck(MessageMetadata::new(self_id.clone()).with_trace_context(), digest, delta),
+                        )
+                        .await
+                        .map_err(|e| format!("Failed to send synack gossip message to peer {} at {addr}: {e:?}", meta.from))?;
+                    trace!("Sent synack to {} at {}", meta.from, addr);
+                }
+                Message::SynAck(meta, digest, diff) => {
+                    self.store.heartbeat(meta.from.clone(), addr.clone()).await
+                        .map_err(|e| format!("Failed to store peer heartbeat: {e:?}"))?;
+                    let delta = self.store.diff(digest).await
+                        .map_err(|e| format!("Failed to compute diff for peer {}: {e:?}", meta.from))?;
+                    self.store.apply(diff).await?;
 
-                self.transport
-                    .send(addr.clone(), Message::Ack(self_id.clone(), delta))
-                    .await?;
+                    self.transport
+                        .send(addr.clone(), Message::Ack(MessageMetadata::new(self_id.clone()).with_trace_context(), delta))
+                        .await
+                        .map_err(|e| format!("Failed to send ack gossip message to peer {} at {addr}: {e:?}", meta.from))?;
+
+                    trace!("Sent ack to {} at {}", meta.from, addr);
+                }
+                Message::Ack(meta, delta) => {
+                    self.store.heartbeat(meta.from.clone(), addr.clone()).await
+                        .map_err(|e| format!("Failed to store peer heartbeat: {e:?}"))?;
+                    self.store.apply(delta).await
+                        .map_err(|e| format!("Failed to apply delta from peer {}: {e:?}", meta.from))?;
+                }
             }
-            Message::Ack(peer_id, delta) => {
-                trace!("Received gossip ack from {peer_id}");
-                self.store.apply(delta).await?;
-                self.store.heartbeat(peer_id.clone(), addr.clone()).await?;
+
+            Ok(())
+        };
+
+        match result {
+            Ok(_) => {
+                trace!("Successfully handled gossip message from {addr}");
+                Ok(())
+            }
+            Err(err) => {
+                trace!("Failed to handle gossip message from {addr}: {err:?}");
+                Span::current().record("error", &err);
+                Err(err)
             }
         }
-
-        Ok(())
     }
 }
 

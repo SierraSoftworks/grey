@@ -9,5 +9,7 @@ readme.workspace = true
 [dependencies]
 serde.workspace = true
 chrono.workspace = true
-serde_json.workspace = true
 humantime-serde.workspace = true
+
+[dev-dependencies]
+rmp-serde.workspace = true

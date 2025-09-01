@@ -4,9 +4,12 @@ use serde::{Deserialize, Serialize};
 pub struct UiConfig {
     #[serde(default = "default_ui_title")]
     pub title: String,
+    
     #[serde(default = "default_ui_logo")]
     pub logo: String,
+    
     pub links: Vec<UiLink>,
+    
     #[serde(default = "default_reload_interval")]
     pub reload_interval: std::time::Duration,
 }
@@ -25,9 +28,12 @@ impl Default for UiConfig {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct UiNotice {
     pub title: String,
+    
     pub description: String,
+    
     #[serde(default)]
     pub timestamp: Option<chrono::DateTime<chrono::Utc>>,
+    
     #[serde(default)]
     pub level: Option<NoticeLevel>,
 }
