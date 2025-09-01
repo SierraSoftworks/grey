@@ -7,7 +7,7 @@ use super::*;
 pub struct GossipClient<S, T>
 where
     S: GossipStore,
-    T: GossipTransport<Id = S::Id, Address = S::Address, State = S::State>,
+    T: GossipTransport<S::Id, S::State, Address = S::Address>,
 {
     store: S,
     transport: T,
@@ -21,7 +21,7 @@ where
 impl<S, T> GossipClient<S, T>
 where
     S: GossipStore,
-    T: GossipTransport<Id = S::Id, Address = S::Address, State = S::State>,
+    T: GossipTransport<S::Id, S::State, Address = S::Address>,
     S::Id: Display + Debug + Clone + Send + 'static,
     S::Address: Display + Debug + Clone + Eq + Send + 'static,
     S::State: Debug,

@@ -287,6 +287,14 @@ impl State {
     }
 }
 
+impl cluster::EncryptionKeyProvider for State {
+    type Key = [u8; 32];
+
+    fn get_encryption_key(&self) -> Result<Self::Key, Box<dyn Error>> {
+        self.get_config().cluster.get_secret_key()
+    }
+}
+
 impl GossipStore for State {
     type Id = NodeID;
     type Address = SocketAddr;
