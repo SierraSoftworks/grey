@@ -7,7 +7,7 @@ use std::{
 use std::error::Error;
 use grey_api::{Mergeable, Probe};
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
-use tracing::info;
+use tracing::{info, instrument};
 use tracing_batteries::prelude::*;
 
 use crate::{
@@ -83,6 +83,7 @@ impl State {
         if let Some((config, modified)) =
             Config::load_if_modified_since(&self.config_path, last_modified).await?
         {
+            info!("Configuration file changed, reloading.");
             *self.config.write().unwrap() = Arc::new(config);
             *self.config_last_modified.lock().unwrap() = modified;
         }
@@ -222,6 +223,7 @@ impl State {
         Ok(peers)
     }
 
+    #[instrument(name="state.gc", skip(self), fields(otel.kind = "internal", node.id=%self.node_id), err(Debug))]
     pub async fn gc(&self) -> Result<(), Box<dyn Error>> {
         let txn = self.database.begin_write()?;
         {
