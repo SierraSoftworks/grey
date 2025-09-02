@@ -285,6 +285,71 @@ impl State {
             tokio::time::sleep(self.get_config().cluster.gc_interval).await;
         }
     }
+
+    fn generate_example_key(&self) -> String {
+        use aes_gcm::{
+            Aes256Gcm,
+            aead::{KeyInit, OsRng},
+        };
+        use base64::prelude::*;
+
+        let example_key = Aes256Gcm::generate_key(OsRng);
+        let key: &[u8] = example_key.as_slice();
+        BASE64_STANDARD.encode(key)
+    }
+
+    fn parse_secret_key(&self, secret: &str) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+        use base64::prelude::*;
+
+        let secret_bytes = BASE64_STANDARD
+            .decode(secret.as_bytes())
+            .unwrap_or_default();
+        if secret_bytes.len() < 32 {
+            return Err("Cluster secret key must contain 32-bytes of base64-encoded data.".into());
+        }
+
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&secret_bytes[..32]);
+        Ok(key)
+    }
+}
+
+impl cluster::EncryptionKeyProvider for State {
+    type Key = [u8; 32];
+
+    fn get_encryption_key(&self) -> Result<Self::Key, Box<dyn Error>> {
+        let config = self.get_config();
+        let secret = if config.cluster.secret.is_empty() {
+            config.cluster.secrets.first().ok_or("No secrets have been configured for the cluster, cannot encrypt gossip messages.")?
+        } else {
+            &config.cluster.secret
+        };
+
+        self.parse_secret_key(secret)
+    }
+
+    fn get_decryption_keys(&self) -> Result<Vec<Self::Key>, Box<dyn Error>> {
+        let config = self.get_config();
+        let mut keys = Vec::new();
+        let secret = if config.cluster.secret.is_empty() {
+            None
+        } else {
+            Some(config.cluster.secret.clone())
+        };
+
+        for secret in secret.iter().chain(config.cluster.secrets.iter()) {
+            if let Ok(key) = self.parse_secret_key(secret) {
+                keys.push(key);
+            } else {
+                warn!("Failed to parse cluster secret key, skipping it.");
+            }
+        }
+        if keys.is_empty() {
+            Err("No valid cluster secret keys available for decryption.".into())
+        } else {
+            Ok(keys)
+        }
+    }
 }
 
 impl GossipStore for State {
