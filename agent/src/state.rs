@@ -323,7 +323,7 @@ impl cluster::EncryptionKeyProvider for State {
             config.cluster.secrets.iter()
                 .nth(2)
                 .or(config.cluster.secrets.first())
-                .ok_or("No secrets have been configured for the cluster, cannot encrypt gossip messages.")?
+                .ok_or(format!("No secrets have been configured for the cluster, cannot encrypt gossip messages. You can use '{}' as a key if you need it.", self.generate_example_key()))?
         } else {
             &config.cluster.secret
         };
