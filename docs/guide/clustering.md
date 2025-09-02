@@ -61,7 +61,8 @@ cluster:
   peers:
     - 10.0.0.2:8888
     - 10.0.0.3:8888
-  secret: /pL7XKDj1UrAGjNMv3t9jmb9leDOZT+64KkYE8k7UH8=
+  secrets:
+    - /pL7XKDj1UrAGjNMv3t9jmb9leDOZT+64KkYE8k7UH8=
 
 ```
 
@@ -98,12 +99,16 @@ cluster:
     - 10.0.0.3:8888
 ```
 
-#### secret
-Base64-encoded 32-byte encryption key. All cluster members must use the same key.
+#### secrets
+Base64-encoded 32-byte encryption keys used by the cluster to encrypt gossip messages.
+We recommend providing three keys to support key rotation, adding new keys to the top
+of the list and removing old ones from the bottom. The second-last key will be used
+if 
 
 ```yaml
 cluster:
-  secret: /pL7XKDj1UrAGjNMv3t9jmb9leDOZT+64KkYE8k7UH8=
+  secrets:
+    - /pL7XKDj1UrAGjNMv3t9jmb9leDOZT+64KkYE8k7UH8=
 ```
 
 ### Advanced Tuning
