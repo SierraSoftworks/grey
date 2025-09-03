@@ -2127,7 +2127,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -3172,7 +3172,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "thiserror 2.0.16",
  "tokio",
  "tracing",
@@ -3209,7 +3209,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -4298,9 +4298,9 @@ dependencies = [
 
 [[package]]
 name = "tonic-health"
-version = "0.14.1"
+version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8aa31379f0851de4f223496a469ffcaae24ad4ce736493179c3e42135e2af5c"
+checksum = "2a82868bf299e0a1d2e8dce0dc33a46c02d6f045b2c1f1d6cc8dc3d0bf1812ef"
 dependencies = [
  "prost 0.14.1",
  "tokio",
