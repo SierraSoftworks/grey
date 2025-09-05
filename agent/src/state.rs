@@ -320,7 +320,10 @@ impl cluster::EncryptionKeyProvider for State {
     fn get_encryption_key(&self) -> Result<Self::Key, Box<dyn Error>> {
         let config = self.get_config();
         let secret = if config.cluster.secret.is_empty() {
-            config.cluster.secrets.first().ok_or("No secrets have been configured for the cluster, cannot encrypt gossip messages.")?
+            config.cluster.secrets.iter()
+                .nth(2)
+                .or(config.cluster.secrets.first())
+                .ok_or(format!("No secrets have been configured for the cluster, cannot encrypt gossip messages. You can use '{}' as a key if you need it.", self.generate_example_key()))?
         } else {
             &config.cluster.secret
         };

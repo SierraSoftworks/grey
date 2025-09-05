@@ -61,7 +61,8 @@ cluster:
   peers:
     - 10.0.0.2:8888
     - 10.0.0.3:8888
-  secret: /pL7XKDj1UrAGjNMv3t9jmb9leDOZT+64KkYE8k7UH8=
+  secrets:
+    - /pL7XKDj1UrAGjNMv3t9jmb9leDOZT+64KkYE8k7UH8=
 
 ```
 
@@ -98,13 +99,77 @@ cluster:
     - 10.0.0.3:8888
 ```
 
-#### secret
-Base64-encoded 32-byte encryption key. All cluster members must use the same key.
+#### secrets
+Base64-encoded 32-byte encryption keys used by the cluster to encrypt gossip messages.
 
 ```yaml
 cluster:
-  secret: /pL7XKDj1UrAGjNMv3t9jmb9leDOZT+64KkYE8k7UH8=
+  secrets:
+    - /pL7XKDj1UrAGjNMv3t9jmb9leDOZT+64KkYE8k7UH8=
 ```
+
+##### Key Rotation
+
+Multiple keys may be provided, in which case the second key in the list will be used for
+encryption, while all keys will be accepted for decryption. This allows for key rotation
+in your cluster without downtime.
+
+::: warning
+[NIST SP 800-38D](https://csrc.nist.gov/publications/detail/sp/800-38d/final) recommends
+rotating encryption keys prior to 2^32 uses of a given key. Depending on the size of your
+cluster and your configured `gossip_interval` and `gossip_factor`, this may require you to
+rotate keys relatively frequently. We recommend you implement a key rotation policy using
+an automated secret management tool such as HashiCorp Vault or AWS KMS to facilitate this.
+
+You can calculate the approximate amount of time before you need to rotate keys using the
+following code:
+
+```python
+cluster_size = 100  # Number of nodes in your cluster
+gossip_interval = 5  # gossip_interval in seconds
+gossip_factor = 10  # gossip_factor
+
+messages_per_second = 3 * (gossip_factor / gossip_interval) * cluster_size
+seconds_until_rotation = (2**32) / messages_per_second
+days_until_rotation = seconds_until_rotation / 86400
+print(f"Approximate days until key rotation is required: {days_until_rotation:.2f}")
+```
+
+In its default configuration, a 5-node cluster will need to rotate keys approximately every
+135 years (so you've got plenty of time) but in a cluster with 100 nodes, a 5-second gossip
+interval, and a gossip factor of 10, you'll need to rotate keys approximately every 80 days.
+:::
+
+To rotate keys without downtime, you must provide three keys in total:
+
+```yaml
+cluster:
+    secrets:
+        - ${key3}   # New key, used for decryption only
+        - ${key2}   # Current key, used for both encryption and decryption
+        - ${key1}   # Old key, used for decryption only
+```
+
+When you are ready to rotate to a new encryption key, add the new key to the top of the list
+and remove the oldest key from the bottom of the list.
+
+```yaml
+cluster:
+    secrets:
+        - ${key4}   # New key, used for decryption only
+        - ${key3}   # Current key, used for both encryption and decryption
+        - ${key2}   # Old key, used for decryption only
+```
+
+This approach ensures that every cluster node maintains a copy of the previous and next key
+at all times, allowing them to communicate with both older and newer configuration versions
+without interruption.
+
+::: tip
+If you need to complete a full key rotation (i.e. if one of your nodes has been compromised),
+you must follow the above process three times; ensuring that the cluster stabilizes between
+each update.
+:::
 
 ### Advanced Tuning
 
