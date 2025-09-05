@@ -37,7 +37,7 @@ dependencies = [
  "derive_more",
  "encoding_rs",
  "flate2",
- "foldhash",
+ "foldhash 0.1.5",
  "futures-core",
  "h2 0.3.27",
  "http 0.2.12",
@@ -151,7 +151,7 @@ dependencies = [
  "cookie",
  "derive_more",
  "encoding_rs",
- "foldhash",
+ "foldhash 0.1.5",
  "futures-core",
  "futures-util",
  "impl-more",
@@ -483,7 +483,7 @@ dependencies = [
 [[package]]
 name = "boa_ast"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#1726e44163c9589476aa33ae3d6b989665421e56"
+source = "git+https://github.com/boa-dev/boa#956bd68d8c34fe10d3297f61df86dd1747bf3c6b"
 dependencies = [
  "bitflags",
  "boa_interner",
@@ -497,7 +497,7 @@ dependencies = [
 [[package]]
 name = "boa_engine"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#1726e44163c9589476aa33ae3d6b989665421e56"
+source = "git+https://github.com/boa-dev/boa#956bd68d8c34fe10d3297f61df86dd1747bf3c6b"
 dependencies = [
  "arrayvec",
  "bitflags",
@@ -516,7 +516,7 @@ dependencies = [
  "fast-float2",
  "float16",
  "futures-lite",
- "hashbrown 0.15.5",
+ "hashbrown 0.16.0",
  "icu_normalizer",
  "indexmap",
  "intrusive-collections",
@@ -546,23 +546,23 @@ dependencies = [
 [[package]]
 name = "boa_gc"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#1726e44163c9589476aa33ae3d6b989665421e56"
+source = "git+https://github.com/boa-dev/boa#956bd68d8c34fe10d3297f61df86dd1747bf3c6b"
 dependencies = [
  "boa_macros",
  "boa_string",
  "either",
- "hashbrown 0.15.5",
+ "hashbrown 0.16.0",
  "thin-vec",
 ]
 
 [[package]]
 name = "boa_interner"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#1726e44163c9589476aa33ae3d6b989665421e56"
+source = "git+https://github.com/boa-dev/boa#956bd68d8c34fe10d3297f61df86dd1747bf3c6b"
 dependencies = [
  "boa_gc",
  "boa_macros",
- "hashbrown 0.15.5",
+ "hashbrown 0.16.0",
  "indexmap",
  "once_cell",
  "phf",
@@ -573,7 +573,7 @@ dependencies = [
 [[package]]
 name = "boa_interop"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#1726e44163c9589476aa33ae3d6b989665421e56"
+source = "git+https://github.com/boa-dev/boa#956bd68d8c34fe10d3297f61df86dd1747bf3c6b"
 dependencies = [
  "boa_engine",
  "boa_gc",
@@ -584,7 +584,7 @@ dependencies = [
 [[package]]
 name = "boa_macros"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#1726e44163c9589476aa33ae3d6b989665421e56"
+source = "git+https://github.com/boa-dev/boa#956bd68d8c34fe10d3297f61df86dd1747bf3c6b"
 dependencies = [
  "cfg-if",
  "cow-utils",
@@ -597,7 +597,7 @@ dependencies = [
 [[package]]
 name = "boa_parser"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#1726e44163c9589476aa33ae3d6b989665421e56"
+source = "git+https://github.com/boa-dev/boa#956bd68d8c34fe10d3297f61df86dd1747bf3c6b"
 dependencies = [
  "bitflags",
  "boa_ast",
@@ -614,7 +614,7 @@ dependencies = [
 [[package]]
 name = "boa_runtime"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#1726e44163c9589476aa33ae3d6b989665421e56"
+source = "git+https://github.com/boa-dev/boa#956bd68d8c34fe10d3297f61df86dd1747bf3c6b"
 dependencies = [
  "boa_engine",
  "boa_gc",
@@ -632,7 +632,7 @@ dependencies = [
 [[package]]
 name = "boa_string"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#1726e44163c9589476aa33ae3d6b989665421e56"
+source = "git+https://github.com/boa-dev/boa#956bd68d8c34fe10d3297f61df86dd1747bf3c6b"
 dependencies = [
  "fast-float2",
  "itoa",
@@ -1096,7 +1096,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "778e2ac28f6c47af28e4907f13ffd1e1ddbd400980a9abd7c8df189bf578a5ad"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1148,6 +1148,12 @@ name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
+
+[[package]]
+name = "foldhash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "foreign-types"
@@ -1937,7 +1943,18 @@ checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
  "allocator-api2",
  "equivalent",
- "foldhash",
+ "foldhash 0.1.5",
+]
+
+[[package]]
+name = "hashbrown"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5419bdc4f6a9207fbeba6d11b604d481addf78ecd10c11ad51e76c2f6482748d"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash 0.2.0",
 ]
 
 [[package]]
@@ -2127,7 +2144,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -3163,7 +3180,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "thiserror 2.0.16",
  "tokio",
  "tracing",
@@ -3200,9 +3217,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3469,7 +3486,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3828,7 +3845,7 @@ checksum = "7a2ae44ef20feb57a68b23d846850f861394c2e02dc425a50098ae8c90267589"
 [[package]]
 name = "small_btree"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#1726e44163c9589476aa33ae3d6b989665421e56"
+source = "git+https://github.com/boa-dev/boa#956bd68d8c34fe10d3297f61df86dd1747bf3c6b"
 dependencies = [
  "arrayvec",
 ]
@@ -3984,7 +4001,7 @@ dependencies = [
 [[package]]
 name = "tag_ptr"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#1726e44163c9589476aa33ae3d6b989665421e56"
+source = "git+https://github.com/boa-dev/boa#956bd68d8c34fe10d3297f61df86dd1747bf3c6b"
 
 [[package]]
 name = "tap"
@@ -4002,7 +4019,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
