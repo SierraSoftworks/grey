@@ -22,7 +22,7 @@ boa_gc = { git = "https://github.com/boa-dev/boa" }
 boa_runtime = { git = "https://github.com/boa-dev/boa", features = [
   "reqwest-blocking",
 ] }
-chrono = { version = "0.4.38", features = ["serde"] }
+chrono = { version = "0.4.42", features = ["serde"] }
 circular-buffer = "1.2.0"
 clap = { version = "4.5", features = ["derive"] }
 ctrlc = "3.5.0"
