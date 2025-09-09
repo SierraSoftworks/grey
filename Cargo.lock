@@ -483,7 +483,7 @@ dependencies = [
 [[package]]
 name = "boa_ast"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#b3ef88a9fe18e24dc3872d6a6def77659cf427da"
+source = "git+https://github.com/boa-dev/boa#30f509464aac9ebc4957dd30d136e68cf41bfd5d"
 dependencies = [
  "bitflags",
  "boa_interner",
@@ -497,7 +497,7 @@ dependencies = [
 [[package]]
 name = "boa_engine"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#b3ef88a9fe18e24dc3872d6a6def77659cf427da"
+source = "git+https://github.com/boa-dev/boa#30f509464aac9ebc4957dd30d136e68cf41bfd5d"
 dependencies = [
  "arrayvec",
  "bitflags",
@@ -546,7 +546,7 @@ dependencies = [
 [[package]]
 name = "boa_gc"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#b3ef88a9fe18e24dc3872d6a6def77659cf427da"
+source = "git+https://github.com/boa-dev/boa#30f509464aac9ebc4957dd30d136e68cf41bfd5d"
 dependencies = [
  "boa_macros",
  "boa_string",
@@ -558,7 +558,7 @@ dependencies = [
 [[package]]
 name = "boa_interner"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#b3ef88a9fe18e24dc3872d6a6def77659cf427da"
+source = "git+https://github.com/boa-dev/boa#30f509464aac9ebc4957dd30d136e68cf41bfd5d"
 dependencies = [
  "boa_gc",
  "boa_macros",
@@ -571,20 +571,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "boa_interop"
-version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#b3ef88a9fe18e24dc3872d6a6def77659cf427da"
-dependencies = [
- "boa_engine",
- "boa_gc",
- "boa_macros",
- "rustc-hash",
-]
-
-[[package]]
 name = "boa_macros"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#b3ef88a9fe18e24dc3872d6a6def77659cf427da"
+source = "git+https://github.com/boa-dev/boa#30f509464aac9ebc4957dd30d136e68cf41bfd5d"
 dependencies = [
  "cfg-if",
  "cow-utils",
@@ -597,7 +586,7 @@ dependencies = [
 [[package]]
 name = "boa_parser"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#b3ef88a9fe18e24dc3872d6a6def77659cf427da"
+source = "git+https://github.com/boa-dev/boa#30f509464aac9ebc4957dd30d136e68cf41bfd5d"
 dependencies = [
  "bitflags",
  "boa_ast",
@@ -614,11 +603,10 @@ dependencies = [
 [[package]]
 name = "boa_runtime"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#b3ef88a9fe18e24dc3872d6a6def77659cf427da"
+source = "git+https://github.com/boa-dev/boa#30f509464aac9ebc4957dd30d136e68cf41bfd5d"
 dependencies = [
  "boa_engine",
  "boa_gc",
- "boa_interop",
  "bytemuck",
  "either",
  "futures-lite",
@@ -632,7 +620,7 @@ dependencies = [
 [[package]]
 name = "boa_string"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#b3ef88a9fe18e24dc3872d6a6def77659cf427da"
+source = "git+https://github.com/boa-dev/boa#30f509464aac9ebc4957dd30d136e68cf41bfd5d"
 dependencies = [
  "fast-float2",
  "itoa",
@@ -1045,18 +1033,18 @@ dependencies = [
 
 [[package]]
 name = "dynify"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20874f077eaec07239d95e2a69816b724e102b288d0ebbdfd4d62864885626d3"
+checksum = "81acb15628a3e22358bf73de5e7e62360b8a777dbcb5fc9ac7dfa9ae73723747"
 dependencies = [
  "dynify-macros",
 ]
 
 [[package]]
 name = "dynify-macros"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3d6cc42514d2ee2fa2528d4ba0d61abb9c24b83abca1141089a0ddb85928ab8"
+checksum = "1ec431cd708430d5029356535259c5d645d60edd3d39c54e5eea9782d46caa7d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2151,7 +2139,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -3187,7 +3175,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "thiserror 2.0.16",
  "tokio",
  "tracing",
@@ -3224,7 +3212,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -3852,7 +3840,7 @@ checksum = "7a2ae44ef20feb57a68b23d846850f861394c2e02dc425a50098ae8c90267589"
 [[package]]
 name = "small_btree"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#b3ef88a9fe18e24dc3872d6a6def77659cf427da"
+source = "git+https://github.com/boa-dev/boa#30f509464aac9ebc4957dd30d136e68cf41bfd5d"
 dependencies = [
  "arrayvec",
 ]
@@ -4008,7 +3996,7 @@ dependencies = [
 [[package]]
 name = "tag_ptr"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#b3ef88a9fe18e24dc3872d6a6def77659cf427da"
+source = "git+https://github.com/boa-dev/boa#30f509464aac9ebc4957dd30d136e68cf41bfd5d"
 
 [[package]]
 name = "tap"
