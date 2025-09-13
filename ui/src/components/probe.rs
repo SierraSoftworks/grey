@@ -18,6 +18,8 @@ pub fn probe(props: &ProbeProps) -> Html {
         _ => "ok",
     };
 
+    let active_observers = props.probe.history.last().map(|h| h.observations.len()).unwrap_or(props.probe.observations.len());
+
     html! {
         <div class="probe">
             <div class="probe-title">
@@ -40,7 +42,7 @@ pub fn probe(props: &ProbeProps) -> Html {
                 </div>
                 <div class="probe-observers" tooltip="The number of agents which have contributed to this status report.">
                     <span class="icon-eye"></span>
-                    {format!("{}", props.probe.observations.len())}
+                    {format!("{}", active_observers)}
                 </div>
                 <div class="availability">{availability(props.probe.availability())}</div>
             </div>
