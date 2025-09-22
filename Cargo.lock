@@ -477,7 +477,7 @@ dependencies = [
 [[package]]
 name = "boa_ast"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#4bb200f606fe630dc4275d3c8418e318c441789e"
+source = "git+https://github.com/boa-dev/boa#601972bcd41745b210bdf15cbecb49d73b1f5288"
 dependencies = [
  "bitflags",
  "boa_interner",
@@ -491,7 +491,7 @@ dependencies = [
 [[package]]
 name = "boa_engine"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#4bb200f606fe630dc4275d3c8418e318c441789e"
+source = "git+https://github.com/boa-dev/boa#601972bcd41745b210bdf15cbecb49d73b1f5288"
 dependencies = [
  "arrayvec",
  "bitflags",
@@ -509,6 +509,8 @@ dependencies = [
  "either",
  "fast-float2",
  "float16",
+ "futures-channel",
+ "futures-concurrency",
  "futures-lite",
  "hashbrown 0.16.0",
  "icu_normalizer",
@@ -540,7 +542,7 @@ dependencies = [
 [[package]]
 name = "boa_gc"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#4bb200f606fe630dc4275d3c8418e318c441789e"
+source = "git+https://github.com/boa-dev/boa#601972bcd41745b210bdf15cbecb49d73b1f5288"
 dependencies = [
  "boa_macros",
  "boa_string",
@@ -552,7 +554,7 @@ dependencies = [
 [[package]]
 name = "boa_interner"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#4bb200f606fe630dc4275d3c8418e318c441789e"
+source = "git+https://github.com/boa-dev/boa#601972bcd41745b210bdf15cbecb49d73b1f5288"
 dependencies = [
  "boa_gc",
  "boa_macros",
@@ -567,7 +569,7 @@ dependencies = [
 [[package]]
 name = "boa_macros"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#4bb200f606fe630dc4275d3c8418e318c441789e"
+source = "git+https://github.com/boa-dev/boa#601972bcd41745b210bdf15cbecb49d73b1f5288"
 dependencies = [
  "cfg-if",
  "cow-utils",
@@ -580,7 +582,7 @@ dependencies = [
 [[package]]
 name = "boa_parser"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#4bb200f606fe630dc4275d3c8418e318c441789e"
+source = "git+https://github.com/boa-dev/boa#601972bcd41745b210bdf15cbecb49d73b1f5288"
 dependencies = [
  "bitflags",
  "boa_ast",
@@ -597,7 +599,7 @@ dependencies = [
 [[package]]
 name = "boa_runtime"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#4bb200f606fe630dc4275d3c8418e318c441789e"
+source = "git+https://github.com/boa-dev/boa#601972bcd41745b210bdf15cbecb49d73b1f5288"
 dependencies = [
  "boa_engine",
  "boa_gc",
@@ -614,7 +616,7 @@ dependencies = [
 [[package]]
 name = "boa_string"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#4bb200f606fe630dc4275d3c8418e318c441789e"
+source = "git+https://github.com/boa-dev/boa#601972bcd41745b210bdf15cbecb49d73b1f5288"
 dependencies = [
  "fast-float2",
  "itoa",
@@ -2132,7 +2134,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -2330,12 +2332,12 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.11.0"
+version = "2.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2481980430f9f78649238835720ddccc57e52df14ffce1c6f37391d61b563e9"
+checksum = "4b0f83760fb341a774ed326568e19f5a863af4a952def8c39f9ab92fd95b88e5"
 dependencies = [
  "equivalent",
- "hashbrown 0.15.5",
+ "hashbrown 0.16.0",
 ]
 
 [[package]]
@@ -3168,7 +3170,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "thiserror 2.0.16",
  "tokio",
  "tracing",
@@ -3205,7 +3207,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -3844,7 +3846,7 @@ checksum = "7a2ae44ef20feb57a68b23d846850f861394c2e02dc425a50098ae8c90267589"
 [[package]]
 name = "small_btree"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#4bb200f606fe630dc4275d3c8418e318c441789e"
+source = "git+https://github.com/boa-dev/boa#601972bcd41745b210bdf15cbecb49d73b1f5288"
 dependencies = [
  "arrayvec",
 ]
@@ -4000,7 +4002,7 @@ dependencies = [
 [[package]]
 name = "tag_ptr"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#4bb200f606fe630dc4275d3c8418e318c441789e"
+source = "git+https://github.com/boa-dev/boa#601972bcd41745b210bdf15cbecb49d73b1f5288"
 
 [[package]]
 name = "tap"
