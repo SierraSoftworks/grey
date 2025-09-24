@@ -76,7 +76,7 @@ wasm-logger = { version = "0.2" }
 web-sys = { version = "0.3" }
 
 # Test dependencies
-tempfile = "3.22"
+tempfile = "3.23"
 
 [profile.release]
 debug = 1
