@@ -145,8 +145,8 @@ impl ProbeRunner {
                             Err(err) => {
                                 debug!("Probe failed: {}", err);
                                 sample.retries += 1;
+                                sample.message = err.to_string();
                                 if sample.retries >= total_attempts {
-                                    sample.message = err.to_string();
                                     return Err(err);
                                 }
                             }
@@ -158,11 +158,10 @@ impl ProbeRunner {
                 Ok(Ok(res)) => return Ok(res),
                 Ok(Err(err)) => {
                     debug!("Probe failed: {}", err);
-                        if sample.retries + 1 == total_attempts {
-                            warn!("Probe failed after {} retries: {}", sample.retries, err);
-                            sample.message = err.to_string();
-                            return Err(err);
-                        }
+                    if sample.retries + 1 == total_attempts {
+                        warn!("Probe failed after {} retries: {}", sample.retries, err);
+                    }
+                    return Err(err);
                 }
                 Err(err) => {
                     debug!("Probe timed out: {}", err);
