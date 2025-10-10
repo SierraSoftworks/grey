@@ -15,6 +15,7 @@ updates:
           - "opentelemetry*"
           - "tracing*"
           - "tonic"
+          - "boa_*"
 
   - package-ecosystem: npm
     directory: "/docs"
