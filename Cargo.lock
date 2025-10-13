@@ -484,7 +484,7 @@ dependencies = [
 [[package]]
 name = "boa_ast"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#5390195b63d4c4ade5d1e10bab7ddd0e34542f35"
+source = "git+https://github.com/boa-dev/boa#3d5034b9959dca8dd5922c7dc407d8c90dae37a4"
 dependencies = [
  "bitflags",
  "boa_interner",
@@ -498,7 +498,7 @@ dependencies = [
 [[package]]
 name = "boa_engine"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#5390195b63d4c4ade5d1e10bab7ddd0e34542f35"
+source = "git+https://github.com/boa-dev/boa#3d5034b9959dca8dd5922c7dc407d8c90dae37a4"
 dependencies = [
  "aligned-vec",
  "arrayvec",
@@ -550,7 +550,7 @@ dependencies = [
 [[package]]
 name = "boa_gc"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#5390195b63d4c4ade5d1e10bab7ddd0e34542f35"
+source = "git+https://github.com/boa-dev/boa#3d5034b9959dca8dd5922c7dc407d8c90dae37a4"
 dependencies = [
  "boa_macros",
  "boa_string",
@@ -562,7 +562,7 @@ dependencies = [
 [[package]]
 name = "boa_interner"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#5390195b63d4c4ade5d1e10bab7ddd0e34542f35"
+source = "git+https://github.com/boa-dev/boa#3d5034b9959dca8dd5922c7dc407d8c90dae37a4"
 dependencies = [
  "boa_gc",
  "boa_macros",
@@ -577,7 +577,7 @@ dependencies = [
 [[package]]
 name = "boa_macros"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#5390195b63d4c4ade5d1e10bab7ddd0e34542f35"
+source = "git+https://github.com/boa-dev/boa#3d5034b9959dca8dd5922c7dc407d8c90dae37a4"
 dependencies = [
  "cfg-if",
  "cow-utils",
@@ -590,7 +590,7 @@ dependencies = [
 [[package]]
 name = "boa_parser"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#5390195b63d4c4ade5d1e10bab7ddd0e34542f35"
+source = "git+https://github.com/boa-dev/boa#3d5034b9959dca8dd5922c7dc407d8c90dae37a4"
 dependencies = [
  "bitflags",
  "boa_ast",
@@ -607,7 +607,7 @@ dependencies = [
 [[package]]
 name = "boa_runtime"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#5390195b63d4c4ade5d1e10bab7ddd0e34542f35"
+source = "git+https://github.com/boa-dev/boa#3d5034b9959dca8dd5922c7dc407d8c90dae37a4"
 dependencies = [
  "boa_engine",
  "boa_gc",
@@ -625,7 +625,7 @@ dependencies = [
 [[package]]
 name = "boa_string"
 version = "0.20.0"
-source = "git+https://github.com/boa-dev/boa#5390195b63d4c4ade5d1e10bab7ddd0e34542f35"
+source = "git+https://github.com/boa-dev/boa#3d5034b9959dca8dd5922c7dc407d8c90dae37a4"
 dependencies = [
  "fast-float2",
  "itoa",
@@ -1847,7 +1847,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "956caa58d4857bc9941749d55e4bd3000032d8212762586fa5705632967140e7"
 dependencies = [
- "proc-macro-crate 1.3.1",
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 2.0.106",
@@ -2182,7 +2182,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -2739,7 +2739,7 @@ version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77e878c846a8abae00dd069496dbe8751b16ac1c3d6bd2a7283a938e8228f90d"
 dependencies = [
- "proc-macro-crate 3.4.0",
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 2.0.106",
@@ -3107,16 +3107,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f4c021e1093a56626774e81216a4ce732a735e5bad4868a03f3ed65ca0c3919"
 dependencies = [
  "once_cell",
- "toml_edit 0.19.15",
-]
-
-[[package]]
-name = "proc-macro-crate"
-version = "3.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "219cb19e96be00ab2e37d6e299658a0cfa83e52429179969b0f0121b4ac46983"
-dependencies = [
- "toml_edit 0.23.7",
+ "toml_edit",
 ]
 
 [[package]]
@@ -3221,7 +3212,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
@@ -3258,7 +3249,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -3913,7 +3904,7 @@ checksum = "7a2ae44ef20feb57a68b23d846850f861394c2e02dc425a50098ae8c90267589"
 [[package]]
 name = "small_btree"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#5390195b63d4c4ade5d1e10bab7ddd0e34542f35"
+source = "git+https://github.com/boa-dev/boa#3d5034b9959dca8dd5922c7dc407d8c90dae37a4"
 dependencies = [
  "arrayvec",
 ]
@@ -4069,7 +4060,7 @@ dependencies = [
 [[package]]
 name = "tag_ptr"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#5390195b63d4c4ade5d1e10bab7ddd0e34542f35"
+source = "git+https://github.com/boa-dev/boa#3d5034b9959dca8dd5922c7dc407d8c90dae37a4"
 
 [[package]]
 name = "tap"
@@ -4288,44 +4279,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
 
 [[package]]
-name = "toml_datetime"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2cdb639ebbc97961c51720f858597f7f24c4fc295327923af55b74c3c724533"
-dependencies = [
- "serde_core",
-]
-
-[[package]]
 name = "toml_edit"
 version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
  "indexmap",
- "toml_datetime 0.6.11",
- "winnow 0.5.40",
-]
-
-[[package]]
-name = "toml_edit"
-version = "0.23.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6485ef6d0d9b5d0ec17244ff7eb05310113c3f316f2d14200d4de56b3cb98f8d"
-dependencies = [
- "indexmap",
- "toml_datetime 0.7.3",
- "toml_parser",
- "winnow 0.7.13",
-]
-
-[[package]]
-name = "toml_parser"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0cbe268d35bdb4bb5a56a2de88d0ad0eb70af5384a99d648cd4b3d04039800e"
-dependencies = [
- "winnow 0.7.13",
+ "toml_datetime",
+ "winnow",
 ]
 
 [[package]]
@@ -5322,15 +5283,6 @@ name = "winnow"
 version = "0.5.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f593a95398737aeed53e489c785df13f3618e41dbcd6718c6addbf1395aa6876"
-dependencies = [
- "memchr",
-]
-
-[[package]]
-name = "winnow"
-version = "0.7.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21a0236b59786fed61e2a80582dd500fe61f18b5dca67a4a067d0bc9039339cf"
 dependencies = [
  "memchr",
 ]
