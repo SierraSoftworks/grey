@@ -25,7 +25,7 @@ boa_runtime = { git = "https://github.com/boa-dev/boa", features = [
 chrono = { version = "0.4.42", features = ["serde"] }
 circular-buffer = "1.2.0"
 clap = { version = "4.5", features = ["derive"] }
-ctrlc = "3.5.0"
+ctrlc = "3.5.1"
 futures = "0.3"
 futures-concurrency = "7.6.3"
 futures-lite = "2.6.1"
