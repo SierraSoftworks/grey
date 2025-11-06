@@ -3991,9 +3991,9 @@ dependencies = [
 
 [[package]]
 name = "sys_traits"
-version = "0.1.18"
+version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "024143c2bb7cc3ee41771de716b4fba227e98fda9bc8b2053ed83a92eb8722bd"
+checksum = "e1495a604cd38eeb30c408724966cd31ca1b68b5a97e3afc474c0d719bfeec5a"
 dependencies = [
  "parking_lot",
  "sys_traits_macros",
