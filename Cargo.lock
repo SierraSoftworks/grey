@@ -4401,7 +4401,7 @@ dependencies = [
 [[package]]
 name = "tracing-batteries"
 version = "0.1.0"
-source = "git+https://github.com/sierrasoftworks/tracing-batteries-rs.git#e6800e982e2af119a7072ac2f405d575dae712e8"
+source = "git+https://github.com/sierrasoftworks/tracing-batteries-rs.git#16cf5e13a7f27dd91631d7f7d9c48f3c272281c6"
 dependencies = [
  "chrono",
  "hex",
