@@ -61,5 +61,6 @@ openssl_src = ["dep:openssl-sys"]
 
 [dev-dependencies]
 tempfile.workspace = true
+wiremock = "0.6"
 
 

@@ -78,6 +78,8 @@ mod tests {
     use crate::sample::SampleValue;
 
     use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn test_script_ok() {
@@ -143,23 +145,33 @@ mod tests {
 
     #[tokio::test]
     async fn test_script_fetch() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"value": "test"})),
+            )
+            .mount(&mock_server)
+            .await;
+
         let target = ScriptTarget {
-            code: r#"
-            const result = await fetch("https://bender.sierrasoftworks.com/api/v1/quote/bender", {
-                headers: getTraceHeaders()
-            });
-            output['http.status_code'] = result.status;
-            const quote = await result.json();
-            output['quote.who'] = quote.who;
-            "#
-            .into(),
+            code: format!(
+                r#"
+            const result = await fetch("{}/test", {{ headers: getTraceHeaders() }});
+            output['status'] = result.status;
+            output['value'] = (await result.json()).value;
+            "#,
+                mock_server.uri()
+            ),
             ..Default::default()
         };
         let cancel = AtomicBool::new(false);
 
         let sample = target.run(&cancel).await.expect("no error to be raised");
-        assert_eq!(sample.get("http.status_code"), &SampleValue::from(200));
-        assert_eq!(sample.get("quote.who"), &SampleValue::from("Bender"));
+        assert_eq!(sample.get("status"), &SampleValue::from(200));
+        assert_eq!(sample.get("value"), &SampleValue::from("test"));
     }
 
     #[tokio::test]
