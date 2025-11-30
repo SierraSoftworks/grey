@@ -113,24 +113,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_get() {
-        // Start a mock server
         let mock_server = MockServer::start().await;
 
-        // Configure the mock to return a 200 OK response
         Mock::given(method("GET"))
-            .and(path("/api/v1/quote"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({
-                        "quote": "Bite my shiny metal ass!",
-                        "who": "Bender"
-                    })),
-            )
+            .and(path("/test"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
             .mount(&mock_server)
             .await;
 
         let target = HttpTarget {
-            url: format!("{}/api/v1/quote", mock_server.uri()),
+            url: format!("{}/test", mock_server.uri()),
             method: "GET".to_string(),
             headers: HashMap::new(),
             body: None,

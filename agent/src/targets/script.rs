@@ -145,18 +145,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_script_fetch() {
-        // Start a mock server
         let mock_server = MockServer::start().await;
 
-        // Configure the mock to return a 200 OK response with JSON body
         Mock::given(method("GET"))
-            .and(path("/api/v1/quote/bender"))
+            .and(path("/test"))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({
-                        "quote": "Bite my shiny metal ass!",
-                        "who": "Bender"
-                    })),
+                    .set_body_json(serde_json::json!({"value": "test"})),
             )
             .mount(&mock_server)
             .await;
@@ -164,12 +159,9 @@ mod tests {
         let target = ScriptTarget {
             code: format!(
                 r#"
-            const result = await fetch("{}/api/v1/quote/bender", {{
-                headers: getTraceHeaders()
-            }});
-            output['http.status_code'] = result.status;
-            const quote = await result.json();
-            output['quote.who'] = quote.who;
+            const result = await fetch("{}/test", {{ headers: getTraceHeaders() }});
+            output['status'] = result.status;
+            output['value'] = (await result.json()).value;
             "#,
                 mock_server.uri()
             ),
@@ -178,8 +170,8 @@ mod tests {
         let cancel = AtomicBool::new(false);
 
         let sample = target.run(&cancel).await.expect("no error to be raised");
-        assert_eq!(sample.get("http.status_code"), &SampleValue::from(200));
-        assert_eq!(sample.get("quote.who"), &SampleValue::from("Bender"));
+        assert_eq!(sample.get("status"), &SampleValue::from(200));
+        assert_eq!(sample.get("value"), &SampleValue::from("test"));
     }
 
     #[tokio::test]

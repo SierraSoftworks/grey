@@ -76,22 +76,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch() {
-        // Start a mock server
         let mock_server = MockServer::start().await;
 
-        // Configure the mock to return a response similar to httpbin
         Mock::given(method("GET"))
-            .and(path("/get"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({
-                        "url": format!("{}/get", mock_server.uri())
-                    })),
-            )
+            .and(path("/test"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ok": true})))
             .mount(&mock_server)
             .await;
 
-        let mock_url = format!("{}/get", mock_server.uri());
+        let mock_url = format!("{}/test", mock_server.uri());
 
         let job_queue = Rc::new(JobQueue::new());
         let mut context = Context::builder()
@@ -108,7 +101,7 @@ mod tests {
             async function test() {{
                 const response = await fetch('{}');
                 const data = await response.json();
-                return data.url;
+                return data.ok;
             }}
             test();
         "#, mock_url);
@@ -118,8 +111,7 @@ mod tests {
         job_queue.run_jobs_async(&RefCell::new(&mut context)).await.unwrap();
         match promise.state() {
             PromiseState::Fulfilled(value) => {
-                let url = value.to_string(&mut context).unwrap().to_std_string_lossy();
-                assert_eq!(url, mock_url);
+                assert!(value.as_boolean().unwrap_or(false), "Expected true");
             }
             PromiseState::Rejected(err) => {
                 panic!("Promise was rejected: {}", err.to_string(&mut context).unwrap().to_std_string_lossy());
