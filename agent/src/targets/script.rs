@@ -78,6 +78,8 @@ mod tests {
     use crate::sample::SampleValue;
 
     use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn test_script_ok() {
@@ -143,16 +145,34 @@ mod tests {
 
     #[tokio::test]
     async fn test_script_fetch() {
+        // Start a mock server
+        let mock_server = MockServer::start().await;
+
+        // Configure the mock to return a 200 OK response with JSON body
+        Mock::given(method("GET"))
+            .and(path("/api/v1/quote/bender"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({
+                        "quote": "Bite my shiny metal ass!",
+                        "who": "Bender"
+                    })),
+            )
+            .mount(&mock_server)
+            .await;
+
         let target = ScriptTarget {
-            code: r#"
-            const result = await fetch("https://bender.sierrasoftworks.com/api/v1/quote/bender", {
+            code: format!(
+                r#"
+            const result = await fetch("{}/api/v1/quote/bender", {{
                 headers: getTraceHeaders()
-            });
+            }});
             output['http.status_code'] = result.status;
             const quote = await result.json();
             output['quote.who'] = quote.who;
-            "#
-            .into(),
+            "#,
+                mock_server.uri()
+            ),
             ..Default::default()
         };
         let cancel = AtomicBool::new(false);

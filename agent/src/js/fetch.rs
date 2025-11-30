@@ -71,9 +71,28 @@ mod tests {
     use boa_engine::builtins::promise::PromiseState;
     use boa_engine::job::JobExecutor;
     use crate::js::JobQueue;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn test_fetch() {
+        // Start a mock server
+        let mock_server = MockServer::start().await;
+
+        // Configure the mock to return a response similar to httpbin
+        Mock::given(method("GET"))
+            .and(path("/get"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({
+                        "url": format!("{}/get", mock_server.uri())
+                    })),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let mock_url = format!("{}/get", mock_server.uri());
+
         let job_queue = Rc::new(JobQueue::new());
         let mut context = Context::builder()
             .job_executor(job_queue.clone())
@@ -85,14 +104,14 @@ mod tests {
             &mut context,
         ).unwrap();
 
-        let script = r#"
-            async function test() {
-                const response = await fetch('https://httpbin.org/get');
+        let script = format!(r#"
+            async function test() {{
+                const response = await fetch('{}');
                 const data = await response.json();
                 return data.url;
-            }
+            }}
             test();
-        "#;
+        "#, mock_url);
 
         let result = context.eval(Source::from_bytes(script.as_bytes())).unwrap();
         let promise = result.as_promise().expect("Expected a Promise");
@@ -100,7 +119,7 @@ mod tests {
         match promise.state() {
             PromiseState::Fulfilled(value) => {
                 let url = value.to_string(&mut context).unwrap().to_std_string_lossy();
-                assert_eq!(url, "https://httpbin.org/get");
+                assert_eq!(url, mock_url);
             }
             PromiseState::Rejected(err) => {
                 panic!("Promise was rejected: {}", err.to_string(&mut context).unwrap().to_std_string_lossy());
