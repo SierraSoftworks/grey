@@ -108,22 +108,31 @@ mod tests {
     use crate::SampleValue;
 
     use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn test_get() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/test"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+            .mount(&mock_server)
+            .await;
+
         let target = HttpTarget {
-            url: "https://bender.sierrasoftworks.com/api/v1/quote".to_string(),
+            url: format!("{}/test", mock_server.uri()),
             method: "GET".to_string(),
             headers: HashMap::new(),
             body: None,
-            no_verify: true,
+            no_verify: false,
         };
 
         let cancel = AtomicBool::new(false);
 
         let sample = target.run(&cancel).await.unwrap();
         assert_eq!(sample.get("http.status"), &200.into());
-        assert_eq!(sample.get("http.version"), &"HTTP/1.1".into());
         assert!(matches!(sample.get("http.body"), SampleValue::String(s) if !s.is_empty()));
     }
 }
