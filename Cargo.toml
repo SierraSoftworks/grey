@@ -64,7 +64,7 @@ tracing-batteries = { git = "https://github.com/sierrasoftworks/tracing-batterie
   "opentelemetry",
 ] }
 trust-dns-resolver = { version = "0.23", features = ["tokio-runtime"] }
-yew = { version = "0.21", features = ["ssr"] }
+yew = { version = "0.22", features = ["ssr"] }
 
 gloo = { version = "0.11" }
 gloo-console = { version = "0.3" }
