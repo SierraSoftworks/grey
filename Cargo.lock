@@ -1155,7 +1155,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1978,7 +1978,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -2999,7 +2999,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
@@ -3036,9 +3036,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3305,7 +3305,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3845,7 +3845,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4216,7 +4216,7 @@ dependencies = [
 [[package]]
 name = "tracing-batteries"
 version = "0.1.0"
-source = "git+https://github.com/sierrasoftworks/tracing-batteries-rs.git#32be096a2d15074add358b3a465cddd739b5459f"
+source = "git+https://github.com/sierrasoftworks/tracing-batteries-rs.git#3a8d27ad996a7a52f8a4aca1273a97bd301243f8"
 dependencies = [
  "chrono",
  "hex",
