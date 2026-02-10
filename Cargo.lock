@@ -4208,7 +4208,7 @@ dependencies = [
 [[package]]
 name = "tracing-batteries"
 version = "0.1.0"
-source = "git+https://github.com/sierrasoftworks/tracing-batteries-rs.git#0b25495e44291518f14c45f24c79cf3e300c2fa1"
+source = "git+https://github.com/sierrasoftworks/tracing-batteries-rs.git#527f84f8384576c87d289e0a882d89631f8b0930"
 dependencies = [
  "chrono",
  "hex",
@@ -4218,7 +4218,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "radix_fmt",
- "rand 0.9.2",
+ "rand 0.10.0",
  "reqwest",
  "sentry",
  "serde",
