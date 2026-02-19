@@ -13,7 +13,7 @@ readme = "README.md"
 grey-api = { path = "api" }
 grey-ui = { path = "ui", default-features = false }
 
-actix-web = "4.12"
+actix-web = "4.13"
 aes-gcm = "0.10.3"
 async-trait = "0.1"
 base64 = "0.22.1"
