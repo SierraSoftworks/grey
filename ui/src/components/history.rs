@@ -213,7 +213,7 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket) -> Html {
                                         <div class="tooltip-section-entry-header">
                                             <div class={format!("tooltip-status-dot {}", validation_class)}></div>
                                             <span class="tooltip-section-entry-name">{availability(observation.success_rate())}</span>
-                                            <span class="tooltip-section-entry-message">{name}</span>
+                                            <span class="tooltip-section-entry-message">{*name}</span>
                                         </div>
                                     </div>
                                 }

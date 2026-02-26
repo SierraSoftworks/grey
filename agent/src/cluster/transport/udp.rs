@@ -75,7 +75,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::Rng;
+    use rand::RngExt;
     use std::net::SocketAddr;
     use tokio::time::{sleep, timeout, Duration};
     use crate::cluster::message::{Message, ClusterStateDigest};
