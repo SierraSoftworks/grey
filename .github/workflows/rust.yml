@@ -29,7 +29,7 @@ jobs:
         run: sed -i "s/^version\s*=\s*\".*\"/version = \"$VERSION\"/g" Cargo.toml
 
       - name: Stash Versioned Cargo.toml
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: cargofile
           path: Cargo.toml
@@ -67,7 +67,7 @@ jobs:
         run: trunk build --release
 
       - name: Upload build artifacts for use in other build stages
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ui-build
           path: ./ui/dist
@@ -245,7 +245,7 @@ jobs:
           overwrite: "true"
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: github.event_name == 'pull_request'
         with:
           name: grey-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.extension }}
