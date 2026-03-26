@@ -68,7 +68,7 @@ yew = { version = "0.23", features = ["ssr"] }
 
 gloo = { version = "0.12" }
 gloo-console = { version = "0.3" }
-gloo-net = { version = "0.6" }
+gloo-net = { version = "0.7" }
 gloo-timers = { version = "0.3", features = ["futures"] }
 wasm-bindgen = { version = "0.2.100" }
 wasm-bindgen-futures = { version = "0.4" }
