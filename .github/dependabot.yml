@@ -16,6 +16,13 @@ updates:
           - "tracing*"
           - "tonic"
           - "boa_*"
+      gloo:
+        patterns:
+          - "gloo*"
+      wasm:
+        patterns:
+          - "wasm-bindgen*"
+          - "web-sys"
 
   - package-ecosystem: npm
     directory: "/docs"
