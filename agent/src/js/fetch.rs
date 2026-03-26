@@ -1,4 +1,4 @@
-use boa_engine::{Context, JsData, JsResult};
+use boa_engine::{Context, JsData, JsObject, JsResult};
 use boa_gc::{Finalize, Trace};
 use boa_runtime::fetch::{Fetcher, request::JsRequest, response::JsResponse};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
@@ -16,6 +16,7 @@ impl Fetcher for ReqwestFetcher {
     async fn fetch(
         self: Rc<Self>,
         request: JsRequest,
+        _signal: Option<JsObject>,
         _context: &RefCell<&mut Context>,
     ) -> JsResult<JsResponse> {
         let client = self.client.clone();
