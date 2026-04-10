@@ -310,7 +310,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -321,7 +321,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -535,7 +535,7 @@ dependencies = [
 [[package]]
 name = "boa_ast"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#352ec3dd2e814e9b2b5ee322c684605533b96344"
+source = "git+https://github.com/boa-dev/boa#d6d76d86e9e18fca07f318f1db434cc8abffaf14"
 dependencies = [
  "bitflags",
  "boa_interner",
@@ -550,7 +550,7 @@ dependencies = [
 [[package]]
 name = "boa_engine"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#352ec3dd2e814e9b2b5ee322c684605533b96344"
+source = "git+https://github.com/boa-dev/boa#d6d76d86e9e18fca07f318f1db434cc8abffaf14"
 dependencies = [
  "aligned-vec",
  "arrayvec",
@@ -606,7 +606,7 @@ dependencies = [
 [[package]]
 name = "boa_gc"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#352ec3dd2e814e9b2b5ee322c684605533b96344"
+source = "git+https://github.com/boa-dev/boa#d6d76d86e9e18fca07f318f1db434cc8abffaf14"
 dependencies = [
  "arrayvec",
  "boa_macros",
@@ -619,7 +619,7 @@ dependencies = [
 [[package]]
 name = "boa_interner"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#352ec3dd2e814e9b2b5ee322c684605533b96344"
+source = "git+https://github.com/boa-dev/boa#d6d76d86e9e18fca07f318f1db434cc8abffaf14"
 dependencies = [
  "boa_gc",
  "boa_macros",
@@ -634,7 +634,7 @@ dependencies = [
 [[package]]
 name = "boa_macros"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#352ec3dd2e814e9b2b5ee322c684605533b96344"
+source = "git+https://github.com/boa-dev/boa#d6d76d86e9e18fca07f318f1db434cc8abffaf14"
 dependencies = [
  "cfg-if",
  "cow-utils",
@@ -647,7 +647,7 @@ dependencies = [
 [[package]]
 name = "boa_parser"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#352ec3dd2e814e9b2b5ee322c684605533b96344"
+source = "git+https://github.com/boa-dev/boa#d6d76d86e9e18fca07f318f1db434cc8abffaf14"
 dependencies = [
  "bitflags",
  "boa_ast",
@@ -664,7 +664,7 @@ dependencies = [
 [[package]]
 name = "boa_runtime"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#352ec3dd2e814e9b2b5ee322c684605533b96344"
+source = "git+https://github.com/boa-dev/boa#d6d76d86e9e18fca07f318f1db434cc8abffaf14"
 dependencies = [
  "base64",
  "boa_engine",
@@ -683,7 +683,7 @@ dependencies = [
 [[package]]
 name = "boa_string"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#352ec3dd2e814e9b2b5ee322c684605533b96344"
+source = "git+https://github.com/boa-dev/boa#d6d76d86e9e18fca07f318f1db434cc8abffaf14"
 dependencies = [
  "fast-float2",
  "itoa",
@@ -1298,7 +1298,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2298,7 +2298,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -2871,7 +2871,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2935,7 +2935,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 1.3.1",
+ "proc-macro-crate 3.3.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -3426,7 +3426,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -3464,7 +3464,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -3803,7 +3803,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3862,7 +3862,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4187,7 +4187,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 [[package]]
 name = "small_btree"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#352ec3dd2e814e9b2b5ee322c684605533b96344"
+source = "git+https://github.com/boa-dev/boa#d6d76d86e9e18fca07f318f1db434cc8abffaf14"
 dependencies = [
  "arrayvec",
 ]
@@ -4215,7 +4215,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4358,7 +4358,7 @@ dependencies = [
 [[package]]
 name = "tag_ptr"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#352ec3dd2e814e9b2b5ee322c684605533b96344"
+source = "git+https://github.com/boa-dev/boa#d6d76d86e9e18fca07f318f1db434cc8abffaf14"
 
 [[package]]
 name = "tap"
@@ -4376,7 +4376,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4787,7 +4787,7 @@ dependencies = [
 [[package]]
 name = "tracing-batteries"
 version = "0.1.0"
-source = "git+https://github.com/sierrasoftworks/tracing-batteries-rs.git#a2186fe77d8dcff95101d53bd0ba3d7b9357eadd"
+source = "git+https://github.com/sierrasoftworks/tracing-batteries-rs.git#04829386d87b477adf07cd363708a562efcb7b0e"
 dependencies = [
  "chrono",
  "hex",
@@ -5303,7 +5303,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
