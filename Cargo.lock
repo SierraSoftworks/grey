@@ -501,9 +501,9 @@ dependencies = [
 
 [[package]]
 name = "bitflags"
-version = "2.11.0"
+version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
+checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
 
 [[package]]
 name = "block-buffer"
@@ -535,7 +535,7 @@ dependencies = [
 [[package]]
 name = "boa_ast"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#3cec5e6bc4454077cb8d65b537d368d633137e0e"
+source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
 dependencies = [
  "bitflags",
  "boa_interner",
@@ -550,7 +550,7 @@ dependencies = [
 [[package]]
 name = "boa_engine"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#3cec5e6bc4454077cb8d65b537d368d633137e0e"
+source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
 dependencies = [
  "aligned-vec",
  "arrayvec",
@@ -572,7 +572,7 @@ dependencies = [
  "float16",
  "futures-concurrency",
  "futures-lite",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.0",
  "icu_calendar",
  "icu_normalizer",
  "indexmap",
@@ -606,24 +606,24 @@ dependencies = [
 [[package]]
 name = "boa_gc"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#3cec5e6bc4454077cb8d65b537d368d633137e0e"
+source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
 dependencies = [
  "arrayvec",
  "boa_macros",
  "boa_string",
  "either",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.0",
  "thin-vec",
 ]
 
 [[package]]
 name = "boa_interner"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#3cec5e6bc4454077cb8d65b537d368d633137e0e"
+source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
 dependencies = [
  "boa_gc",
  "boa_macros",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.0",
  "indexmap",
  "once_cell",
  "phf",
@@ -634,7 +634,7 @@ dependencies = [
 [[package]]
 name = "boa_macros"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#3cec5e6bc4454077cb8d65b537d368d633137e0e"
+source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
 dependencies = [
  "cfg-if",
  "cow-utils",
@@ -647,7 +647,7 @@ dependencies = [
 [[package]]
 name = "boa_parser"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#3cec5e6bc4454077cb8d65b537d368d633137e0e"
+source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
 dependencies = [
  "bitflags",
  "boa_ast",
@@ -664,7 +664,7 @@ dependencies = [
 [[package]]
 name = "boa_runtime"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#3cec5e6bc4454077cb8d65b537d368d633137e0e"
+source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
 dependencies = [
  "base64",
  "boa_engine",
@@ -683,7 +683,7 @@ dependencies = [
 [[package]]
 name = "boa_string"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#3cec5e6bc4454077cb8d65b537d368d633137e0e"
+source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
 dependencies = [
  "fast-float2",
  "itoa",
@@ -2105,6 +2105,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashbrown"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f467dd6dccf739c208452f8014c75c18bb8301b050ad1cfb27153803edb0f51"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash 0.2.0",
+]
+
+[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2298,7 +2309,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -2544,12 +2555,12 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.13.1"
+version = "2.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45a8a2b9cb3e0b0c1803dbb0758ffac5de2f425b23c28f518faabd9d805342ff"
+checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.0",
  "serde",
  "serde_core",
 ]
@@ -2935,7 +2946,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 1.3.1",
+ "proc-macro-crate 3.3.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -3426,7 +3437,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -3464,7 +3475,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -4187,7 +4198,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 [[package]]
 name = "small_btree"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#3cec5e6bc4454077cb8d65b537d368d633137e0e"
+source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
 dependencies = [
  "arrayvec",
 ]
@@ -4358,7 +4369,7 @@ dependencies = [
 [[package]]
 name = "tag_ptr"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#3cec5e6bc4454077cb8d65b537d368d633137e0e"
+source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
 
 [[package]]
 name = "tap"
@@ -4398,9 +4409,9 @@ dependencies = [
 
 [[package]]
 name = "thin-vec"
-version = "0.2.14"
+version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "144f754d318415ac792f9d69fc87abbbfc043ce2ef041c60f16ad828f638717d"
+checksum = "259cdf8ed4e4aca6f1e9d011e10bd53f524a2d0637d7b28450f6c64ac298c4c6"
 
 [[package]]
 name = "thiserror"
