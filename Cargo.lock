@@ -535,7 +535,7 @@ dependencies = [
 [[package]]
 name = "boa_ast"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
+source = "git+https://github.com/boa-dev/boa#3ee2b71a306334c2b2a0dcc20ac4b5e1c5a71558"
 dependencies = [
  "bitflags",
  "boa_interner",
@@ -550,7 +550,7 @@ dependencies = [
 [[package]]
 name = "boa_engine"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
+source = "git+https://github.com/boa-dev/boa#3ee2b71a306334c2b2a0dcc20ac4b5e1c5a71558"
 dependencies = [
  "aligned-vec",
  "arrayvec",
@@ -606,7 +606,7 @@ dependencies = [
 [[package]]
 name = "boa_gc"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
+source = "git+https://github.com/boa-dev/boa#3ee2b71a306334c2b2a0dcc20ac4b5e1c5a71558"
 dependencies = [
  "arrayvec",
  "boa_macros",
@@ -619,7 +619,7 @@ dependencies = [
 [[package]]
 name = "boa_interner"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
+source = "git+https://github.com/boa-dev/boa#3ee2b71a306334c2b2a0dcc20ac4b5e1c5a71558"
 dependencies = [
  "boa_gc",
  "boa_macros",
@@ -634,7 +634,7 @@ dependencies = [
 [[package]]
 name = "boa_macros"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
+source = "git+https://github.com/boa-dev/boa#3ee2b71a306334c2b2a0dcc20ac4b5e1c5a71558"
 dependencies = [
  "cfg-if",
  "cow-utils",
@@ -647,7 +647,7 @@ dependencies = [
 [[package]]
 name = "boa_parser"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
+source = "git+https://github.com/boa-dev/boa#3ee2b71a306334c2b2a0dcc20ac4b5e1c5a71558"
 dependencies = [
  "bitflags",
  "boa_ast",
@@ -664,7 +664,7 @@ dependencies = [
 [[package]]
 name = "boa_runtime"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
+source = "git+https://github.com/boa-dev/boa#3ee2b71a306334c2b2a0dcc20ac4b5e1c5a71558"
 dependencies = [
  "base64",
  "boa_engine",
@@ -683,7 +683,7 @@ dependencies = [
 [[package]]
 name = "boa_string"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
+source = "git+https://github.com/boa-dev/boa#3ee2b71a306334c2b2a0dcc20ac4b5e1c5a71558"
 dependencies = [
  "fast-float2",
  "itoa",
@@ -2946,7 +2946,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.3.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -4198,7 +4198,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 [[package]]
 name = "small_btree"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
+source = "git+https://github.com/boa-dev/boa#3ee2b71a306334c2b2a0dcc20ac4b5e1c5a71558"
 dependencies = [
  "arrayvec",
 ]
@@ -4369,7 +4369,7 @@ dependencies = [
 [[package]]
 name = "tag_ptr"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#da570fd74bb6cd5b0fc01363451eb710b7ab5a0c"
+source = "git+https://github.com/boa-dev/boa#3ee2b71a306334c2b2a0dcc20ac4b5e1c5a71558"
 
 [[package]]
 name = "tap"
@@ -4798,7 +4798,7 @@ dependencies = [
 [[package]]
 name = "tracing-batteries"
 version = "0.1.0"
-source = "git+https://github.com/sierrasoftworks/tracing-batteries-rs.git#bed8b5a77113c546e29c9b440ad0edc894c3b818"
+source = "git+https://github.com/sierrasoftworks/tracing-batteries-rs.git#f25451e207bb38c623a54bc69e94baa2157b3b1f"
 dependencies = [
  "chrono",
  "hex",
