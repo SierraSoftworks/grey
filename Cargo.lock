@@ -2290,7 +2290,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -3417,7 +3417,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -3455,7 +3455,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tracing",
  "windows-sys 0.52.0",
 ]
@@ -4778,7 +4778,7 @@ dependencies = [
 [[package]]
 name = "tracing-batteries"
 version = "0.1.0"
-source = "git+https://github.com/sierrasoftworks/tracing-batteries-rs.git#b56b3f113f8e0e1a8e2268b29e77e2cd0b53ea76"
+source = "git+https://github.com/sierrasoftworks/tracing-batteries-rs.git#cf0fbabb68054d972621da1f1f84657e1ec646ff"
 dependencies = [
  "chrono",
  "hex",
