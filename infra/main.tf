@@ -35,6 +35,11 @@ variable "location_override" {
   default     = "West Europe"
 }
 
+variable "cloudflare_account_id" {
+  description = "The Cloudflare account ID to use when discovering the DNS zone."
+  type        = string
+}
+
 locals {
   website_location = var.location_override != "" ? var.location_override : var.location
 }
