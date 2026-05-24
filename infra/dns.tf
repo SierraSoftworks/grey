@@ -13,3 +13,36 @@ resource "azurerm_dns_cname_record" "cname" {
     azurerm_static_web_app.website
   ]
 }
+
+data "cloudflare_zones" "root_domain" {
+  account = {
+    id = var.cloudflare_account_id
+  }
+
+  name = var.root-domain
+}
+
+resource "cloudflare_dns_record" "cname" {
+  zone_id = data.cloudflare_zones.root_domain.result[0].id
+  name    = var.app-name
+  type    = "CNAME"
+  ttl     = 300
+  content = azurerm_static_web_app.website.default_host_name
+  proxied = true
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "cloudflare_dns_record" "dnsauth" {
+  zone_id = data.cloudflare_zones.root_domain.result[0].id
+  name    = "_dnsauth.${var.app-name}"
+  type    = "TXT"
+  ttl     = 300
+  content = azurerm_static_web_app_custom_domain.domain.validation_token
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
