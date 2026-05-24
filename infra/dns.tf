@@ -26,7 +26,7 @@ resource "cloudflare_dns_record" "cname" {
   zone_id = data.cloudflare_zones.root_domain.result[0].id
   name    = var.app-name
   type    = "CNAME"
-  ttl     = 300
+  ttl     = 1
   content = azurerm_static_web_app.website.default_host_name
   proxied = true
 
@@ -40,7 +40,7 @@ resource "cloudflare_dns_record" "dnsauth" {
   name    = "_dnsauth.${var.app-name}"
   type    = "TXT"
   ttl     = 300
-  content = azurerm_static_web_app_custom_domain.domain.validation_token
+  content = trimspace(azurerm_static_web_app_custom_domain.domain.validation_token)
 
   lifecycle {
     prevent_destroy = true
