@@ -40,7 +40,7 @@ resource "cloudflare_dns_record" "dnsauth" {
   name    = "_dnsauth.${var.app-name}"
   type    = "TXT"
   ttl     = 300
-  content = trimspace(azurerm_static_web_app_custom_domain.domain.validation_token)
+  content = coalesce(trimspace(azurerm_static_web_app_custom_domain.domain.validation_token), "validated")
 
   lifecycle {
     prevent_destroy = true
