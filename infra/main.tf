@@ -1,5 +1,3 @@
-data "azuread_client_config" "current" {}
-
 variable "app-name" {
   description = "The name of the static web app to create."
   type        = string
@@ -12,34 +10,13 @@ variable "root-domain" {
   default     = "sierrasoftworks.com"
 }
 
-variable "location" {
-  description = "The location that the static web app should be deployed."
-  default     = "North Europe"
-}
-
-variable "resource_group" {
-  description = "The name of the resource group to deploy into."
-  type        = string
-  default     = "app-grey"
-}
-
 variable "tags" {
   description = "The tags which should apply to the resource."
   type        = map(string)
   default     = {}
 }
 
-variable "location_override" {
-  description = "The location into which the website itself should be deployed, if different to the default."
-  type        = string
-  default     = "West Europe"
-}
-
 variable "cloudflare_account_id" {
   description = "The Cloudflare account ID to use when discovering the DNS zone."
   type        = string
-}
-
-locals {
-  website_location = var.location_override != "" ? var.location_override : var.location
 }
