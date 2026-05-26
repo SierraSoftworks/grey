@@ -46,9 +46,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let telemetry = tracing_batteries::Session::new("grey", version!("v"))
         .with_battery(tracing_batteries::OpenTelemetry::new(""))
-        .with_battery(tracing_batteries::Medama::new(
+        .with_battery(tracing_batteries::Umami::new(
             "https://analytics.sierrasoftworks.com",
-        ));
+            "75074736-b79c-4060-aa8e-a3297b0e61ba",
+        ).with_initial_page("/.app/"));
 
     let state = state::State::new(&args.config).await?;
 
