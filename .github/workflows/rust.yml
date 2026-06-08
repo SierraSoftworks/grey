@@ -88,12 +88,10 @@ jobs:
           components: llvm-tools-preview
 
       - name: install protoc
-        run: |
-          Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v${env:PROTOC_VERSION}/protoc-${env:PROTOC_VERSION}-linux-x86_64.zip
-          Expand-Archive /tmp/protoc.zip -DestinationPath ../tools
-          Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
-          Get-Content $env:GITHUB_PATH
-        shell: pwsh
+        uses: arduino/setup-protoc@v3
+        with:
+          version: ${{ env.PROTOC_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: cargo install grcov
         uses: SierraSoftworks/setup-grcov@v1
@@ -158,10 +156,6 @@ jobs:
             run_on: windows-latest
             target: x86_64-pc-windows-msvc
             extension: .exe
-            setup: |
-              Invoke-WebRequest -OutFile protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v${env:PROTOC_VERSION}/protoc-${env:PROTOC_VERSION}-win64.zip
-              Expand-Archive protoc.zip -DestinationPath ../tools
-              Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
 
           # Linux builds
           - arch: amd64
@@ -169,10 +163,6 @@ jobs:
             os: linux
             target: x86_64-unknown-linux-gnu
             test: true
-            setup: |
-              Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v${env:PROTOC_VERSION}/protoc-${env:PROTOC_VERSION}-linux-x86_64.zip
-              Expand-Archive /tmp/protoc.zip -DestinationPath ../tools
-              Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
           - arch: "arm64"
             os: linux
             run_on: ubuntu-latest
@@ -185,24 +175,18 @@ jobs:
             run_on: macos-latest
             os: darwin
             target: x86_64-apple-darwin
-            setup: |
-              Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v${env:PROTOC_VERSION}/protoc-${env:PROTOC_VERSION}-osx-x86_64.zip
-              Expand-Archive /tmp/protoc.zip -DestinationPath ../tools
-              Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
           - arch: arm64
             run_on: macos-latest
             os: darwin
             target: aarch64-apple-darwin
-            setup: |
-              Invoke-WebRequest -OutFile /tmp/protoc.zip -Uri https://github.com/protocolbuffers/protobuf/releases/download/v${env:PROTOC_VERSION}/protoc-${env:PROTOC_VERSION}-osx-x86_64.zip
-              Expand-Archive /tmp/protoc.zip -DestinationPath ../tools
-              Add-Content -Path $env:GITHUB_PATH -Value "$((get-item ./).parent.fullname)/tools/bin"
 
     steps:
-      - name: setup dependencies
-        run: ${{ matrix.setup }}
-        shell: pwsh
-        if: matrix.setup
+      - name: install protoc
+        uses: arduino/setup-protoc@v3
+        if: ${{ !matrix.cross }}
+        with:
+          version: ${{ env.PROTOC_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get Rust Stable
         uses: actions-rs/toolchain@v1.0.7
