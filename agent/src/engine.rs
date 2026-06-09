@@ -62,19 +62,13 @@ impl Engine {
                 cluster::Aes256Gcm,
                 self.state.clone(),
             )
-            .await?;
+            .await?
+            .with_max_message_size(self.state.get_config().cluster.max_message_size);
             let cluster_client = cluster::GossipClient::new(self.state.clone(), cluster_transport)
                 .with_gossip_factor(self.state.get_config().cluster.gossip_factor)
                 .with_gossip_interval(self.state.get_config().cluster.gossip_interval)
-                .with_seed_peers(
-                    self.state
-                        .get_config()
-                        .cluster
-                        .peers
-                        .iter()
-                        .filter_map(|p| p.parse().ok())
-                        .collect(),
-                );
+                .with_seed_resolve_interval(self.state.get_config().cluster.peer_resolve_interval)
+                .with_seed_peers(self.state.get_config().cluster.peers.clone());
 
             tokio::task::spawn_local(async move {
                 cluster_client.run().await;

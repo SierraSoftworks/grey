@@ -4,6 +4,10 @@ use serde::{Serialize, de::DeserializeOwned};
 use tokio::net::UdpSocket;
 use crate::cluster::transport::encryption::{EncryptionKeyProvider, EncryptionProvider};
 
+/// Largest UDP datagram payload we will ever receive (IPv4: 65535 - 20-byte IP header - 8-byte UDP
+/// header). Used to size the receive buffer; the per-message send limit is configurable.
+const MAX_DATAGRAM_SIZE: usize = 65507;
+
 pub struct UdpGossipTransport<E, K>
 where
     E: EncryptionProvider,
@@ -12,6 +16,9 @@ where
     socket: Arc<UdpSocket>,
     encryption_provider: E,
     key_provider: K,
+    /// Maximum size, in bytes, of an encrypted datagram this transport will emit. Larger messages
+    /// are partitioned across rounds to fit. Lower it below the path MTU to avoid IP fragmentation.
+    max_message_size: usize,
 }
 
 impl<E, K> UdpGossipTransport<E, K>
@@ -31,7 +38,16 @@ where
             socket: Arc::new(socket),
             encryption_provider,
             key_provider,
+            max_message_size: MAX_DATAGRAM_SIZE,
         })
+    }
+
+    /// Sets the maximum size, in bytes, of an encrypted datagram this transport will emit. Defaults
+    /// to [`MAX_DATAGRAM_SIZE`] when not called. Lower it below the path MTU to avoid IP
+    /// fragmentation; messages larger than this are partitioned across gossip rounds.
+    pub fn with_max_message_size(mut self, msg_size: usize) -> Self {
+        self.max_message_size = msg_size;
+        self
     }
 }
 
@@ -39,27 +55,56 @@ impl <E, K, P, T> GossipTransport<P, T> for UdpGossipTransport<E, K>
 where
     E: EncryptionProvider,
     K: EncryptionKeyProvider<Key = E::Key>,
-    P: Eq + Hash + Serialize + DeserializeOwned + Send + 'static,
+    P: Eq + Hash + Clone + Serialize + DeserializeOwned + Send + 'static,
     T: Versioned + Serialize + DeserializeOwned + Send + 'static,
+    T::Diff: Versioned,
 {
     type Address = SocketAddr;
+
+    async fn resolve(
+        &self,
+        address: &str,
+    ) -> Result<Vec<Self::Address>, Box<dyn std::error::Error>> {
+        // `lookup_host` accepts both `ip:port` and `host:port` specifications, performing a DNS
+        // lookup for the latter, and yields one entry per resolved address (e.g. both A and AAAA
+        // records).
+        Ok(tokio::net::lookup_host(address).await?.collect())
+    }
 
     async fn send(
         &self,
         address: Self::Address,
         msg: Message<P, T>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let data = rmp_serde::to_vec(&msg)?;
-        let encrypted_data = self.encryption_provider.encrypt(&self.key_provider, &data)?;
-        self.socket.send_to(&encrypted_data, address).await?;
-        Ok(())
+        let mut msg = msg;
+        loop {
+            let data = rmp_serde::to_vec(&msg)?;
+            let encrypted = self.encryption_provider.encrypt(&self.key_provider, &data)?;
+
+            // Send once the encrypted datagram fits the frame, or once the message has been reduced
+            // to its digest and cannot be partitioned further. The latter is best effort: `send_to`
+            // surfaces any oversize error (e.g. a digest larger than the frame) to the caller.
+            if encrypted.len() <= self.max_message_size || msg.is_empty() {
+                self.socket.send_to(&encrypted, address).await?;
+                return Ok(());
+            }
+
+            // Estimate how many of the current entries will fit from the measured oversize ratio.
+            // Integer division undershoots, which we prefer: gossip is frequent, so sending a few
+            // fewer entries now is cheaper than extra serialization passes chasing the exact
+            // maximum. Re-measuring each pass lets the estimate self-correct for fixed overhead
+            // (metadata, digest) so it converges in one or two iterations.
+            let items = msg.len();
+            let keep = (items.saturating_mul(self.max_message_size) / encrypted.len()).min(items - 1);
+            msg = msg.partition(keep);
+        }
     }
 
     async fn try_receive(
         &self,
     ) -> Result<Option<(Self::Address, Message<P, T>)>, Box<dyn std::error::Error>>
     {
-        let mut buf = [0; 65507];
+        let mut buf = [0; MAX_DATAGRAM_SIZE];
         // Await the next datagram rather than polling with `try_recv_from`; this removes the
         // ~100 wakeups/s-per-node busy-poll and the up-to-10ms hop latency it incurred.
         let (size, addr) = self.socket.recv_from(&mut buf).await?;
@@ -89,6 +134,99 @@ mod tests {
         let addr_str = format!("127.0.0.1:{}", port);
         let addr = addr_str.parse().unwrap();
         (addr_str, addr)
+    }
+
+    #[tokio::test]
+    async fn send_partitions_oversized_message_keeping_oldest() {
+        let key_provider = StaticKeyProvider::new([7u8; 32]);
+        let (addr1_str, _addr1) = random_local_addr();
+        let (addr2_str, addr2) = random_local_addr();
+
+        // A deliberately small frame so a modest message must be partitioned to fit.
+        let frame = 300usize;
+        let sender = UdpGossipTransport::new(&addr1_str, Aes256Gcm, key_provider.clone()).await.unwrap()
+            .with_max_message_size(frame);
+        let receiver = UdpGossipTransport::new(&addr2_str, Aes256Gcm, key_provider).await.unwrap();
+
+        let peer = TestPeer("p".to_string());
+        let total = 50u64;
+        let mut diff = ClusterStateDiff::new();
+        for v in 0..total {
+            diff.update(peer.clone(), format!("field-{v:03}"), LastWriteWinsValue::new(v as i32).with_version(v));
+        }
+        let msg = Message::<TestPeer, LastWriteWinsValue<i32>>::Ack(MessageMetadata::new(peer.clone()), diff);
+        assert_eq!(msg.len(), total as usize);
+
+        sender.send(addr2, msg).await.unwrap();
+
+        let (_src, received): (SocketAddr, Message<TestPeer, LastWriteWinsValue<i32>>) =
+            timeout(Duration::from_secs(1), async {
+                loop {
+                    if let Some(x) = receiver.try_receive().await.unwrap() {
+                        break x;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            }).await.expect("timed out waiting for partitioned message");
+
+        match received {
+            Message::Ack(_, diff) => {
+                let len = diff.len();
+                assert!(len > 0 && len < total as usize, "message must be partitioned (got {len} of {total})");
+                let inner = diff.into_inner();
+                let fields = &inner[&peer];
+                assert!(fields.contains_key("field-000"), "the oldest entry must be kept");
+                assert!(
+                    !fields.contains_key(&format!("field-{:03}", total - 1)),
+                    "the newest entry must be dropped and re-sent later"
+                );
+            }
+            other => panic!("expected Ack, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn udp_gossip_transport_resolves_addresses() {
+        let (addr_str, _addr) = random_local_addr();
+        let transport: UdpGossipTransport<_, _> =
+            UdpGossipTransport::new(&addr_str, Aes256Gcm, StaticKeyProvider::new([7u8; 32]))
+                .await
+                .unwrap();
+
+        // IP literals should resolve to themselves without any DNS lookup.
+        let resolved = GossipTransport::<TestPeer, LastWriteWinsValue<i32>>::resolve(
+            &transport,
+            "127.0.0.1:8888",
+        )
+        .await
+        .unwrap();
+        assert_eq!(resolved, vec!["127.0.0.1:8888".parse().unwrap()]);
+
+        // Hostnames should be resolved via DNS; `localhost` is guaranteed to resolve locally.
+        let resolved = GossipTransport::<TestPeer, LastWriteWinsValue<i32>>::resolve(
+            &transport,
+            "localhost:8888",
+        )
+        .await
+        .unwrap();
+        assert!(
+            resolved.iter().all(|addr| addr.ip().is_loopback()),
+            "expected localhost to resolve to loopback addresses, got {resolved:?}"
+        );
+        assert!(
+            resolved.iter().any(|addr| addr.port() == 8888),
+            "expected resolved addresses to preserve the requested port, got {resolved:?}"
+        );
+
+        // Unparseable specifications should surface an error rather than silently yielding nothing.
+        assert!(
+            GossipTransport::<TestPeer, LastWriteWinsValue<i32>>::resolve(
+                &transport,
+                "not a valid address"
+            )
+            .await
+            .is_err()
+        );
     }
 
     #[tokio::test]

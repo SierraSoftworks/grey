@@ -88,15 +88,22 @@ cluster:
 ```
 
 #### peers
-Initial peer addresses for cluster discovery. These should be IP addresses which
+Initial peer addresses for cluster discovery. These should be addresses which
 are accessible from the current node (either over a private network, a VPN, or over
 the public internet).
+
+Each entry may be either an `ip:port` literal or a `hostname:port` value. Hostnames
+are resolved via DNS, which makes it possible to use dynamic naming systems such as
+Tailscale + MagicDNS, Kubernetes service names, or Docker Compose service aliases.
+DNS names are re-resolved periodically in the background, so peers whose IP addresses
+change over time will continue to be reachable without restarting Grey.
 
 ```yaml
 cluster:
   peers:
     - 10.0.0.2:8888
-    - 10.0.0.3:8888
+    - grey-worker-1.example.com:8888
+    - my-node.tailnet-1234.ts.net:8888
 ```
 
 #### secrets
@@ -196,6 +203,34 @@ For clusters with N nodes, optimal gossip_factor is typically `log₂(N) + 1`:
 - 2-4 nodes: gossip_factor = 2
 - 5-8 nodes: gossip_factor = 3  
 - 9-16 nodes: gossip_factor = 4
+
+#### max_message_size
+The maximum size, in bytes, of an encrypted gossip datagram this node will emit. Messages larger
+than this (for example a big catch-up after a node has been offline) are automatically split across
+multiple gossip rounds, sending the oldest un-propagated records first.
+
+The default of 8&nbsp;KiB is deliberately conservative: a lost datagram costs little to re-send, yet
+each round still carries plenty of state. Raise it (up to the UDP maximum of `65507`) for fewer
+rounds on reliable links, or lower it below your path MTU (for example to around `1400`) so each
+datagram fits a single IP packet and isn't dropped by fragmentation-averse middleboxes.
+
+```yaml
+cluster:
+  max_message_size: 8192  # Default (8 KiB)
+```
+
+#### peer_resolve_interval
+How frequently the DNS names configured in `peers` are re-resolved in the background.
+
+Seed peers that are configured as hostnames are resolved on a background loop (rather than
+on every gossip round) so that DNS lookups never add latency to the gossip hot path. Lowering
+this value makes Grey react more quickly to seed peers whose IP addresses change, at the cost
+of slightly more frequent DNS lookups. IP-literal peers are unaffected by this setting.
+
+```yaml
+cluster:
+  peer_resolve_interval: 60s  # Default
+```
 
 #### gc_interval
 How frequently to run the garbage collector to remove stale peers and expired probes.
