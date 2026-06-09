@@ -256,7 +256,8 @@ impl State {
 
             let mut dropped_probe_records = 0;
             table_fields.retain(|(_, probe_name), (version, _data)| {
-                let last_updated = chrono::DateTime::from_timestamp(version as i64, 0).unwrap_or_default();
+                // `version` is the probe's `last_updated` in milliseconds (see `Versioned for Probe`).
+                let last_updated = chrono::DateTime::from_timestamp_millis(version as i64).unwrap_or_default();
                 if last_updated >= history_expiry_threshold {
                     true
                 } else {
@@ -489,7 +490,9 @@ impl Versioned for Probe {
     type Diff = Probe;
 
     fn version(&self) -> u64 {
-        self.last_updated.timestamp() as u64
+        // Millisecond granularity: two updates within the same wall-clock second produce distinct
+        // versions, so the second one is not silently skipped by the digest/diff comparison.
+        self.last_updated.timestamp_millis() as u64
     }
 
     fn diff(&self, version: u64) -> Option<Self::Diff>
@@ -524,6 +527,70 @@ mod tests {
     use super::*;
     use crate::cluster::{Aes256Gcm, EncryptionKeyProvider, EncryptionProvider};
     use base64::prelude::*;
+
+    fn probe_at(name: &str, when: chrono::DateTime<chrono::Utc>) -> ProbeState {
+        Probe {
+            name: name.into(),
+            tags: HashMap::new(),
+            last_updated: when,
+            history: Vec::new(),
+            observations: HashMap::new(),
+        }
+    }
+
+    /// Two updates within the same wall-clock second must produce distinct versions, so the later
+    /// one is diffable rather than silently skipped.
+    #[test]
+    fn version_has_millisecond_granularity() {
+        let base = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        let earlier = probe_at("p", base);
+        let later = probe_at("p", base + chrono::Duration::milliseconds(1));
+
+        assert!(later.version() > earlier.version(), "a 1ms-newer update must advance the version");
+        assert!(later.diff(earlier.version()).is_some(), "the newer update must be diffable");
+        assert!(earlier.diff(earlier.version()).is_none(), "an unchanged probe has nothing to diff");
+    }
+
+    /// GC must interpret the stored version as milliseconds; otherwise a millisecond timestamp read
+    /// as seconds lands ~50000 years in the future and probes would never expire.
+    #[tokio::test]
+    async fn gc_expires_probes_using_millisecond_versions() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = State::test(dir.path().to_path_buf()).await;
+
+        let mut config = Config::test(&dir.path().to_path_buf());
+        config.cluster.gc_probe_expiry = std::time::Duration::from_secs(60);
+        *state.config.write().unwrap() = Arc::new(config);
+
+        let node = NodeID::new();
+        let stale_ms = (chrono::Utc::now() - chrono::Duration::hours(1)).timestamp_millis() as u64;
+        let fresh_ms = chrono::Utc::now().timestamp_millis() as u64;
+
+        {
+            let txn = state.database.begin_write().unwrap();
+            {
+                let mut table = txn.open_table(CLUSTER_FIELDS_TABLE).unwrap();
+                let stale = rmp_serde::to_vec_named(&probe_at("stale", chrono::Utc::now())).unwrap();
+                let fresh = rmp_serde::to_vec_named(&probe_at("fresh", chrono::Utc::now())).unwrap();
+                table.insert((node.into(), "stale".to_string()), (stale_ms, stale.as_slice())).unwrap();
+                table.insert((node.into(), "fresh".to_string()), (fresh_ms, fresh.as_slice())).unwrap();
+            }
+            txn.commit().unwrap();
+        }
+
+        state.gc().await.unwrap();
+
+        let txn = state.database.begin_read().unwrap();
+        let table = txn.open_table(CLUSTER_FIELDS_TABLE).unwrap();
+        assert!(
+            table.get((node.into(), "fresh".to_string())).unwrap().is_some(),
+            "a recent probe must be retained"
+        );
+        assert!(
+            table.get((node.into(), "stale".to_string())).unwrap().is_none(),
+            "an hour-old probe must expire under a 60s expiry (i.e. version read as milliseconds)"
+        );
+    }
 
     fn b64_key(byte: u8) -> String {
         BASE64_STANDARD.encode([byte; 32])
