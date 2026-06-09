@@ -26,6 +26,67 @@ const CLUSTER_FIELDS_TABLE: TableDefinition<(u128, String), (u64, &[u8])> =
 
 type ProbeState = Probe;
 
+/// Maximum serialized size, in bytes, of a single gossip delta. Held below the 65507-byte UDP
+/// datagram limit with headroom for the accompanying digest, message metadata, the 12-byte
+/// AES-GCM nonce, and the 16-byte authentication tag. Larger backlogs are drained over several
+/// gossip rounds rather than sent (and dropped) in one oversized datagram.
+const MAX_DELTA_BYTES: usize = 60_000;
+
+/// Largest `k` in `[0, n]` for which `fits(k)` holds, assuming `fits` is monotonic — `fits(0)` is
+/// true and once it becomes false it stays false. Uses binary search, so it evaluates `fits`
+/// only `O(log n)` times (each evaluation is one serialization attempt in [`bounded_delta`]).
+fn largest_fitting_prefix(n: usize, mut fits: impl FnMut(usize) -> bool) -> usize {
+    let (mut lo, mut hi) = (0usize, n);
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        if fits(mid) {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
+}
+
+/// Builds a [`cluster::ClusterStateDiff`] from `candidates` (each `(version, node, probe, diff)`),
+/// including only as many of the *stalest* entries as fit within `budget` bytes once serialized.
+///
+/// Entries are sent stalest-first (lowest version) so the oldest un-propagated state drains first;
+/// the remainder is carried by subsequent gossip rounds as the peer's digest advances. A single
+/// entry larger than `budget` is still sent on its own (with a warning) so it cannot stall forever.
+fn bounded_delta(
+    mut candidates: Vec<(u64, NodeID, String, ProbeState)>,
+    budget: usize,
+) -> cluster::ClusterStateDiff<NodeID, ProbeState> {
+    candidates.sort_by_key(|(version, _, _, _)| *version);
+
+    // Binary-searched so we serialize O(log n) prefixes rather than re-measuring after every entry.
+    let serialized_len = |count: usize| -> usize {
+        let mut delta = cluster::ClusterStateDiff::<NodeID, ProbeState>::new();
+        for (_, peer, probe, diff) in &candidates[..count] {
+            delta.update(peer.clone(), probe.clone(), diff.clone());
+        }
+        rmp_serde::to_vec(&delta).map(|bytes| bytes.len()).unwrap_or(usize::MAX)
+    };
+
+    let mut take = largest_fitting_prefix(candidates.len(), |count| serialized_len(count) <= budget);
+    if take == 0 && !candidates.is_empty() {
+        let (_, peer, probe, _) = &candidates[0];
+        warn!(
+            name: "state.diff.oversized",
+            { peer.id = %peer, probe.name = %probe, budget = budget },
+            "Probe state exceeds the gossip datagram budget; sending it alone (it may be dropped by the network)."
+        );
+        take = 1;
+    }
+
+    let mut delta = cluster::ClusterStateDiff::<NodeID, ProbeState>::new();
+    for (_, peer, probe, diff) in candidates.into_iter().take(take) {
+        delta.update(peer, probe, diff);
+    }
+    delta
+}
+
 #[derive(Clone)]
 pub struct State {
     config_path: PathBuf,
@@ -411,11 +472,12 @@ impl GossipStore for State {
         digest: ClusterStateDigest<Self::Id>,
     ) -> Result<cluster::ClusterStateDiff<Self::Id, Self::State>, Box<dyn Error>>
     {
-        let mut delta = cluster::ClusterStateDiff::new();
-
         let txn = self.database.begin_read()?;
         let table = txn.open_table(CLUSTER_FIELDS_TABLE)?;
         let iter = table.iter()?;
+
+        // Collect every field the remote is behind on, computing each per-field diff exactly once.
+        let mut candidates: Vec<(u64, Self::Id, String, Self::State)> = Vec::new();
         for (key, value) in iter.filter_map(|r| r.ok()) {
             let (node_id, probe) = key.value();
             let (version, data) = value.value();
@@ -430,9 +492,13 @@ impl GossipStore for State {
             let data: ProbeState = rmp_serde::from_slice(data)
                 .map_err(|e| format!("Failed to parse probe state for diff: {e:?}"))?;
             if let Some(diff) = data.diff(remote_version) {
-                delta.update(peer.clone(), probe, diff);
+                candidates.push((version, peer, probe, diff));
             }
         }
+
+        // Bound the delta to a single UDP datagram; the rest drains over subsequent rounds so a
+        // large catch-up (e.g. after a partition) can't permanently fail to deliver.
+        let delta = bounded_delta(candidates, MAX_DELTA_BYTES);
 
         trace!(name: "state.diff", { host.node_id = %self.node_id, digest = %digest, delta = ?delta }, "Composed new cluster state diff.");
 
@@ -513,5 +579,85 @@ impl Versioned for Probe {
 
     fn apply(&mut self, diff: &Self::Diff) {
         self.merge(diff);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn largest_fitting_prefix_finds_boundary() {
+        // Each entry "costs" 3; with a budget of 10 the largest fitting prefix is 3 (cost 9).
+        assert_eq!(largest_fitting_prefix(5, |k| 3 * k <= 10), 3);
+    }
+
+    #[test]
+    fn largest_fitting_prefix_all_or_none() {
+        assert_eq!(largest_fitting_prefix(4, |_| true), 4);
+        assert_eq!(largest_fitting_prefix(4, |k| k == 0), 0);
+    }
+
+    fn probe_state(name: &str, version_secs: i64) -> ProbeState {
+        Probe {
+            name: name.into(),
+            tags: HashMap::new(),
+            last_updated: chrono::DateTime::from_timestamp(version_secs, 0).unwrap(),
+            history: Vec::new(),
+            observations: HashMap::new(),
+        }
+    }
+
+    fn serialized_size(entries: &[(NodeID, &str, ProbeState)]) -> usize {
+        let mut delta = cluster::ClusterStateDiff::<NodeID, ProbeState>::new();
+        for (peer, name, state) in entries {
+            delta.update(*peer, (*name).to_string(), state.clone());
+        }
+        rmp_serde::to_vec(&delta).unwrap().len()
+    }
+
+    #[test]
+    fn bounded_delta_sends_stalest_first_within_budget() {
+        let node = NodeID::new();
+        let candidates = vec![
+            (30u64, node, "c".to_string(), probe_state("c", 30)),
+            (10u64, node, "a".to_string(), probe_state("a", 10)),
+            (20u64, node, "b".to_string(), probe_state("b", 20)),
+        ];
+
+        // A budget that fits exactly the two stalest entries (versions 10 and 20).
+        let budget = serialized_size(&[
+            (node, "a", probe_state("a", 10)),
+            (node, "b", probe_state("b", 20)),
+        ]);
+
+        let inner = bounded_delta(candidates, budget).into_inner();
+        let fields = inner.get(&node).expect("node present");
+        assert_eq!(fields.len(), 2);
+        assert!(fields.contains_key("a") && fields.contains_key("b"));
+        assert!(
+            !fields.contains_key("c"),
+            "the freshest entry must be deferred to a later round"
+        );
+    }
+
+    #[test]
+    fn bounded_delta_includes_all_when_budget_large() {
+        let node = NodeID::new();
+        let candidates = vec![
+            (10u64, node, "a".to_string(), probe_state("a", 10)),
+            (20u64, node, "b".to_string(), probe_state("b", 20)),
+        ];
+        let inner = bounded_delta(candidates, 1_000_000).into_inner();
+        assert_eq!(inner.get(&node).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn bounded_delta_sends_single_oversized_entry() {
+        let node = NodeID::new();
+        let candidates = vec![(10u64, node, "a".to_string(), probe_state("a", 10))];
+        // A 1-byte budget fits nothing, but the single entry must still be sent so it cannot stall.
+        let inner = bounded_delta(candidates, 1).into_inner();
+        assert_eq!(inner.get(&node).unwrap().len(), 1);
     }
 }
