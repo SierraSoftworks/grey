@@ -10,6 +10,17 @@ pub use tests::InMemoryGossipTransport;
 pub trait GossipTransport<Id: Eq + Hash, State: Versioned> {
     type Address;
 
+    /// Resolves a seed peer specification (e.g. a `host:port` or `ip:port` string) into zero or
+    /// more concrete peer addresses.
+    ///
+    /// This is invoked on every gossip round so that DNS-based seed peers are re-resolved as their
+    /// underlying records change (for example in environments like Tailscale + MagicDNS, or when a
+    /// peer is rescheduled onto a new IP address).
+    fn resolve(
+        &self,
+        address: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<Self::Address>, Box<dyn std::error::Error>>>;
+
     fn send(
         &self,
         address: Self::Address,
@@ -63,10 +74,19 @@ mod tests {
 
     impl<P, T> GossipTransport<P, T> for InMemoryGossipTransport<P, T>
     where
-        P: Eq + Hash + Clone + Send + 'static,
+        P: Eq + Hash + Clone + Send + std::str::FromStr + 'static,
         T: Versioned + Send + 'static,
     {
         type Address = P;
+
+        async fn resolve(
+            &self,
+            address: &str,
+        ) -> Result<Vec<Self::Address>, Box<dyn std::error::Error>> {
+            P::from_str(address)
+                .map(|addr| vec![addr])
+                .map_err(|_| format!("Failed to parse peer address '{address}'").into())
+        }
 
         async fn send(
             &self,

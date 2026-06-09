@@ -45,7 +45,12 @@ where
     store: S,
     transport: T,
 
-    seed_peers: Vec<S::Address>,
+    seed_peers: Vec<String>,
+    /// How frequently the seed peers are re-resolved by the background resolver loop.
+    seed_resolve_interval: std::time::Duration,
+    /// The most recently resolved seed peer addresses, maintained by the resolver loop so that the
+    /// gossip hot path never has to perform DNS resolution itself.
+    resolved_seed_peers: std::sync::Mutex<Vec<S::Address>>,
 
     gossip_factor: usize,
     gossip_interval: std::time::Duration,
@@ -67,6 +72,8 @@ where
             gossip_factor: 1,
             gossip_interval: std::time::Duration::from_secs(10),
             seed_peers: Vec::new(),
+            seed_resolve_interval: std::time::Duration::from_secs(60),
+            resolved_seed_peers: std::sync::Mutex::new(Vec::new()),
         }
     }
 
@@ -84,18 +91,61 @@ where
         }
     }
 
-    pub fn with_seed_peers(self, addresses: Vec<S::Address>) -> Self {
+    pub fn with_seed_peers(self, addresses: Vec<String>) -> Self {
         Self {
-            store: self.store,
-            transport: self.transport,
-            gossip_factor: self.gossip_factor,
-            gossip_interval: self.gossip_interval,
             seed_peers: addresses,
+            ..self
+        }
+    }
+
+    pub fn with_seed_resolve_interval(self, interval: std::time::Duration) -> Self {
+        Self {
+            seed_resolve_interval: interval,
+            ..self
         }
     }
 
     pub async fn run(&self) {
-        tokio::join!(self.gossip_loop(), self.receive_loop());
+        tokio::join!(self.gossip_loop(), self.receive_loop(), self.resolve_loop());
+    }
+
+    /// Periodically re-resolves the configured seed peers in the background so that DNS changes are
+    /// picked up without forcing the gossip loop to perform (potentially blocking) DNS lookups on
+    /// every round. The resolved addresses are cached and read cheaply by [`Self::gossip`].
+    async fn resolve_loop(&self) {
+        if self.seed_peers.is_empty() {
+            return;
+        }
+
+        loop {
+            self.refresh_seed_peers().await;
+            tokio::time::sleep(self.seed_resolve_interval).await;
+        }
+    }
+
+    /// Resolves every configured seed peer and updates the cached address list. If resolution yields
+    /// no addresses at all (for example during a transient DNS outage), the previously resolved
+    /// addresses are retained rather than dropping all of our seeds.
+    async fn refresh_seed_peers(&self) {
+        let mut resolved = Vec::new();
+        for seed in self.seed_peers.iter() {
+            match self.transport.resolve(seed).await {
+                Ok(addresses) if addresses.is_empty() => {
+                    warn!(name: "gossip.seed.resolve", { peer.seed = %seed }, "Seed peer '{seed}' did not resolve to any addresses, skipping it.");
+                }
+                Ok(addresses) => resolved.extend(addresses),
+                Err(err) => {
+                    warn!(name: "gossip.seed.resolve", { peer.seed = %seed, exception = %err }, "Failed to resolve seed peer '{seed}', skipping it: {err:?}");
+                }
+            }
+        }
+
+        if resolved.is_empty() && !self.seed_peers.is_empty() {
+            warn!(name: "gossip.seed.resolve", "Failed to resolve any seed peers, retaining the previously resolved addresses.");
+            return;
+        }
+
+        *self.resolved_seed_peers.lock().unwrap() = resolved;
     }
 
     async fn gossip_loop(&self) {
@@ -123,12 +173,15 @@ where
         let mut peer_addresses = sample_peers(discovered, self.gossip_factor);
 
         // Always include the seed peers. A node that has been partitioned long enough to be
-        // forgotten by its discovered peers can still rejoin the cluster via a live seed.
-        peer_addresses.extend(self.seed_peers.iter().cloned());
+        // forgotten by its discovered peers can still rejoin the cluster via a live seed. The
+        // resolved addresses are maintained by the background resolver loop so we never block the
+        // gossip hot path on DNS resolution here.
+        peer_addresses.extend(self.resolved_seed_peers.lock().unwrap().iter().cloned());
 
         // `Vec::dedup` only removes *consecutive* duplicates; a seed that is also a sampled peer
         // would not be adjacent to its duplicate. Dedup by identity instead.
         let peer_addresses = unique_preserving_order(peer_addresses);
+
         if peer_addresses.is_empty() {
             return Ok(());
         }
@@ -323,7 +376,7 @@ mod tests {
             .with_gossip_interval(Duration::from_millis(10));
         let client2 = GossipClient::new(store2.clone(), transport2)
             .with_gossip_interval(Duration::from_millis(10))
-            .with_seed_peers(vec![node1]);
+            .with_seed_peers(vec![node1.to_string()]);
 
         {
             let local_set = tokio::task::LocalSet::new();
