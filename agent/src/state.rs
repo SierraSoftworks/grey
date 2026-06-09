@@ -12,14 +12,11 @@ use tracing_batteries::prelude::*;
 
 use crate::{
     Config,
-    cluster::{self, ClusterStateDigest, NodeID, Versioned},
+    cluster::{self, ClusterStateDigest, Membership, MembershipConfig, NodeID, Versioned},
     result::ProbeResult,
 };
 use crate::cluster::GossipStore;
 
-// Maps a node's address to a tuple of its (NodeID, Last Seen Timestamp)
-const CLUSTER_PEERS_TABLE: TableDefinition<String, (u128, u64)> =
-    TableDefinition::new("cluster_peers");
 // Maps a (NodeID, Probe Name) to a tuple of (Version, MsgPack Snapshot)
 const CLUSTER_FIELDS_TABLE: TableDefinition<(u128, String), (u64, &[u8])> =
     TableDefinition::new("cluster_fields");
@@ -40,6 +37,11 @@ pub struct State {
 
     node_id: NodeID,
     database: Arc<Database>,
+
+    /// The in-memory cluster membership registry. Peer addresses and link health are deliberately
+    /// **not** persisted to the database — they are rebuilt from seed peers on restart — so this is
+    /// shared (read-only for the API) rather than living in redb.
+    members: Arc<Membership<NodeID, SocketAddr>>,
 }
 
 impl State {
@@ -57,9 +59,11 @@ impl State {
 
         let test_probe = &this.get_config().probes[0];
 
-        this.heartbeat(NodeID::new(), "127.0.0.1:12345".parse().unwrap())
-            .await
-            .unwrap();
+        this.members.record_inbound(
+            &NodeID::new(),
+            "127.0.0.1:12345".parse().unwrap(),
+            std::time::Instant::now(),
+        );
         this.update_probe_config(test_probe).await.unwrap();
         this.update_probe_state(&test_probe.name, &ProbeResult::test()).await.unwrap();
 
@@ -72,6 +76,7 @@ impl State {
 
         let database = Arc::new(Database::create(config.state.clone())?);
         let node_id = Self::load_or_create_node_id(&database)?;
+        let members = Arc::new(Membership::new(node_id, Self::membership_config(&config)));
 
         Ok(Self {
             config_path,
@@ -81,7 +86,31 @@ impl State {
 
             node_id,
             database,
+            members,
         })
+    }
+
+    /// Derives the in-memory membership/failure-detector tuning from the cluster configuration.
+    fn membership_config(config: &Config) -> MembershipConfig {
+        let cluster = &config.cluster;
+        MembershipConfig {
+            failure_detector_window: cluster.failure_detector_window,
+            phi_prior: cluster.gossip_interval,
+            phi_threshold: cluster.phi_threshold,
+            dead_grace: cluster.dead_node_grace_period,
+            max_addresses: cluster.max_member_addresses,
+            // An address counts as "working" if we have seen it within a few gossip rounds.
+            working_window: cluster.gossip_interval.saturating_mul(3),
+            backoff_base: cluster.unhealthy_retry_base,
+            backoff_max: cluster.unhealthy_retry_max,
+            member_expiry: cluster.gc_peer_expiry,
+        }
+    }
+
+    /// The shared, in-memory cluster membership registry. The gossip client uses it to track peers
+    /// and link health; the API reads a redacted view of it via [`State::get_peers`].
+    pub fn members(&self) -> Arc<Membership<NodeID, SocketAddr>> {
+        self.members.clone()
     }
 
     /// Loads this instance's persistent [`NodeID`] from the database, generating and storing a fresh
@@ -235,57 +264,29 @@ impl State {
         }
     }
 
+    /// Returns a redacted view of the known cluster peers for the API/UI. Only the node identifier
+    /// and last-seen timestamp are exposed — peer **addresses are never returned**, since the API has
+    /// no access control and may be reachable on the public internet.
     pub async fn get_peers(&self) -> Result<Vec<grey_api::Peer>, Box<dyn Error>> {
-        let mut peers = Vec::new();
-
-        let txn = self.database.begin_read()?;
-        let table = txn.open_table(CLUSTER_PEERS_TABLE)?;
-        for entry in table.iter()?.filter_map(|r| r.ok()) {
-            let (_addr, info) = entry;
-            let (peer_id, last_seen) = info.value();
-            let peer_id = NodeID::from(peer_id);
-            let last_seen =
-                chrono::DateTime::from_timestamp(last_seen as i64, 0).unwrap_or_default();
-            peers.push(grey_api::Peer {
-                id: peer_id.to_string(),
-                last_seen,
-            });
-        }
-
-        Ok(peers)
+        Ok(self
+            .members
+            .redacted_peers()
+            .into_iter()
+            .map(|(id, last_seen)| grey_api::Peer { id, last_seen })
+            .collect())
     }
 
     #[instrument(name="state.gc", skip(self), fields(otel.kind = "internal", node.id=%self.node_id), err(Debug))]
     pub async fn gc(&self) -> Result<(), Box<dyn Error>> {
         let txn = self.database.begin_write()?;
         {
-            let mut table_peers = txn.open_table(CLUSTER_PEERS_TABLE)?;
             let mut table_fields = txn.open_table(CLUSTER_FIELDS_TABLE)?;
 
             let history_expiry_threshold =
                 chrono::Utc::now() - self.get_config().cluster.gc_probe_expiry;
-            let peer_drop_threshold = chrono::Utc::now() - self.get_config().cluster.gc_peer_expiry;
 
-            table_peers.retain(|addr, (peer_id, last_seen)| {
-                let peer_id = NodeID::from(peer_id);
-                let last_seen =
-                    chrono::DateTime::from_timestamp(last_seen as i64, 0).unwrap_or_default();
-                if last_seen >= peer_drop_threshold {
-                    true
-                } else {
-                    info!(
-                        name: "state.gc.peer",
-                        {
-                            peer.id = %peer_id,
-                            peer.addr = %addr,
-                            peer.last_seen = %last_seen,
-                        },
-                        "Removing stale peer from database."
-                    );
-                    false
-                }
-            })?;
-
+            // Peer/membership records live entirely in memory (the registry expires them itself);
+            // only probe state is persisted, so the GC sweep here is concerned with probes alone.
             let mut dropped_probe_records = 0;
             table_fields.retain(|(_, probe_name), (version, _data)| {
                 // `version` is the probe's `last_updated` in milliseconds (see `Versioned for Probe`).
@@ -393,35 +394,10 @@ impl cluster::EncryptionKeyProvider for State {
 
 impl GossipStore for State {
     type Id = NodeID;
-    type Address = SocketAddr;
     type State = ProbeState;
 
     async fn id(&self) -> Result<Self::Id, Box<dyn Error>> {
         Ok(self.node_id)
-    }
-
-    async fn heartbeat(&self, peer: Self::Id, address: Self::Address) -> Result<(), Box<dyn Error>> {
-        trace!(name: "state.heartbeat", { host.node_id = %self.node_id, peer.id = %peer, peer.address = %address }, "Registering address for peer.");
-        let txn = self.database.begin_write()?;
-        {
-            let mut table_peers = txn.open_table(CLUSTER_PEERS_TABLE)?;
-            table_peers.insert(
-                address.to_string(),
-                (peer.into(), chrono::Utc::now().timestamp() as u64),
-            )?;
-        }
-        txn.commit()?;
-        Ok(())
-    }
-
-    async fn get_peer_addresses(&self) -> Result<Vec<Self::Address>, Box<dyn Error>> {
-        let txn = self.database.begin_read()?;
-        let table = txn.open_table(CLUSTER_PEERS_TABLE)?;
-        Ok(table
-            .iter()?
-            .filter_map(|r| r.ok())
-            .filter_map(|(addr, _info)| addr.value().parse().ok())
-            .collect())
     }
 
     async fn digest(

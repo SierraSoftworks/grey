@@ -283,6 +283,7 @@ mod tests {
                     assert_eq!(&d, &peer1_digest);
                     assert_eq!(&diff, &peer1_diff);
                 },
+                Message::MemberGossip(..) => panic!("did not send a MemberGossip message"),
             }
             assert_eq!(src_addr.ip(), addr1.ip());
         }

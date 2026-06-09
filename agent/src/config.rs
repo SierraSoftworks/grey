@@ -112,6 +112,13 @@ pub struct ClusterConfig {
     pub enabled: bool,
     #[serde(default = "default::cluster::listen")]
     pub listen: String,
+    /// The address other nodes should use to reach this one, advertised through the membership
+    /// gossip so peers can be discovered transitively. When unset it falls back to `listen` if that
+    /// is a concrete (non-wildcard) address; a wildcard `listen` with no `advertised_address` means
+    /// this node self-advertises nothing (it is still discovered via the source address of its
+    /// packets).
+    #[serde(default)]
+    pub advertised_address: Option<String>,
     pub peers: Vec<String>,
     pub secret: String,
     #[serde(default)]
@@ -125,6 +132,32 @@ pub struct ClusterConfig {
 
     #[serde(default = "default::cluster::default_message_size")]
     pub max_message_size: usize,
+
+    /// Number of member records carried in each fire-and-forget membership gossip datagram.
+    #[serde(default = "default::cluster::membership_sample_size")]
+    pub membership_sample_size: usize,
+    /// Maximum number of known-working addresses retained (and gossiped) per member.
+    #[serde(default = "default::cluster::max_member_addresses")]
+    pub max_member_addresses: usize,
+    /// Phi-accrual suspicion threshold; a peer whose phi exceeds this is considered suspect/dead.
+    #[serde(default = "default::cluster::phi_threshold")]
+    pub phi_threshold: f64,
+    /// Number of heartbeat-advance intervals retained per peer by the phi-accrual detector.
+    #[serde(default = "default::cluster::failure_detector_window")]
+    pub failure_detector_window: usize,
+    /// How long a peer is retained in the membership registry after it is declared dead, before it
+    /// is forgotten entirely.
+    #[serde(default = "default::cluster::dead_node_grace_period")]
+    #[serde(with = "humantime_serde")]
+    pub dead_node_grace_period: std::time::Duration,
+    /// Base delay for the per-address exponential backoff applied to unhealthy links.
+    #[serde(default = "default::cluster::unhealthy_retry_base")]
+    #[serde(with = "humantime_serde")]
+    pub unhealthy_retry_base: std::time::Duration,
+    /// Maximum delay for the per-address exponential backoff applied to unhealthy links.
+    #[serde(default = "default::cluster::unhealthy_retry_max")]
+    #[serde(with = "humantime_serde")]
+    pub unhealthy_retry_max: std::time::Duration,
 
     #[serde(default = "default::cluster::peer_resolve_interval")]
     #[serde(with = "humantime_serde")]
@@ -146,12 +179,20 @@ impl Default for ClusterConfig {
         Self {
             enabled: false,
             listen: default::cluster::listen(),
+            advertised_address: None,
             peers: vec![],
             secret: "".into(),
             secrets: vec![],
             gossip_interval: default::cluster::gossip_interval(),
             gossip_factor: default::cluster::gossip_factor(),
             max_message_size: default::cluster::default_message_size(),
+            membership_sample_size: default::cluster::membership_sample_size(),
+            max_member_addresses: default::cluster::max_member_addresses(),
+            phi_threshold: default::cluster::phi_threshold(),
+            failure_detector_window: default::cluster::failure_detector_window(),
+            dead_node_grace_period: default::cluster::dead_node_grace_period(),
+            unhealthy_retry_base: default::cluster::unhealthy_retry_base(),
+            unhealthy_retry_max: default::cluster::unhealthy_retry_max(),
             peer_resolve_interval: default::cluster::peer_resolve_interval(),
             gc_interval: default::cluster::gc_interval(),
             gc_probe_expiry: default::cluster::gc_probe_expiry(),
@@ -208,6 +249,34 @@ mod default {
 
         pub fn peer_resolve_interval() -> std::time::Duration {
             std::time::Duration::from_secs(60)
+        }
+
+        pub fn membership_sample_size() -> usize {
+            16
+        }
+
+        pub fn max_member_addresses() -> usize {
+            8
+        }
+
+        pub fn phi_threshold() -> f64 {
+            8.0
+        }
+
+        pub fn failure_detector_window() -> usize {
+            1000
+        }
+
+        pub fn dead_node_grace_period() -> std::time::Duration {
+            std::time::Duration::from_secs(60 * 60)
+        }
+
+        pub fn unhealthy_retry_base() -> std::time::Duration {
+            std::time::Duration::from_secs(30)
+        }
+
+        pub fn unhealthy_retry_max() -> std::time::Duration {
+            std::time::Duration::from_secs(15 * 60)
         }
 
         pub fn gc_interval() -> std::time::Duration {

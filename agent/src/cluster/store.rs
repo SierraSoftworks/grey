@@ -8,19 +8,10 @@ pub use in_memory::InMemoryGossipStore;
 pub trait GossipStore {
     /// The type used to uniquely identify a peer node in the cluster.
     type Id: Eq + Hash;
-    type Address;
     type State: Versioned;
 
     /// Returns the unique identifier of the local node.
     fn id(&self) -> impl Future<Output = Result<Self::Id, Box<dyn std::error::Error>>>;
-
-    /// Records a heartbeat from a peer node, updating its address if necessary.
-    fn heartbeat(&self, peer: Self::Id, address: Self::Address) -> impl Future<Output = Result<(), Box<dyn std::error::Error>>>;
-
-    /// Retrieves the addresses of all known peer nodes.
-    fn get_peer_addresses(
-        &self,
-    ) -> impl Future<Output = Result<Vec<Self::Address>, Box<dyn std::error::Error>>>;
 
     /// Compiles a digest of the current cluster state, summarizing the maximum version of each peer's state.
     fn digest(
@@ -57,7 +48,6 @@ mod in_memory {
     #[derive(Clone)]
     pub struct InMemoryGossipStore<P: Eq + Hash, A, T: Versioned> {
         node_id: P,
-        peers: Arc<RwLock<HashMap<P, A>>>,
         state: Arc<RwLock<HashMap<P, NodeState<T>>>>,
         _phantom: std::marker::PhantomData<A>,
     }
@@ -67,7 +57,6 @@ mod in_memory {
             Self {
                 node_id,
                 state: Arc::new(RwLock::new(HashMap::new())),
-                peers: Arc::new(RwLock::new(HashMap::new())),
                 _phantom: Default::default(),
             }
         }
@@ -111,35 +100,10 @@ mod in_memory {
         for InMemoryGossipStore<P, A, T>
     {
         type Id = P;
-        type Address = A;
         type State = T;
 
         async fn id(&self) -> Result<Self::Id, Box<dyn Error>> {
             Ok(self.node_id.clone())
-        }
-
-        async fn heartbeat(&self, peer: Self::Id, address: Self::Address) -> Result<(), Box<dyn Error>> {
-            let mut peers = self.peers.write().await;
-            peers.insert(peer, address);
-            Ok(())
-        }
-
-        async fn get_peer_addresses(
-            &self,
-        ) -> Result<Vec<Self::Address>, Box<dyn Error>> {
-            Ok(self
-                .peers
-                .read()
-                .await
-                .iter()
-                .filter_map(|(id, addr)| {
-                    if *id != self.node_id {
-                        Some(addr.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect())
         }
 
         async fn digest(

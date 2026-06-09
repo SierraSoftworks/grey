@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use tracing::Span;
 use tracing_batteries::prelude::OpenTelemetrySpanExt;
 use crate::cluster::Versioned;
+use crate::cluster::MembershipSample;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Message<Peer, Value>
@@ -16,6 +17,10 @@ where
     Syn(MessageMetadata<Peer>, ClusterStateDigest<Peer>),
     Ack(MessageMetadata<Peer>, ClusterStateDiff<Peer, Value>),
     SynAck(MessageMetadata<Peer>, ClusterStateDigest<Peer>, ClusterStateDiff<Peer, Value>),
+    /// A fire-and-forget sample of the memberlist used for peer discovery and liveness propagation.
+    /// Appended after the original three variants so older nodes simply fail to decode (and drop) it
+    /// without affecting their probe-state gossip, which keeps the wire format backward-compatible.
+    MemberGossip(MessageMetadata<Peer>, MembershipSample<Peer>),
 }
 
 impl<Peer, Value> Message<Peer, Value>
@@ -30,6 +35,7 @@ where
             Message::Syn(_, _) => "syn",
             Message::Ack(_, _) => "ack",
             Message::SynAck(_, _, _) => "synack",
+            Message::MemberGossip(_, _) => "members",
         }
     }
 
@@ -38,6 +44,7 @@ where
             Message::Syn(meta, _) => meta,
             Message::Ack(meta, _) => meta,
             Message::SynAck(meta, _, _) => meta,
+            Message::MemberGossip(meta, _) => meta,
         }
     }
 }
@@ -55,6 +62,7 @@ where
         match self {
             Message::Syn(_, _) => 0,
             Message::Ack(_, diff) | Message::SynAck(_, _, diff) => diff.len(),
+            Message::MemberGossip(_, sample) => sample.len(),
         }
     }
 
@@ -62,6 +70,7 @@ where
         match self {
             Message::Syn(_, _) => true,
             Message::Ack(_, diff) | Message::SynAck(_, _, diff) => diff.is_empty(),
+            Message::MemberGossip(_, sample) => sample.is_empty(),
         }
     }
 }
@@ -82,6 +91,9 @@ where
             Message::Ack(meta, diff) => Message::Ack(meta, diff.partition(max_items)),
             Message::SynAck(meta, digest, diff) => {
                 Message::SynAck(meta, digest, diff.partition(max_items))
+            }
+            Message::MemberGossip(meta, sample) => {
+                Message::MemberGossip(meta, sample.truncate(max_items))
             }
         }
     }
