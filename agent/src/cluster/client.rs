@@ -208,7 +208,7 @@ where
                 Message::Syn(meta, digest) => {
                     self.store.heartbeat(meta.from.clone(), addr.clone()).await
                         .map_err(|e| format!("Failed to store peer heartbeat: {e:?}"))?;
-                    let delta = self.store.diff(digest).await
+                    let delta = self.store.diff(digest, self.transport.max_delta_size()).await
                         .map_err(|e| format!("Failed to compute diff for peer {}: {e:?}", meta.from))?;
                     let digest = self.store.digest().await
                         .map_err(|e| format!("Failed to compute digest for node: {e:?}"))?;
@@ -224,7 +224,7 @@ where
                 Message::SynAck(meta, digest, diff) => {
                     self.store.heartbeat(meta.from.clone(), addr.clone()).await
                         .map_err(|e| format!("Failed to store peer heartbeat: {e:?}"))?;
-                    let delta = self.store.diff(digest).await
+                    let delta = self.store.diff(digest, self.transport.max_delta_size()).await
                         .map_err(|e| format!("Failed to compute diff for peer {}: {e:?}", meta.from))?;
                     self.store.apply(diff).await?;
 

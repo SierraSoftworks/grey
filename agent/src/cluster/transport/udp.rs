@@ -4,6 +4,19 @@ use serde::{Serialize, de::DeserializeOwned};
 use tokio::net::UdpSocket;
 use crate::cluster::transport::encryption::{EncryptionKeyProvider, EncryptionProvider};
 
+/// Theoretical maximum size of a single UDP datagram payload (IPv4: 65535 - 20-byte IP header -
+/// 8-byte UDP header). A gossip message must fit within this once encrypted.
+const MAX_DATAGRAM_SIZE: usize = 65507;
+/// AES-256-GCM framing added to every datagram: a 12-byte nonce prefix and a 16-byte auth tag.
+const ENCRYPTION_OVERHEAD: usize = 12 + 16;
+/// Headroom reserved within each datagram for the rest of the gossip message that accompanies a
+/// delta — the enum discriminant, the sender metadata (id + trace context), and the cluster-state
+/// digest. 8 KiB comfortably covers the digest for clusters of a few hundred nodes.
+const ENVELOPE_RESERVE: usize = 8 * 1024;
+/// Bytes available for a state delta in a single datagram, after encryption framing and the
+/// reserved envelope headroom.
+const MAX_DELTA_SIZE: usize = MAX_DATAGRAM_SIZE - ENCRYPTION_OVERHEAD - ENVELOPE_RESERVE;
+
 pub struct UdpGossipTransport<E, K>
 where
     E: EncryptionProvider,
@@ -44,6 +57,10 @@ where
 {
     type Address = SocketAddr;
 
+    fn max_delta_size(&self) -> usize {
+        MAX_DELTA_SIZE
+    }
+
     async fn send(
         &self,
         address: Self::Address,
@@ -59,7 +76,7 @@ where
         &self,
     ) -> Result<Option<(Self::Address, Message<P, T>)>, Box<dyn std::error::Error>>
     {
-        let mut buf = [0; 65507];
+        let mut buf = [0; MAX_DATAGRAM_SIZE];
         // Await the next datagram rather than polling with `try_recv_from`; this removes the
         // ~100 wakeups/s-per-node busy-poll and the up-to-10ms hop latency it incurred.
         let (size, addr) = self.socket.recv_from(&mut buf).await?;
@@ -89,6 +106,20 @@ mod tests {
         let addr_str = format!("127.0.0.1:{}", port);
         let addr = addr_str.parse().unwrap();
         (addr_str, addr)
+    }
+
+    #[test]
+    fn full_budget_delta_plus_envelope_fits_one_datagram() {
+        // Worst case: a delta filling the whole budget plus the reserved envelope headroom. After
+        // AES-256-GCM framing it must still fit within a single UDP datagram.
+        let plaintext = vec![0u8; MAX_DELTA_SIZE + ENVELOPE_RESERVE];
+        let encrypted = Aes256Gcm.encrypt_with([0u8; 32], &plaintext).unwrap();
+        assert!(
+            encrypted.len() <= MAX_DATAGRAM_SIZE,
+            "encrypted full-budget message ({} bytes) must fit the datagram limit ({MAX_DATAGRAM_SIZE})",
+            encrypted.len()
+        );
+        assert!(MAX_DELTA_SIZE > 32 * 1024, "delta budget should stay generous for catch-up");
     }
 
     #[tokio::test]

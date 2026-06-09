@@ -26,12 +26,6 @@ const CLUSTER_FIELDS_TABLE: TableDefinition<(u128, String), (u64, &[u8])> =
 
 type ProbeState = Probe;
 
-/// Maximum serialized size, in bytes, of a single gossip delta. Held below the 65507-byte UDP
-/// datagram limit with headroom for the accompanying digest, message metadata, the 12-byte
-/// AES-GCM nonce, and the 16-byte authentication tag. Larger backlogs are drained over several
-/// gossip rounds rather than sent (and dropped) in one oversized datagram.
-const MAX_DELTA_BYTES: usize = 60_000;
-
 /// Largest `k` in `[0, n]` for which `fits(k)` holds, assuming `fits` is monotonic — `fits(0)` is
 /// true and once it becomes false it stays false. Uses binary search, so it evaluates `fits`
 /// only `O(log n)` times (each evaluation is one serialization attempt in [`bounded_delta`]).
@@ -473,6 +467,7 @@ impl GossipStore for State {
     async fn diff(
         &self,
         digest: ClusterStateDigest<Self::Id>,
+        max_delta_bytes: usize,
     ) -> Result<cluster::ClusterStateDiff<Self::Id, Self::State>, Box<dyn Error>>
     {
         let txn = self.database.begin_read()?;
@@ -499,9 +494,10 @@ impl GossipStore for State {
             }
         }
 
-        // Bound the delta to a single UDP datagram; the rest drains over subsequent rounds so a
-        // large catch-up (e.g. after a partition) can't permanently fail to deliver.
-        let delta = bounded_delta(candidates, MAX_DELTA_BYTES);
+        // Bound the delta to what the caller's transport can carry in one message; the rest drains
+        // over subsequent rounds so a large catch-up (e.g. after a partition) can't permanently
+        // fail to deliver.
+        let delta = bounded_delta(candidates, max_delta_bytes);
 
         trace!(name: "state.diff", { host.node_id = %self.node_id, digest = %digest, delta = ?delta }, "Composed new cluster state diff.");
 
