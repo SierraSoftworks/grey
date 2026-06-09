@@ -1,8 +1,24 @@
+use std::collections::HashSet;
 use std::fmt::{Debug, Display};
+use std::hash::Hash;
 use tracing::instrument;
 use tracing_batteries::prelude::*;
 
 use super::*;
+
+/// Returns the input with duplicate values removed, preserving first-seen order.
+///
+/// Unlike [`Vec::dedup`], this removes *all* duplicates, not only consecutive ones.
+fn unique_preserving_order<A: Clone + Eq + Hash>(items: Vec<A>) -> Vec<A> {
+    let mut seen = HashSet::new();
+    let mut result = Vec::with_capacity(items.len());
+    for item in items {
+        if seen.insert(item.clone()) {
+            result.push(item);
+        }
+    }
+    result
+}
 
 pub struct GossipClient<S, T>
 where
@@ -23,7 +39,7 @@ where
     S: GossipStore,
     T: GossipTransport<S::Id, S::State, Address = S::Address>,
     S::Id: Display + Debug + Clone + Send + 'static,
-    S::Address: Display + Debug + Clone + Eq + Send + 'static,
+    S::Address: Display + Debug + Clone + Eq + Hash + Send + 'static,
     S::State: Debug,
 {
     pub fn new(store: S, transport: T) -> Self {
@@ -85,7 +101,10 @@ where
 
         let mut peer_addresses = self.store.get_peer_addresses().await.unwrap_or_default();
         peer_addresses.extend(self.seed_peers.iter().cloned());
-        peer_addresses.dedup();
+        // `Vec::dedup` only removes *consecutive* duplicates; seed peers are appended after the
+        // discovered peers, so a seed that is also a known peer would not be adjacent to its
+        // duplicate and would be gossiped to twice per round. Dedup by identity instead.
+        let peer_addresses = unique_preserving_order(peer_addresses);
         if peer_addresses.is_empty() {
             return Ok(());
         }
@@ -222,6 +241,20 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn unique_preserving_order_removes_non_adjacent_duplicates() {
+        // Mimics discovered peers followed by appended seed peers, where a seed (1) is also a
+        // known peer and a duplicate seed (3) appears twice — none of them adjacent.
+        let input = vec![1, 2, 3, 1, 3];
+        assert_eq!(unique_preserving_order(input), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn unique_preserving_order_keeps_first_seen_order() {
+        let input = vec!["b", "a", "b", "c", "a"];
+        assert_eq!(unique_preserving_order(input), vec!["b", "a", "c"]);
+    }
 
     #[tokio::test]
     async fn test_client_gossip() {
