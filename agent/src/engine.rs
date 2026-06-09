@@ -62,7 +62,8 @@ impl Engine {
                 cluster::Aes256Gcm,
                 self.state.clone(),
             )
-            .await?;
+            .await?
+            .with_max_message_size(self.state.get_config().cluster.max_message_size);
             let cluster_client = cluster::GossipClient::new(self.state.clone(), cluster_transport)
                 .with_gossip_factor(self.state.get_config().cluster.gossip_factor)
                 .with_gossip_interval(self.state.get_config().cluster.gossip_interval)

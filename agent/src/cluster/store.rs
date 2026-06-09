@@ -29,6 +29,9 @@ pub trait GossipStore {
 
     /// Computes the difference between the local state and a provided digest, returning the updates
     /// needed to bring the remote digest up to date with the local state.
+    ///
+    /// The full delta is returned; it is the transport's responsibility to fit it into its frame
+    /// (dropping the newest entries and re-sending them on a later round) if it is too large.
     fn diff(
         &self,
         digest: ClusterStateDigest<Self::Id>,

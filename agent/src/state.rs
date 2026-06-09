@@ -415,6 +415,8 @@ impl GossipStore for State {
         digest: ClusterStateDigest<Self::Id>,
     ) -> Result<cluster::ClusterStateDiff<Self::Id, Self::State>, Box<dyn Error>>
     {
+        // Return the full delta; it is the transport's job to fit it into its frame and re-send any
+        // entries that don't fit on a later round.
         let mut delta = cluster::ClusterStateDiff::new();
 
         let txn = self.database.begin_read()?;

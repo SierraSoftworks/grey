@@ -21,6 +21,10 @@ pub trait GossipTransport<Id: Eq + Hash, State: Versioned> {
         address: &str,
     ) -> impl std::future::Future<Output = Result<Vec<Self::Address>, Box<dyn std::error::Error>>>;
 
+    /// Sends a gossip message to the given peer. A transport bound by a frame size (e.g. UDP) is
+    /// responsible for fitting the message into that frame itself — for example by partitioning an
+    /// over-large message with [`Message::partition`] and letting the dropped entries be re-sent on
+    /// a later gossip round.
     fn send(
         &self,
         address: Self::Address,

@@ -42,6 +42,51 @@ where
     }
 }
 
+impl<Peer, Value> Message<Peer, Value>
+where
+    Peer: Eq + Hash + Clone,
+    Value: Versioned,
+    Value::Diff: Serialize + Debug + Clone,
+    for <'dde> Value::Diff: Deserialize<'dde>,
+{
+    /// Number of state entries carried by this message that [`Message::partition`] can drop in
+    /// order to shrink it. A `Syn` carries only a digest, so it has nothing to drop and returns 0.
+    pub fn len(&self) -> usize {
+        match self {
+            Message::Syn(_, _) => 0,
+            Message::Ack(_, diff) | Message::SynAck(_, _, diff) => diff.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Message::Syn(_, _) => true,
+            Message::Ack(_, diff) | Message::SynAck(_, _, diff) => diff.is_empty(),
+        }
+    }
+}
+
+impl<Peer, Value> Message<Peer, Value>
+where
+    Peer: Eq + Hash + Clone,
+    Value: Versioned,
+    Value::Diff: Versioned + Serialize + Debug + Clone,
+    for <'dde> Value::Diff: Deserialize<'dde>,
+{
+    /// Consumes the message, returning one carrying at most `max_items` of its state entries,
+    /// keeping the oldest. Any accompanying digest is preserved unchanged. Size-limited transports
+    /// use this to fit a message into their frame; the dropped entries are re-sent on a later round.
+    pub fn partition(self, max_items: usize) -> Self {
+        match self {
+            Message::Syn(meta, digest) => Message::Syn(meta, digest),
+            Message::Ack(meta, diff) => Message::Ack(meta, diff.partition(max_items)),
+            Message::SynAck(meta, digest, diff) => {
+                Message::SynAck(meta, digest, diff.partition(max_items))
+            }
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MessageMetadata<Peer> {
     pub from: Peer,
@@ -116,6 +161,48 @@ where
 
     pub fn into_inner(self) -> HashMap<Peer, HashMap<String, Value::Diff>> {
         self.inner
+    }
+
+    /// Total number of `(node, field)` entries carried by this diff.
+    pub fn len(&self) -> usize {
+        self.inner.values().map(|fields| fields.len()).sum()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.values().all(|fields| fields.is_empty())
+    }
+}
+
+impl<Peer, Value> ClusterStateDiff<Peer, Value>
+where
+    Peer: Eq + Hash + Clone,
+    Value: Versioned,
+    Value::Diff: Versioned + Serialize,
+    for <'dde> Value::Diff: Deserialize<'dde>,
+{
+    /// Consumes the diff, returning at most `max_items` of the oldest (lowest-version) entries;
+    /// newer entries are dropped and re-sent on a later gossip round. Size-limited transports use
+    /// this to shrink an over-large message while still making forward progress on the records that
+    /// have waited longest to propagate. The retained entries are moved, not cloned.
+    pub fn partition(self, max_items: usize) -> Self {
+        let mut entries: Vec<(u64, Peer, String, Value::Diff)> = self
+            .inner
+            .into_iter()
+            .flat_map(|(peer, fields)| {
+                fields.into_iter().map(move |(field, diff)| {
+                    let version = diff.version();
+                    (version, peer.clone(), field, diff)
+                })
+            })
+            .collect();
+        entries.sort_by_key(|(version, _, _, _)| *version);
+        entries.truncate(max_items);
+
+        let mut inner: HashMap<Peer, HashMap<String, Value::Diff>> = HashMap::new();
+        for (_, peer, field, diff) in entries {
+            inner.entry(peer).or_default().insert(field, diff);
+        }
+        Self { inner }
     }
 }
 
@@ -204,5 +291,69 @@ impl<Peer> tracing_batteries::prelude::opentelemetry::propagation::Injector for 
             "baggage" => self.baggage = Some(value),
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cluster::versioned::LastWriteWinsValue;
+
+    fn diff_with(versions: &[u64]) -> ClusterStateDiff<u32, LastWriteWinsValue<i32>> {
+        let mut diff = ClusterStateDiff::new();
+        for &v in versions {
+            diff.update(1u32, format!("f{v}"), LastWriteWinsValue::new(v as i32).with_version(v));
+        }
+        diff
+    }
+
+    #[test]
+    fn diff_len_counts_entries() {
+        assert_eq!(diff_with(&[1, 2, 3]).len(), 3);
+        assert!(ClusterStateDiff::<u32, LastWriteWinsValue<i32>>::new().is_empty());
+    }
+
+    #[test]
+    fn partition_retains_lowest_versions() {
+        let kept = diff_with(&[5, 1, 4, 2, 3]).partition(2);
+        let inner = kept.into_inner();
+        let fields = &inner[&1u32];
+        assert_eq!(fields.len(), 2);
+        assert!(
+            fields.contains_key("f1") && fields.contains_key("f2"),
+            "the two oldest (lowest-version) entries must be kept"
+        );
+    }
+
+    #[test]
+    fn partition_capped_at_available() {
+        assert_eq!(diff_with(&[1, 2]).partition(10).len(), 2);
+        assert_eq!(diff_with(&[1, 2]).partition(0).len(), 0);
+    }
+
+    #[test]
+    fn message_partition_keeps_oldest_and_preserves_digest() {
+        let digest = ClusterStateDigest::new().with_max_version(1u32, 9);
+        let msg = Message::SynAck(MessageMetadata::new(1u32), digest.clone(), diff_with(&[3, 1, 2]));
+        assert_eq!(msg.len(), 3);
+
+        let partitioned = msg.partition(1);
+        assert_eq!(partitioned.len(), 1);
+        match partitioned {
+            Message::SynAck(_, d, diff) => {
+                assert_eq!(d, digest, "digest must be preserved when partitioning");
+                assert!(diff.into_inner()[&1u32].contains_key("f1"), "oldest entry kept");
+            }
+            _ => panic!("expected SynAck"),
+        }
+    }
+
+    #[test]
+    fn syn_has_no_partitionable_entries() {
+        let msg: Message<u32, LastWriteWinsValue<i32>> =
+            Message::Syn(MessageMetadata::new(1u32), ClusterStateDigest::new());
+        assert_eq!(msg.len(), 0);
+        assert!(msg.is_empty());
+        assert_eq!(msg.partition(0).len(), 0);
     }
 }

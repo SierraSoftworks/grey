@@ -123,6 +123,9 @@ pub struct ClusterConfig {
     #[serde(default = "default::cluster::gossip_factor")]
     pub gossip_factor: usize,
 
+    #[serde(default = "default::cluster::default_message_size")]
+    pub max_message_size: usize,
+
     #[serde(default = "default::cluster::peer_resolve_interval")]
     #[serde(with = "humantime_serde")]
     pub peer_resolve_interval: std::time::Duration,
@@ -148,6 +151,7 @@ impl Default for ClusterConfig {
             secrets: vec![],
             gossip_interval: default::cluster::gossip_interval(),
             gossip_factor: default::cluster::gossip_factor(),
+            max_message_size: default::cluster::default_message_size(),
             peer_resolve_interval: default::cluster::peer_resolve_interval(),
             gc_interval: default::cluster::gc_interval(),
             gc_probe_expiry: default::cluster::gc_probe_expiry(),
@@ -192,6 +196,14 @@ mod default {
 
         pub fn gossip_factor() -> usize {
             2
+        }
+
+        pub fn default_message_size() -> usize {
+            // A conservative default: small enough that a lost datagram costs little and large
+            // enough to carry plenty per round. Raise it (up to ~65507) for fewer rounds on
+            // reliable links, or lower it below the path MTU to avoid IP fragmentation. Over-large
+            // gossip messages are partitioned across rounds regardless.
+            8 * 1024
         }
 
         pub fn peer_resolve_interval() -> std::time::Duration {

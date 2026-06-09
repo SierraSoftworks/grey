@@ -204,6 +204,21 @@ For clusters with N nodes, optimal gossip_factor is typically `log₂(N) + 1`:
 - 5-8 nodes: gossip_factor = 3  
 - 9-16 nodes: gossip_factor = 4
 
+#### max_message_size
+The maximum size, in bytes, of an encrypted gossip datagram this node will emit. Messages larger
+than this (for example a big catch-up after a node has been offline) are automatically split across
+multiple gossip rounds, sending the oldest un-propagated records first.
+
+The default of 8&nbsp;KiB is deliberately conservative: a lost datagram costs little to re-send, yet
+each round still carries plenty of state. Raise it (up to the UDP maximum of `65507`) for fewer
+rounds on reliable links, or lower it below your path MTU (for example to around `1400`) so each
+datagram fits a single IP packet and isn't dropped by fragmentation-averse middleboxes.
+
+```yaml
+cluster:
+  max_message_size: 8192  # Default (8 KiB)
+```
+
 #### peer_resolve_interval
 How frequently the DNS names configured in `peers` are re-resolved in the background.
 
