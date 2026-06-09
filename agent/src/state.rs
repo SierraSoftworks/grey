@@ -25,6 +25,7 @@ const CLUSTER_FIELDS_TABLE: TableDefinition<(u128, String), (u64, &[u8])> =
 const CLUSTER_IDENTITY_TABLE: TableDefinition<&str, u128> =
     TableDefinition::new("cluster_identity");
 const NODE_ID_KEY: &str = "node_id";
+const GENERATION_KEY: &str = "generation";
 
 type ProbeState = Probe;
 
@@ -76,7 +77,12 @@ impl State {
 
         let database = Arc::new(Database::create(config.state.clone())?);
         let node_id = Self::load_or_create_node_id(&database)?;
-        let members = Arc::new(Membership::new(node_id, Self::membership_config(&config)));
+        let generation = Self::load_and_bump_generation(&database)?;
+        let members = Arc::new(Membership::new(
+            node_id,
+            generation,
+            Self::membership_config(&config),
+        ));
 
         Ok(Self {
             config_path,
@@ -137,6 +143,30 @@ impl State {
         }
         write.commit()?;
         Ok(node_id)
+    }
+
+    /// Loads and increments this instance's persistent generation counter. The generation is a
+    /// monotonic boot id: every start advances it, so a restarted node's membership record
+    /// supersedes the stale one its peers still hold (whose heartbeat may be higher) without relying
+    /// on any synchronised clock.
+    fn load_and_bump_generation(database: &Database) -> Result<u64, Box<dyn Error>> {
+        let current: u128 = {
+            let read = database.begin_read()?;
+            // `open_table` errors on a read transaction if the table has never been created (the
+            // first-run case), in which case the generation starts at 0.
+            match read.open_table(CLUSTER_IDENTITY_TABLE) {
+                Ok(table) => table.get(GENERATION_KEY)?.map(|v| v.value()).unwrap_or(0),
+                Err(_) => 0,
+            }
+        };
+        let next = current.saturating_add(1);
+        let write = database.begin_write()?;
+        {
+            let mut table = write.open_table(CLUSTER_IDENTITY_TABLE)?;
+            table.insert(GENERATION_KEY, next)?;
+        }
+        write.commit()?;
+        Ok(next as u64)
     }
 
     pub async fn reload(&self) -> Result<(), Box<dyn Error>> {
@@ -272,7 +302,7 @@ impl State {
             .members
             .redacted_peers()
             .into_iter()
-            .map(|(id, last_seen)| grey_api::Peer { id, last_seen })
+            .map(|(id, last_seen, health)| grey_api::Peer { id, last_seen, health })
             .collect())
     }
 
@@ -674,5 +704,28 @@ mod tests {
         };
 
         assert_eq!(first, second, "NodeID must be stable across restarts");
+    }
+
+    /// The generation counter is persisted and incremented on every start, so a restarted node's
+    /// membership record always supersedes the stale one its peers still hold.
+    #[test]
+    fn generation_increments_monotonically_across_restarts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.redb");
+
+        let g1 = {
+            let db = Database::create(&path).unwrap();
+            State::load_and_bump_generation(&db).unwrap()
+        };
+        let g2 = {
+            let db = Database::create(&path).unwrap();
+            State::load_and_bump_generation(&db).unwrap()
+        };
+        let g3 = {
+            let db = Database::create(&path).unwrap();
+            State::load_and_bump_generation(&db).unwrap()
+        };
+
+        assert_eq!((g1, g2, g3), (1, 2, 3), "generation must increase on each restart");
     }
 }

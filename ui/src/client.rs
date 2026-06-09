@@ -4,14 +4,15 @@ use grey_api::UiConfig;
 use yew::prelude::*;
 
 use crate::components::status::StatusLevel;
-use crate::contexts::{NoticesProvider, ProbesProvider, UiConfigProvider, use_probes};
+use crate::contexts::{NoticesProvider, PeersProvider, ProbesProvider, UiConfigProvider, use_probes};
 
-use super::components::{Banner, BannerKind, Header, ProbeList, Timeline};
+use super::components::{Banner, BannerKind, Header, PeerList, ProbeList, Timeline};
 
 #[cfg(feature = "wasm")]
 pub enum ClientMsg {
     UpdateNotices(Vec<grey_api::UiNotice>),
     UpdateProbes(Vec<grey_api::Probe>),
+    UpdatePeers(Vec<grey_api::Peer>),
     Error(String),
 }
 
@@ -19,6 +20,7 @@ pub enum ClientMsg {
 pub struct App {
     notices: Vec<grey_api::UiNotice>,
     probes: Vec<grey_api::Probe>,
+    peers: Vec<grey_api::Peer>,
     has_error: bool,
 }
 
@@ -28,6 +30,7 @@ pub struct AppProps {
     pub config: grey_api::UiConfig,
     pub notices: Vec<grey_api::UiNotice>,
     pub probes: Vec<grey_api::Probe>,
+    pub peers: Vec<grey_api::Peer>,
 }
 
 impl AppProps {
@@ -48,6 +51,7 @@ impl AppProps {
             config,
             notices: Vec::new(),
             probes: Vec::new(),
+            peers: Vec::new(),
         })
     }
 
@@ -68,15 +72,21 @@ impl AppProps {
         let probes_data = app_element
             .get_attribute("data-probes")
             .ok_or("#app[data-probes] not found")?;
+        // Peers are optional: a node may not advertise them, and older server renders omit them.
+        let peers_data = app_element.get_attribute("data-peers");
 
         let config: UiConfig = serde_json::from_str(&config_data)?;
         let notices: Vec<grey_api::UiNotice> = serde_json::from_str(&notices_data)?;
         let probes: Vec<grey_api::Probe> = serde_json::from_str(&probes_data)?;
+        let peers: Vec<grey_api::Peer> = peers_data
+            .and_then(|data| serde_json::from_str(&data).ok())
+            .unwrap_or_default();
 
         Ok(Self {
             config,
             notices,
             probes,
+            peers,
         })
     }
 }
@@ -93,20 +103,28 @@ impl Component for App {
         let app = Self {
             notices: ctx.props().notices.clone(),
             probes: ctx.props().probes.clone(),
+            peers: ctx.props().peers.clone(),
             has_error: false,
         };
 
         #[cfg(feature = "wasm")]
-        if app.probes.is_empty() {
-            // We might not have loaded the un-hydrated context correctly, so let's trigger an immediate refresh
-            ctx.link()
-                .send_future(async move { Self::fetch_probes_as_client_msg().await });
+        {
+            if app.probes.is_empty() {
+                // We might not have loaded the un-hydrated context correctly, so let's trigger an immediate refresh
+                ctx.link()
+                    .send_future(async move { Self::fetch_probes_as_client_msg().await });
 
+                ctx.link()
+                    .send_future(async move { Self::fetch_notices_as_client_msg().await });
+            } else {
+                Self::schedule_next_probes_poll(ctx);
+                Self::schedule_next_notices_poll(ctx);
+            }
+
+            // Peers change frequently and are cheap to fetch, so always refresh them on mount; the
+            // polling loop is then driven from the update handler.
             ctx.link()
-                .send_future(async move { Self::fetch_notices_as_client_msg().await });
-        } else {
-            Self::schedule_next_probes_poll(ctx);
-            Self::schedule_next_notices_poll(ctx);
+                .send_future(async move { Self::fetch_peers_as_client_msg().await });
         }
 
         app
@@ -126,6 +144,12 @@ impl Component for App {
                 Self::schedule_next_notices_poll(ctx);
                 true
             }
+            ClientMsg::UpdatePeers(peers) => {
+                let changed = self.peers != peers;
+                self.peers = peers;
+                Self::schedule_next_peers_poll(ctx);
+                changed
+            }
             ClientMsg::Error(err) => {
                 gloo::console::error!("{}", err);
                 self.has_error = true;
@@ -139,17 +163,21 @@ impl Component for App {
         let config_json = serde_json::to_string(&ctx.props().config).unwrap_or_default();
         let notices_json = serde_json::to_string(&ctx.props().notices).unwrap_or_default();
         let probes_json = serde_json::to_string(&ctx.props().probes).unwrap_or_default();
+        let peers_json = serde_json::to_string(&ctx.props().peers).unwrap_or_default();
 
         html! {
             <div id="app"
                 data-config={config_json}
                 data-notices={notices_json}
                 data-probes={probes_json}
+                data-peers={peers_json}
             >
                 <UiConfigProvider config={ctx.props().config.clone()}>
                     <NoticesProvider notices={self.notices.clone()}>
                         <ProbesProvider probes={self.probes.clone()}>
-                            <AppContent has_error={self.has_error} />
+                            <PeersProvider peers={self.peers.clone()}>
+                                <AppContent has_error={self.has_error} />
+                            </PeersProvider>
                         </ProbesProvider>
                     </NoticesProvider>
                 </UiConfigProvider>
@@ -197,6 +225,7 @@ fn app_content(props: &AppContentProps) -> Html {
             <div class="content">
                 <Banner kind={banner_kind} text={status_text.to_string()} />
                 <ProbeList />
+                <PeerList />
             </div>
 
             <Timeline />
@@ -238,6 +267,34 @@ impl App {
             Ok(notices) => ClientMsg::UpdateNotices(notices),
             Err(err) => ClientMsg::Error(format!("Failed to fetch notices: {}", err)),
         }
+    }
+
+    fn schedule_next_peers_poll(ctx: &Context<Self>) {
+        let reload_interval = ctx.props().config.reload_interval;
+        ctx.link().send_future(async move {
+            gloo::timers::future::sleep(reload_interval).await;
+            Self::fetch_peers_as_client_msg().await
+        });
+    }
+
+    async fn fetch_peers_as_client_msg() -> ClientMsg {
+        match Self::fetch_peers().await {
+            Ok(peers) => ClientMsg::UpdatePeers(peers),
+            Err(err) => ClientMsg::Error(format!("Failed to fetch peers: {}", err)),
+        }
+    }
+
+    async fn fetch_peers() -> Result<Vec<grey_api::Peer>, Box<dyn std::error::Error>> {
+        let response = gloo::net::http::Request::get("/api/v1/cluster/peers")
+            .send()
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
+        let peers: Vec<grey_api::Peer> = response
+            .json()
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+        Ok(peers)
     }
 
     async fn fetch_notices() -> Result<Vec<grey_api::UiNotice>, Box<dyn std::error::Error>> {

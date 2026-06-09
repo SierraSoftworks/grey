@@ -5,6 +5,7 @@ use std::str::FromStr;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
+use grey_api::PeerHealth;
 use serde::{Deserialize, Serialize};
 
 use super::health::{Liveness, PhiAccrualDetector};
@@ -16,8 +17,8 @@ use super::health::{Liveness, PhiAccrualDetector};
 pub struct MemberRecord {
     /// Addresses the advertising node believes are working for this member.
     pub addresses: Vec<String>,
-    /// The member's boot generation (unix-millis at process start). A restart yields a larger
-    /// generation so its fresh record supersedes a stale one even though its heartbeat reset to 0.
+    /// The member's boot generation: a persisted, monotonically increasing counter bumped on every
+    /// restart, so a fresh record supersedes a stale one even though the heartbeat reset to 0.
     pub generation: u64,
     /// A monotonic counter the member bumps every gossip round; its advance is the liveness signal.
     pub heartbeat: u64,
@@ -151,6 +152,20 @@ pub struct MembershipConfig {
     pub member_expiry: Duration,
 }
 
+/// Raw per-peer signals derived from the failure detector and per-address timestamps.
+struct Signals {
+    /// The failure detector has not flagged the peer (or has no samples yet).
+    alive: bool,
+    /// We have received datagrams directly from the peer recently.
+    received: bool,
+    /// One of our sends to the peer was answered recently (a confirmed direct link).
+    confirmed: bool,
+    /// We are actively sending to the peer.
+    sending: bool,
+    /// No heartbeat has been observed for longer than the dead-node grace period.
+    long_silence: bool,
+}
+
 /// A candidate peer (and the specific address) to gossip with this round.
 pub struct GossipCandidate<Id, Addr> {
     pub id: Id,
@@ -181,12 +196,14 @@ where
     Id: Eq + Hash + Clone + Display,
     Addr: Eq + Hash + Clone + Display + FromStr,
 {
-    pub fn new(self_id: Id, config: MembershipConfig) -> Self {
+    /// Creates a registry for the local node. `generation` is a persisted, monotonically increasing
+    /// boot counter (see `State::load_and_bump_generation`): because it grows on every restart, this
+    /// node's fresh record always supersedes the stale one peers still hold, whose heartbeat may be
+    /// higher.
+    pub fn new(self_id: Id, generation: u64, config: MembershipConfig) -> Self {
         Self {
             self_id,
-            // Generation = boot wall-clock millis. A restart produces a larger value, so this node's
-            // fresh record supersedes the stale one peers still hold (whose heartbeat may be higher).
-            self_generation: chrono::Utc::now().timestamp_millis().max(0) as u64,
+            self_generation: generation,
             config,
             inner: RwLock::new(Inner {
                 self_heartbeat: 0,
@@ -336,39 +353,62 @@ where
         }
     }
 
-    fn classify(&self, member: &Member<Addr>, now: Instant) -> Liveness {
+    /// The raw per-peer signals the classifiers are derived from.
+    fn signals(&self, member: &Member<Addr>, now: Instant) -> Signals {
         let window = self.config.working_window;
         let recent = |t: Option<Instant>| {
             t.map(|t| now.saturating_duration_since(t) <= window).unwrap_or(false)
         };
-
         let phi = member.detector.phi(now);
-        // A node with no heartbeat samples yet is treated as alive so a just-learned peer is never
-        // immediately declared dead.
-        let alive = member.detector.last_arrival().is_none() || phi < self.config.phi_threshold;
-        // Did we receive datagrams directly from this peer, did our sends get answered, are we even
-        // trying to send to it?
-        let received = member.addresses.values().any(|h| recent(h.last_inbound));
-        let confirmed = member.addresses.values().any(|h| recent(h.last_confirmed));
-        let sending = member.addresses.values().any(|h| recent(h.last_send));
-
-        if !alive {
-            let long_silence = member
+        Signals {
+            // A node with no heartbeat samples yet is treated as alive so a just-learned peer is
+            // never immediately declared dead.
+            alive: member.detector.last_arrival().is_none() || phi < self.config.phi_threshold,
+            received: member.addresses.values().any(|h| recent(h.last_inbound)),
+            confirmed: member.addresses.values().any(|h| recent(h.last_confirmed)),
+            sending: member.addresses.values().any(|h| recent(h.last_send)),
+            long_silence: member
                 .detector
                 .last_arrival()
                 .map(|t| now.saturating_duration_since(t) > self.config.dead_grace)
-                .unwrap_or(false);
-            if long_silence {
+                .unwrap_or(false),
+        }
+    }
+
+    /// The fine-grained liveness used for operator-facing health reporting (including the
+    /// unidirectional-link signal).
+    fn classify(&self, member: &Member<Addr>, now: Instant) -> Liveness {
+        let s = self.signals(member, now);
+        if !s.alive {
+            if s.long_silence {
                 Liveness::Dead
             } else {
                 Liveness::Suspect
             }
-        } else if sending && received && !confirmed {
+        } else if s.sending && s.received && !s.confirmed {
             // The peer is alive and reaching us, and we are actively sending to it, yet none of our
             // sends are being answered: a one-way (asymmetric) link from us to the peer.
             Liveness::Unidirectional
         } else {
             Liveness::Healthy
+        }
+    }
+
+    /// The coarse, API/UI-facing aggregate health for a peer — the best state across all of its
+    /// addresses. `Online` requires a confirmed direct two-way link; `Transitive` means the peer is
+    /// alive (its heartbeat advances) but we have no confirmed direct link to it.
+    fn aggregate_health(&self, member: &Member<Addr>, now: Instant) -> PeerHealth {
+        let s = self.signals(member, now);
+        if s.alive {
+            if s.confirmed {
+                PeerHealth::Online
+            } else {
+                PeerHealth::Transitive
+            }
+        } else if s.long_silence {
+            PeerHealth::Offline
+        } else {
+            PeerHealth::Suspect
         }
     }
 
@@ -546,14 +586,16 @@ where
         }
     }
 
-    /// A redacted view of known peers for the API/UI: identifier and last-seen only. **Addresses are
-    /// intentionally never exposed** (the API has no access control and may be public).
-    pub fn redacted_peers(&self) -> Vec<(String, chrono::DateTime<chrono::Utc>)> {
+    /// A redacted view of known peers for the API/UI: identifier, last-seen, and aggregate health
+    /// only. **Addresses are intentionally never exposed** (the API has no access control and may be
+    /// reachable on the public internet).
+    pub fn redacted_peers(&self) -> Vec<(String, chrono::DateTime<chrono::Utc>, PeerHealth)> {
+        let now = Instant::now();
         let inner = self.inner.read().unwrap();
         inner
             .members
             .iter()
-            .map(|(id, m)| (id.to_string(), m.last_seen_wall))
+            .map(|(id, m)| (id.to_string(), m.last_seen_wall, self.aggregate_health(m, now)))
             .collect()
     }
 
@@ -561,6 +603,16 @@ where
     pub fn liveness_of(&self, peer: &Id, now: Instant) -> Option<Liveness> {
         let inner = self.inner.read().unwrap();
         inner.members.get(peer).map(|m| self.classify(m, now))
+    }
+
+    #[cfg(test)]
+    pub fn health_of(&self, peer: &Id, now: Instant) -> PeerHealth {
+        let inner = self.inner.read().unwrap();
+        inner
+            .members
+            .get(peer)
+            .map(|m| self.aggregate_health(m, now))
+            .unwrap_or(PeerHealth::Offline)
     }
 
     #[cfg(test)]
@@ -644,7 +696,7 @@ mod tests {
 
     #[test]
     fn merge_unions_addresses_and_supersedes_by_version() {
-        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), test_config());
+        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
         let base = Instant::now();
 
         let mut s1 = MembershipSample::new();
@@ -662,7 +714,7 @@ mod tests {
 
     #[test]
     fn merge_drops_self_records() {
-        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), test_config());
+        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
         let mut s = MembershipSample::new();
         s.insert(nid(1), record(&["127.0.0.1:1"], 9, 9));
         m.merge_sample(s, Instant::now());
@@ -671,7 +723,7 @@ mod tests {
 
     #[test]
     fn address_set_is_bounded() {
-        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), test_config());
+        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
         let base = Instant::now();
         let mut s = MembershipSample::new();
         s.insert(
@@ -688,7 +740,7 @@ mod tests {
 
     #[test]
     fn inbound_marks_address_working_and_keeps_node_healthy() {
-        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), test_config());
+        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
         let base = Instant::now();
         m.record_inbound(&nid(2), addr("10.0.0.2:8888"), base);
         // Healthy: we have a working address and the detector has no reason to suspect.
@@ -697,7 +749,7 @@ mod tests {
 
     #[test]
     fn unidirectional_when_alive_but_our_sends_are_unanswered() {
-        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), test_config());
+        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
         let base = Instant::now();
         let a = addr("10.0.0.2:8888");
 
@@ -719,7 +771,7 @@ mod tests {
 
     #[test]
     fn dead_when_heartbeats_stop_for_long_enough() {
-        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), test_config());
+        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
         let base = Instant::now();
         // Establish a ~1s heartbeat cadence.
         for hb in 1..5 {
@@ -734,7 +786,7 @@ mod tests {
 
     #[test]
     fn sample_includes_self_and_only_working_peer_addresses() {
-        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), test_config());
+        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
         m.set_self_addresses(vec!["10.0.0.1:8888".to_string()]);
         let base = Instant::now();
 
@@ -752,6 +804,41 @@ mod tests {
             !sample.contains_key(&nid(3)),
             "a peer with no confirmed-working address must not be advertised"
         );
+    }
+
+    #[test]
+    fn aggregate_health_reflects_best_address_state() {
+        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
+        let base = Instant::now();
+        let a = addr("10.0.0.2:8888");
+
+        // Unknown peer → Offline.
+        assert_eq!(m.health_of(&nid(2), base), PeerHealth::Offline);
+
+        // Learned via gossip (alive, but no confirmed direct link) → Transitive.
+        let mut s = MembershipSample::new();
+        s.insert(nid(2), record(&["10.0.0.2:8888"], 1, 1));
+        m.merge_sample(s, base);
+        assert_eq!(m.health_of(&nid(2), base), PeerHealth::Transitive);
+
+        // A confirmed reply to our send → Online (a direct two-way link).
+        m.record_send(&nid(2), &a, base);
+        m.record_confirmation(&nid(2), base);
+        assert_eq!(m.health_of(&nid(2), base), PeerHealth::Online);
+    }
+
+    #[test]
+    fn aggregate_health_is_offline_after_long_silence() {
+        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
+        let base = Instant::now();
+        for hb in 1..5 {
+            let mut s = MembershipSample::new();
+            s.insert(nid(2), record(&["10.0.0.2:8888"], 1, hb));
+            m.merge_sample(s, base + Duration::from_secs(hb));
+        }
+        // Well past dead_grace with no further heartbeats.
+        let now = base + Duration::from_secs(4 + 30);
+        assert_eq!(m.health_of(&nid(2), now), PeerHealth::Offline);
     }
 
     #[test]

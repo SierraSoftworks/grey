@@ -367,7 +367,11 @@ This gives Grey two capabilities:
   replies, for example behind an asymmetric NAT or firewall rule &mdash; and emits a `warn`-level
   `cluster.health.transition` event so operators can diagnose it instead of silently failing to converge.
   Grey then prefers gossiping over healthy links and backs off unhealthy ones (while still always
-  contacting seeds).
+  contacting seeds). Each peer is summarised with an aggregate health &mdash; the best state across
+  all of its addresses &mdash; surfaced in the web UI as a coloured indicator:
+  **Online** (green, a confirmed direct two-way link), **Transitive** (blue, alive in the cluster but
+  reached only indirectly or via a one-way link), **Suspect** (orange, heartbeats slowing), and
+  **Offline** (grey, not heard from for a long time).
 
 All of this membership and health state is held **in memory only**; it is never written to the state
 database (so a node on flash storage isn't churned with peer writes) and is rebuilt from the configured

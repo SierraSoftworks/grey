@@ -453,7 +453,7 @@ mod tests {
     }
 
     fn test_membership(id: NodeID) -> Arc<Membership<NodeID, NodeID>> {
-        Arc::new(Membership::new(id, test_membership_config()))
+        Arc::new(Membership::new(id, 1, test_membership_config()))
     }
 
     #[tokio::test]
@@ -562,7 +562,7 @@ mod tests {
     }
 
     fn socket_membership(id: NodeID, addr: SocketAddr) -> Arc<Membership<NodeID, SocketAddr>> {
-        let m = Arc::new(Membership::new(id, test_membership_config()));
+        let m = Arc::new(Membership::new(id, 1, test_membership_config()));
         m.set_self_addresses(vec![addr.to_string()]);
         m
     }
