@@ -23,6 +23,11 @@ const CLUSTER_PEERS_TABLE: TableDefinition<String, (u128, u64)> =
 // Maps a (NodeID, Probe Name) to a tuple of (Version, MsgPack Snapshot)
 const CLUSTER_FIELDS_TABLE: TableDefinition<(u128, String), (u64, &[u8])> =
     TableDefinition::new("cluster_fields");
+// Stores this instance's persistent identity so that a restart resumes the same NodeID (and keeps
+// advertising its existing probe state) rather than appearing as a brand-new node.
+const CLUSTER_IDENTITY_TABLE: TableDefinition<&str, u128> =
+    TableDefinition::new("cluster_identity");
+const NODE_ID_KEY: &str = "node_id";
 
 type ProbeState = Probe;
 
@@ -40,15 +45,15 @@ pub struct State {
 impl State {
     #[cfg(test)]
     pub async fn test(temp_dir: PathBuf) -> Self {
-        let config_path = temp_dir.join("config.yml");
+        // Construct through the real `new()` path so tests exercise identical setup (including
+        // persisting the node identity), writing the in-memory test config to disk for it to load.
         let config = Config::test(&temp_dir);
-        let this = Self {
-            config_path,
-            config_last_modified: Arc::new(Mutex::new(std::time::SystemTime::now())),
-            config: Arc::new(RwLock::new(Arc::new(config))),
-            node_id: NodeID::new(),
-            database: Arc::new(Database::create(temp_dir.join("state.redb")).unwrap()),
-        };
+        let config_path = temp_dir.join("config.yml");
+        tokio::fs::write(&config_path, serde_yaml::to_string(&config).unwrap())
+            .await
+            .unwrap();
+
+        let this = Self::new(&config_path).await.unwrap();
 
         let test_probe = &this.get_config().probes[0];
 
@@ -56,7 +61,7 @@ impl State {
             .await
             .unwrap();
         this.update_probe_config(test_probe).await.unwrap();
-        this.update_probe_state(&test_probe.name, &&ProbeResult::test()).await.unwrap();
+        this.update_probe_state(&test_probe.name, &ProbeResult::test()).await.unwrap();
 
         this
     }
@@ -66,6 +71,7 @@ impl State {
         let config = Config::load_from_path(&config_path).await?;
 
         let database = Arc::new(Database::create(config.state.clone())?);
+        let node_id = Self::load_or_create_node_id(&database)?;
 
         Ok(Self {
             config_path,
@@ -73,9 +79,35 @@ impl State {
 
             config: Arc::new(RwLock::new(Arc::new(config))),
 
-            node_id: NodeID::new(),
+            node_id,
             database,
         })
+    }
+
+    /// Loads this instance's persistent [`NodeID`] from the database, generating and storing a fresh
+    /// one on first run. Persisting the identity means a restart (via [`State::new`]) resumes the
+    /// same node — continuing to advertise its probe state — instead of appearing as a new node
+    /// whose old state must later be garbage-collected.
+    fn load_or_create_node_id(database: &Database) -> Result<NodeID, Box<dyn Error>> {
+        let read = database.begin_read()?;
+        // `open_table` errors on a read transaction if the table has never been created, which is
+        // the expected first-run case — fall through to generating a new identity.
+        if let Ok(table) = read.open_table(CLUSTER_IDENTITY_TABLE)
+            && let Some(existing) = table.get(NODE_ID_KEY)?
+        {
+            return Ok(NodeID::from(existing.value()));
+        }
+        drop(read);
+
+        let node_id = NodeID::new();
+        let id: u128 = node_id.into();
+        let write = database.begin_write()?;
+        {
+            let mut table = write.open_table(CLUSTER_IDENTITY_TABLE)?;
+            table.insert(NODE_ID_KEY, id)?;
+        }
+        write.commit()?;
+        Ok(node_id)
     }
 
     pub async fn reload(&self) -> Result<(), Box<dyn Error>> {
@@ -647,5 +679,24 @@ mod tests {
             node.get_encryption_key().unwrap(),
             node.parse_secret_key(&only).unwrap()
         );
+    }
+
+    /// The node identity is persisted, so reopening the same state database yields the same NodeID
+    /// — a restart resumes the node rather than appearing as a new one.
+    #[test]
+    fn node_id_persists_across_database_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.redb");
+
+        let first = {
+            let db = Database::create(&path).unwrap();
+            State::load_or_create_node_id(&db).unwrap()
+        };
+        let second = {
+            let db = Database::create(&path).unwrap();
+            State::load_or_create_node_id(&db).unwrap()
+        };
+
+        assert_eq!(first, second, "NodeID must be stable across restarts");
     }
 }
