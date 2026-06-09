@@ -209,10 +209,11 @@ cluster:
 How long to retain information about a probe before it is considered stale and removed
 in the next garbage collection cycle.
 
-Every time you start Grey, it starts reporting probe state under a new node identifier,
-so it is normal and expected that application restarts will result in probe state for
-old instances not being updated and eventually needing to be removed. Once removed,
-the aggregated probe metrics will be adjusted to account for the loss of this data.
+Each Grey instance persists its node identifier in its state database, so a restart resumes
+the same identity and continues updating its existing probe state rather than appearing as a
+new node. Probe records are still removed once they have not been updated for `gc_probe_expiry`
+— for example when an instance is permanently retired, or when its state database is reset — and
+the aggregated probe metrics are adjusted to account for the loss of this data.
 
 ```yaml
 cluster:
