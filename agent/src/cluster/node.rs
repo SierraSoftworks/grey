@@ -17,6 +17,15 @@ impl Display for NodeID {
     }
 }
 
+impl std::str::FromStr for NodeID {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Mirrors the base-36 encoding used by `Display`.
+        u128::from_str_radix(s, 36).map(Self)
+    }
+}
+
 impl From<u128> for NodeID {
     fn from(value: u128) -> Self {
         Self(value)

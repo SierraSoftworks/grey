@@ -88,15 +88,22 @@ cluster:
 ```
 
 #### peers
-Initial peer addresses for cluster discovery. These should be IP addresses which
+Initial peer addresses for cluster discovery. These should be addresses which
 are accessible from the current node (either over a private network, a VPN, or over
 the public internet).
+
+Each entry may be either an `ip:port` literal or a `hostname:port` value. Hostnames
+are resolved via DNS, which makes it possible to use dynamic naming systems such as
+Tailscale + MagicDNS, Kubernetes service names, or Docker Compose service aliases.
+DNS names are re-resolved periodically in the background, so peers whose IP addresses
+change over time will continue to be reachable without restarting Grey.
 
 ```yaml
 cluster:
   peers:
     - 10.0.0.2:8888
-    - 10.0.0.3:8888
+    - grey-worker-1.example.com:8888
+    - my-node.tailnet-1234.ts.net:8888
 ```
 
 #### secrets
@@ -196,6 +203,19 @@ For clusters with N nodes, optimal gossip_factor is typically `log₂(N) + 1`:
 - 2-4 nodes: gossip_factor = 2
 - 5-8 nodes: gossip_factor = 3  
 - 9-16 nodes: gossip_factor = 4
+
+#### peer_resolve_interval
+How frequently the DNS names configured in `peers` are re-resolved in the background.
+
+Seed peers that are configured as hostnames are resolved on a background loop (rather than
+on every gossip round) so that DNS lookups never add latency to the gossip hot path. Lowering
+this value makes Grey react more quickly to seed peers whose IP addresses change, at the cost
+of slightly more frequent DNS lookups. IP-literal peers are unaffected by this setting.
+
+```yaml
+cluster:
+  peer_resolve_interval: 60s  # Default
+```
 
 #### gc_interval
 How frequently to run the garbage collector to remove stale peers and expired probes.
