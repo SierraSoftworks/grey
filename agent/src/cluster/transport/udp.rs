@@ -53,6 +53,16 @@ where
 {
     type Address = SocketAddr;
 
+    async fn resolve(
+        &self,
+        address: &str,
+    ) -> Result<Vec<Self::Address>, Box<dyn std::error::Error>> {
+        // `lookup_host` accepts both `ip:port` and `host:port` specifications, performing a DNS
+        // lookup for the latter, and yields one entry per resolved address (e.g. both A and AAAA
+        // records).
+        Ok(tokio::net::lookup_host(address).await?.collect())
+    }
+
     async fn send(
         &self,
         address: Self::Address,
@@ -164,6 +174,50 @@ mod tests {
             }
             other => panic!("expected Ack, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn udp_gossip_transport_resolves_addresses() {
+        let (addr_str, _addr) = random_local_addr();
+        let transport: UdpGossipTransport<_, _> =
+            UdpGossipTransport::new(&addr_str, MAX_DATAGRAM_SIZE, Aes256Gcm, StaticKeyProvider::new([7u8; 32]))
+                .await
+                .unwrap();
+
+        // IP literals should resolve to themselves without any DNS lookup.
+        let resolved = GossipTransport::<TestPeer, LastWriteWinsValue<i32>>::resolve(
+            &transport,
+            "127.0.0.1:8888",
+        )
+        .await
+        .unwrap();
+        assert_eq!(resolved, vec!["127.0.0.1:8888".parse().unwrap()]);
+
+        // Hostnames should be resolved via DNS; `localhost` is guaranteed to resolve locally.
+        let resolved = GossipTransport::<TestPeer, LastWriteWinsValue<i32>>::resolve(
+            &transport,
+            "localhost:8888",
+        )
+        .await
+        .unwrap();
+        assert!(
+            resolved.iter().all(|addr| addr.ip().is_loopback()),
+            "expected localhost to resolve to loopback addresses, got {resolved:?}"
+        );
+        assert!(
+            resolved.iter().any(|addr| addr.port() == 8888),
+            "expected resolved addresses to preserve the requested port, got {resolved:?}"
+        );
+
+        // Unparseable specifications should surface an error rather than silently yielding nothing.
+        assert!(
+            GossipTransport::<TestPeer, LastWriteWinsValue<i32>>::resolve(
+                &transport,
+                "not a valid address"
+            )
+            .await
+            .is_err()
+        );
     }
 
     #[tokio::test]
