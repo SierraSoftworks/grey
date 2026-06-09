@@ -50,7 +50,7 @@ where
     seed_resolve_interval: std::time::Duration,
     /// The most recently resolved seed peer addresses, maintained by the resolver loop so that the
     /// gossip hot path never has to perform DNS resolution itself.
-    resolved_seed_peers: std::sync::Mutex<Vec<S::Address>>,
+    resolved_seed_peers: tokio::sync::RwLock<Vec<S::Address>>,
 
     gossip_factor: usize,
     gossip_interval: std::time::Duration,
@@ -73,7 +73,7 @@ where
             gossip_interval: std::time::Duration::from_secs(10),
             seed_peers: Vec::new(),
             seed_resolve_interval: std::time::Duration::from_secs(60),
-            resolved_seed_peers: std::sync::Mutex::new(Vec::new()),
+            resolved_seed_peers: tokio::sync::RwLock::new(Vec::new()),
         }
     }
 
@@ -145,7 +145,7 @@ where
             return;
         }
 
-        *self.resolved_seed_peers.lock().unwrap() = resolved;
+        *self.resolved_seed_peers.write().await = resolved;
     }
 
     async fn gossip_loop(&self) {
@@ -176,7 +176,7 @@ where
         // forgotten by its discovered peers can still rejoin the cluster via a live seed. The
         // resolved addresses are maintained by the background resolver loop so we never block the
         // gossip hot path on DNS resolution here.
-        peer_addresses.extend(self.resolved_seed_peers.lock().unwrap().iter().cloned());
+        peer_addresses.extend(self.resolved_seed_peers.read().await.iter().cloned());
 
         // `Vec::dedup` only removes *consecutive* duplicates; a seed that is also a sampled peer
         // would not be adjacent to its duplicate. Dedup by identity instead.
