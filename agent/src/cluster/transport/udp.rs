@@ -60,15 +60,12 @@ where
     ) -> Result<Option<(Self::Address, Message<P, T>)>, Box<dyn std::error::Error>>
     {
         let mut buf = [0; 65507];
-        match self.socket.try_recv_from(&mut buf) {
-            Ok((size, addr)) => {
-                let decrypted_data = self.encryption_provider.decrypt(&self.key_provider, &buf[..size])?;
-                let msg: Message<P, T> = rmp_serde::from_slice(&decrypted_data)?;
-                Ok(Some((addr, msg)))
-            }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
-            Err(e) => Err(Box::new(e)),
-        }
+        // Await the next datagram rather than polling with `try_recv_from`; this removes the
+        // ~100 wakeups/s-per-node busy-poll and the up-to-10ms hop latency it incurred.
+        let (size, addr) = self.socket.recv_from(&mut buf).await?;
+        let decrypted_data = self.encryption_provider.decrypt(&self.key_provider, &buf[..size])?;
+        let msg: Message<P, T> = rmp_serde::from_slice(&decrypted_data)?;
+        Ok(Some((addr, msg)))
     }
 }
 
