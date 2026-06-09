@@ -140,8 +140,8 @@ where
                     }
                 },
                 Ok(_) => {
-                    // No message received, continue
-                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    // No message available (e.g. a closed in-memory channel); the UDP transport
+                    // now awaits the next datagram, so this no longer busy-polls.
                 }
                 Err(err) => {
                     // Handle error
