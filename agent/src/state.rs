@@ -17,9 +17,12 @@ use crate::{
 };
 use crate::cluster::GossipStore;
 
-// Maps a node's address to a tuple of its (NodeID, Last Seen Timestamp)
-const CLUSTER_PEERS_TABLE: TableDefinition<String, (u128, u64)> =
-    TableDefinition::new("cluster_peers");
+// Maps a node's NodeID to a tuple of its (Address, Last Seen Timestamp). Keyed by NodeID rather
+// than address so a node that changes address updates its row in place instead of leaving a stale
+// entry behind. A new table name is used because the key type changed; the old address-keyed table
+// is abandoned (peer data is ephemeral and re-learned within seconds via gossip).
+const CLUSTER_PEERS_TABLE: TableDefinition<u128, (String, u64)> =
+    TableDefinition::new("cluster_peers_v2");
 // Maps a (NodeID, Probe Name) to a tuple of (Version, MsgPack Snapshot)
 const CLUSTER_FIELDS_TABLE: TableDefinition<(u128, String), (u64, &[u8])> =
     TableDefinition::new("cluster_fields");
@@ -209,9 +212,9 @@ impl State {
         let txn = self.database.begin_read()?;
         let table = txn.open_table(CLUSTER_PEERS_TABLE)?;
         for entry in table.iter()?.filter_map(|r| r.ok()) {
-            let (_addr, info) = entry;
-            let (peer_id, last_seen) = info.value();
-            let peer_id = NodeID::from(peer_id);
+            let (id, info) = entry;
+            let peer_id = NodeID::from(id.value());
+            let (_address, last_seen) = info.value();
             let last_seen =
                 chrono::DateTime::from_timestamp(last_seen as i64, 0).unwrap_or_default();
             peers.push(grey_api::Peer {
@@ -234,7 +237,7 @@ impl State {
                 chrono::Utc::now() - self.get_config().cluster.gc_probe_expiry;
             let peer_drop_threshold = chrono::Utc::now() - self.get_config().cluster.gc_peer_expiry;
 
-            table_peers.retain(|addr, (peer_id, last_seen)| {
+            table_peers.retain(|peer_id, (addr, last_seen)| {
                 let peer_id = NodeID::from(peer_id);
                 let last_seen =
                     chrono::DateTime::from_timestamp(last_seen as i64, 0).unwrap_or_default();
@@ -370,9 +373,10 @@ impl GossipStore for State {
         let txn = self.database.begin_write()?;
         {
             let mut table_peers = txn.open_table(CLUSTER_PEERS_TABLE)?;
+            let peer_id: u128 = peer.into();
             table_peers.insert(
-                address.to_string(),
-                (peer.into(), chrono::Utc::now().timestamp() as u64),
+                peer_id,
+                (address.to_string(), chrono::Utc::now().timestamp() as u64),
             )?;
         }
         txn.commit()?;
@@ -385,7 +389,7 @@ impl GossipStore for State {
         Ok(table
             .iter()?
             .filter_map(|r| r.ok())
-            .filter_map(|(addr, _info)| addr.value().parse().ok())
+            .filter_map(|(_id, info)| info.value().0.parse().ok())
             .collect())
     }
 
@@ -584,6 +588,32 @@ mod tests {
         assert!(
             table.get((node.into(), "stale".to_string())).unwrap().is_none(),
             "an hour-old probe must expire under a 60s expiry (i.e. version read as milliseconds)"
+        );
+    }
+
+    /// Peers are keyed by NodeID, so a node that changes address updates its row in place rather
+    /// than leaving a stale entry behind.
+    #[tokio::test]
+    async fn heartbeat_updates_node_address_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = State::test(dir.path().to_path_buf()).await;
+
+        let node = NodeID::new();
+        state.heartbeat(node, "10.0.0.1:8888".parse().unwrap()).await.unwrap();
+        state.heartbeat(node, "10.0.0.2:8888".parse().unwrap()).await.unwrap();
+
+        let addresses: Vec<String> = state
+            .get_peer_addresses()
+            .await
+            .unwrap()
+            .iter()
+            .map(|a| a.to_string())
+            .collect();
+
+        assert!(addresses.contains(&"10.0.0.2:8888".to_string()), "latest address must be present");
+        assert!(
+            !addresses.contains(&"10.0.0.1:8888".to_string()),
+            "old address must be replaced in place, not left as a stale row"
         );
     }
 }
