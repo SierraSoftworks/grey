@@ -20,6 +20,23 @@ fn unique_preserving_order<A: Clone + Eq + Hash>(items: Vec<A>) -> Vec<A> {
     result
 }
 
+/// Randomly selects up to `count` items from `items` without replacement.
+///
+/// Uses a partial Fisher–Yates shuffle so it touches only `count` elements regardless of the
+/// input size. Returns all items when `count` exceeds their number.
+fn sample_peers<A>(mut items: Vec<A>, count: usize) -> Vec<A> {
+    use rand::RngExt;
+
+    let take = count.min(items.len());
+    let mut rng = rand::rng();
+    for i in 0..take {
+        let j = i + rng.random_range(0..(items.len() - i));
+        items.swap(i, j);
+    }
+    items.truncate(take);
+    items
+}
+
 pub struct GossipClient<S, T>
 where
     S: GossipStore,
@@ -99,11 +116,18 @@ where
         let self_id = self.store.id().await?;
         tracing::Span::current().record("node.id", &self_id.to_string().as_str());
 
-        let mut peer_addresses = self.store.get_peer_addresses().await.unwrap_or_default();
+        // Gossip to a random sample of up to `gossip_factor` discovered peers per round so fan-out
+        // stays O(gossip_factor) rather than O(cluster size); anti-entropy still converges as the
+        // sampled set rotates across rounds.
+        let discovered = self.store.get_peer_addresses().await.unwrap_or_default();
+        let mut peer_addresses = sample_peers(discovered, self.gossip_factor);
+
+        // Always include the seed peers. A node that has been partitioned long enough to be
+        // forgotten by its discovered peers can still rejoin the cluster via a live seed.
         peer_addresses.extend(self.seed_peers.iter().cloned());
-        // `Vec::dedup` only removes *consecutive* duplicates; seed peers are appended after the
-        // discovered peers, so a seed that is also a known peer would not be adjacent to its
-        // duplicate and would be gossiped to twice per round. Dedup by identity instead.
+
+        // `Vec::dedup` only removes *consecutive* duplicates; a seed that is also a sampled peer
+        // would not be adjacent to its duplicate. Dedup by identity instead.
         let peer_addresses = unique_preserving_order(peer_addresses);
         if peer_addresses.is_empty() {
             return Ok(());
@@ -254,6 +278,35 @@ mod tests {
     fn unique_preserving_order_keeps_first_seen_order() {
         let input = vec!["b", "a", "b", "c", "a"];
         assert_eq!(unique_preserving_order(input), vec!["b", "a", "c"]);
+    }
+
+    #[test]
+    fn sample_peers_limits_to_count_and_returns_distinct_subset() {
+        let all: Vec<u32> = (0..10).collect();
+        for _ in 0..100 {
+            let sampled = sample_peers(all.clone(), 3);
+            assert_eq!(sampled.len(), 3, "should sample exactly gossip_factor peers");
+            assert!(sampled.iter().all(|x| all.contains(x)), "samples must come from the input");
+            let distinct: HashSet<_> = sampled.iter().collect();
+            assert_eq!(distinct.len(), sampled.len(), "samples must be without replacement");
+        }
+    }
+
+    #[test]
+    fn sample_peers_caps_at_available() {
+        assert_eq!(sample_peers(vec![1, 2], 5).len(), 2);
+        assert!(sample_peers(Vec::<u32>::new(), 5).is_empty());
+    }
+
+    #[test]
+    fn sample_peers_eventually_covers_all_candidates() {
+        // Sampling must rotate across rounds so anti-entropy reaches every peer over time.
+        let all: Vec<u32> = (0..5).collect();
+        let mut seen: HashSet<u32> = HashSet::new();
+        for _ in 0..1000 {
+            seen.extend(sample_peers(all.clone(), 1));
+        }
+        assert_eq!(seen.len(), all.len(), "every candidate should be reachable across rounds");
     }
 
     #[tokio::test]
