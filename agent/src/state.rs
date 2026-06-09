@@ -325,7 +325,10 @@ impl cluster::EncryptionKeyProvider for State {
         let config = self.get_config();
         let secret = if config.cluster.secret.is_empty() {
             config.cluster.secrets.iter()
-                .nth(2)
+                // Encrypt with the second key in the list (the "current" key in the
+                // documented rotation scheme), falling back to the first when only one
+                // key is configured. See docs/guide/clustering.md ("Key Rotation").
+                .nth(1)
                 .or(config.cluster.secrets.first())
                 .ok_or(format!("No secrets have been configured for the cluster, cannot encrypt gossip messages. You can use '{}' as a key if you need it.", self.generate_example_key()))?
         } else {
@@ -526,6 +529,8 @@ impl Versioned for Probe {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cluster::{Aes256Gcm, EncryptionKeyProvider, EncryptionProvider};
+    use base64::prelude::*;
 
     fn probe_at(name: &str, when: chrono::DateTime<chrono::Utc>) -> ProbeState {
         Probe {
@@ -614,6 +619,61 @@ mod tests {
         assert!(
             !addresses.contains(&"10.0.0.1:8888".to_string()),
             "old address must be replaced in place, not left as a stale row"
+        );
+    }
+
+    fn b64_key(byte: u8) -> String {
+        BASE64_STANDARD.encode([byte; 32])
+    }
+
+    async fn state_with_secrets(dir: &std::path::Path, secrets: Vec<String>) -> State {
+        let state = State::test(dir.to_path_buf()).await;
+        let mut config = Config::test(&dir.to_path_buf());
+        config.cluster.secrets = secrets;
+        *state.config.write().unwrap() = Arc::new(config);
+        state
+    }
+
+    /// During a documented 3-key rotation the list is
+    /// `[new (decrypt-only), current (encrypt+decrypt), old (decrypt-only)]`, so encryption must use
+    /// the *second* key. A peer that has rotated one step forward (dropping `old`) still holds
+    /// `current` for decryption and must be able to read the message.
+    #[tokio::test]
+    async fn encrypts_with_second_key_and_survives_rotation() {
+        let new = b64_key(1);
+        let current = b64_key(2);
+        let old = b64_key(3);
+
+        let dir_a = tempfile::tempdir().unwrap();
+        let node_a = state_with_secrets(dir_a.path(), vec![new.clone(), current.clone(), old]).await;
+
+        // Encryption uses the current (second) key, not the old (third) key.
+        assert_eq!(
+            node_a.get_encryption_key().unwrap(),
+            node_a.parse_secret_key(&current).unwrap(),
+            "expected encryption with the second (current) key"
+        );
+
+        // Node B has rotated forward and dropped `old`, but still accepts `current` for decryption.
+        let newer = b64_key(0);
+        let dir_b = tempfile::tempdir().unwrap();
+        let node_b = state_with_secrets(dir_b.path(), vec![newer, new, current]).await;
+
+        let provider = Aes256Gcm;
+        let ciphertext = provider.encrypt(&node_a, b"probe-state").unwrap();
+        let plaintext = provider.decrypt(&node_b, &ciphertext).unwrap();
+        assert_eq!(plaintext, b"probe-state");
+    }
+
+    /// With a single configured key, encryption falls back to that key.
+    #[tokio::test]
+    async fn encrypts_with_only_key_when_single() {
+        let only = b64_key(7);
+        let dir = tempfile::tempdir().unwrap();
+        let node = state_with_secrets(dir.path(), vec![only.clone()]).await;
+        assert_eq!(
+            node.get_encryption_key().unwrap(),
+            node.parse_secret_key(&only).unwrap()
         );
     }
 }

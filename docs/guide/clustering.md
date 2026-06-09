@@ -230,3 +230,27 @@ under load.
 ```yaml
 cluster:
   gc_peer_expiry: 30m  # Default (30 minutes)
+```
+
+## Partitions and Recovery
+
+Grey discovers peers transitively: once a node has gossiped with a seed, it learns about the
+rest of the cluster and contacts those nodes directly. To keep its member list current, each
+node forgets any peer it has not heard from within `gc_peer_expiry` (30 minutes by default).
+
+This has an important consequence for **network partitions**. If two nodes that discovered each
+other indirectly (neither is a seed of the other) are split apart for longer than
+`gc_peer_expiry`, they will each forget the other. When the partition heals, neither side knows
+the other's address anymore, so they will **only** reconverge through a peer they both still
+gossip with &mdash; in practice, a shared seed.
+
+Because every node always gossips with its configured seed peers (they are never forgotten),
+this is exactly what the seeds are for. To make sure your cluster heals after a partition:
+
+- Configure **at least two seed peers** on every node, and make sure those seeds are
+  reachable from every part of the network you expect to be partitioned.
+- Prefer stable, well-known addresses for seeds (for example, a small set of primary nodes)
+  rather than ephemeral worker addresses.
+
+As long as each side of a healed partition can reach a common, live seed, probe state
+reconverges automatically once gossip resumes.
