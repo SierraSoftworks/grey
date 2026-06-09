@@ -28,7 +28,6 @@ where
 {
     pub async fn new(
         addr: &str,
-        max_message_size: usize,
         encryption_provider: E,
         key_provider: K,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -39,8 +38,16 @@ where
             socket: Arc::new(socket),
             encryption_provider,
             key_provider,
-            max_message_size,
+            max_message_size: MAX_DATAGRAM_SIZE,
         })
+    }
+
+    /// Sets the maximum size, in bytes, of an encrypted datagram this transport will emit. Defaults
+    /// to [`MAX_DATAGRAM_SIZE`] when not called. Lower it below the path MTU to avoid IP
+    /// fragmentation; messages larger than this are partitioned across gossip rounds.
+    pub fn with_max_message_size(mut self, msg_size: usize) -> Self {
+        self.max_message_size = msg_size;
+        self
     }
 }
 
@@ -50,6 +57,7 @@ where
     K: EncryptionKeyProvider<Key = E::Key>,
     P: Eq + Hash + Clone + Serialize + DeserializeOwned + Send + 'static,
     T: Versioned + Serialize + DeserializeOwned + Send + 'static,
+    T::Diff: Versioned,
 {
     type Address = SocketAddr;
 
@@ -136,8 +144,9 @@ mod tests {
 
         // A deliberately small frame so a modest message must be partitioned to fit.
         let frame = 300usize;
-        let sender = UdpGossipTransport::new(&addr1_str, frame, Aes256Gcm, key_provider.clone()).await.unwrap();
-        let receiver = UdpGossipTransport::new(&addr2_str, MAX_DATAGRAM_SIZE, Aes256Gcm, key_provider).await.unwrap();
+        let sender = UdpGossipTransport::new(&addr1_str, Aes256Gcm, key_provider.clone()).await.unwrap()
+            .with_max_message_size(frame);
+        let receiver = UdpGossipTransport::new(&addr2_str, Aes256Gcm, key_provider).await.unwrap();
 
         let peer = TestPeer("p".to_string());
         let total = 50u64;
@@ -180,7 +189,7 @@ mod tests {
     async fn udp_gossip_transport_resolves_addresses() {
         let (addr_str, _addr) = random_local_addr();
         let transport: UdpGossipTransport<_, _> =
-            UdpGossipTransport::new(&addr_str, MAX_DATAGRAM_SIZE, Aes256Gcm, StaticKeyProvider::new([7u8; 32]))
+            UdpGossipTransport::new(&addr_str, Aes256Gcm, StaticKeyProvider::new([7u8; 32]))
                 .await
                 .unwrap();
 
@@ -228,8 +237,8 @@ mod tests {
         let (addr1_str, addr1) = random_local_addr();
         let (addr2_str, addr2) = random_local_addr();
 
-        let transport1 = UdpGossipTransport::new(&addr1_str, MAX_DATAGRAM_SIZE, Aes256Gcm, key_provider.clone()).await.unwrap();
-        let transport2 = UdpGossipTransport::new(&addr2_str, MAX_DATAGRAM_SIZE, Aes256Gcm, key_provider).await.unwrap();
+        let transport1 = UdpGossipTransport::new(&addr1_str, Aes256Gcm, key_provider.clone()).await.unwrap();
+        let transport2 = UdpGossipTransport::new(&addr2_str, Aes256Gcm, key_provider).await.unwrap();
 
         // Build a simple Syn message
         let peer1 = TestPeer("peer1".to_string());
@@ -286,8 +295,8 @@ mod tests {
         let (addr1_str, _addr1) = random_local_addr();
         let (addr2_str, addr2) = random_local_addr();
 
-        let transport1 = UdpGossipTransport::new(&addr1_str, MAX_DATAGRAM_SIZE, Aes256Gcm, StaticKeyProvider::new(shared_secret1)).await.unwrap();
-        let transport2 = UdpGossipTransport::new(&addr2_str, MAX_DATAGRAM_SIZE, Aes256Gcm, StaticKeyProvider::new(shared_secret2)).await.unwrap();
+        let transport1 = UdpGossipTransport::new(&addr1_str, Aes256Gcm, StaticKeyProvider::new(shared_secret1)).await.unwrap();
+        let transport2 = UdpGossipTransport::new(&addr2_str, Aes256Gcm, StaticKeyProvider::new(shared_secret2)).await.unwrap();
 
         let peer1 = TestPeer("peer1".to_string());
         let mut digest = ClusterStateDigest::new();

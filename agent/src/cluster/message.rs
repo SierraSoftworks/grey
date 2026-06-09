@@ -64,16 +64,24 @@ where
             Message::Ack(_, diff) | Message::SynAck(_, _, diff) => diff.is_empty(),
         }
     }
+}
 
-    /// Returns a copy of this message carrying at most `max_items` of its state entries, keeping the
-    /// oldest. Any accompanying digest is preserved unchanged. Size-limited transports use this to
-    /// fit a message into their frame; the dropped entries are re-sent on a later gossip round.
-    pub fn partition(&self, max_items: usize) -> Self {
+impl<Peer, Value> Message<Peer, Value>
+where
+    Peer: Eq + Hash + Clone,
+    Value: Versioned,
+    Value::Diff: Versioned + Serialize + Debug + Clone,
+    for <'dde> Value::Diff: Deserialize<'dde>,
+{
+    /// Consumes the message, returning one carrying at most `max_items` of its state entries,
+    /// keeping the oldest. Any accompanying digest is preserved unchanged. Size-limited transports
+    /// use this to fit a message into their frame; the dropped entries are re-sent on a later round.
+    pub fn partition(self, max_items: usize) -> Self {
         match self {
-            Message::Syn(meta, digest) => Message::Syn(meta.clone(), digest.clone()),
-            Message::Ack(meta, diff) => Message::Ack(meta.clone(), diff.keep_oldest(max_items)),
+            Message::Syn(meta, digest) => Message::Syn(meta, digest),
+            Message::Ack(meta, diff) => Message::Ack(meta, diff.partition(max_items)),
             Message::SynAck(meta, digest, diff) => {
-                Message::SynAck(meta.clone(), digest.clone(), diff.keep_oldest(max_items))
+                Message::SynAck(meta, digest, diff.partition(max_items))
             }
         }
     }
@@ -169,31 +177,30 @@ impl<Peer, Value> ClusterStateDiff<Peer, Value>
 where
     Peer: Eq + Hash + Clone,
     Value: Versioned,
-    Value::Diff: Serialize + Clone,
+    Value::Diff: Versioned + Serialize,
     for <'dde> Value::Diff: Deserialize<'dde>,
 {
-    /// Returns a copy retaining at most `max_items` of the oldest (lowest-version) entries; newer
-    /// entries are dropped and re-sent on a later gossip round. Size-limited transports use this to
-    /// shrink an over-large message while still making forward progress on the records that have
-    /// waited longest to propagate.
-    pub fn keep_oldest(&self, max_items: usize) -> Self {
-        let mut entries: Vec<(u64, &Peer, &String)> = self
+    /// Consumes the diff, returning at most `max_items` of the oldest (lowest-version) entries;
+    /// newer entries are dropped and re-sent on a later gossip round. Size-limited transports use
+    /// this to shrink an over-large message while still making forward progress on the records that
+    /// have waited longest to propagate. The retained entries are moved, not cloned.
+    pub fn partition(self, max_items: usize) -> Self {
+        let mut entries: Vec<(u64, Peer, String, Value::Diff)> = self
             .inner
-            .iter()
+            .into_iter()
             .flat_map(|(peer, fields)| {
-                fields.iter().map(move |(field, diff)| {
-                    let version = Into::<Value>::into(diff.clone()).version();
-                    (version, peer, field)
+                fields.into_iter().map(move |(field, diff)| {
+                    let version = diff.version();
+                    (version, peer.clone(), field, diff)
                 })
             })
             .collect();
-        entries.sort_by_key(|(version, _, _)| *version);
+        entries.sort_by_key(|(version, _, _, _)| *version);
         entries.truncate(max_items);
 
         let mut inner: HashMap<Peer, HashMap<String, Value::Diff>> = HashMap::new();
-        for (_, peer, field) in entries {
-            let diff = self.inner[peer][field].clone();
-            inner.entry(peer.clone()).or_default().insert(field.clone(), diff);
+        for (_, peer, field, diff) in entries {
+            inner.entry(peer).or_default().insert(field, diff);
         }
         Self { inner }
     }
@@ -307,8 +314,8 @@ mod tests {
     }
 
     #[test]
-    fn keep_oldest_retains_lowest_versions() {
-        let kept = diff_with(&[5, 1, 4, 2, 3]).keep_oldest(2);
+    fn partition_retains_lowest_versions() {
+        let kept = diff_with(&[5, 1, 4, 2, 3]).partition(2);
         let inner = kept.into_inner();
         let fields = &inner[&1u32];
         assert_eq!(fields.len(), 2);
@@ -319,9 +326,9 @@ mod tests {
     }
 
     #[test]
-    fn keep_oldest_capped_at_available() {
-        assert_eq!(diff_with(&[1, 2]).keep_oldest(10).len(), 2);
-        assert_eq!(diff_with(&[1, 2]).keep_oldest(0).len(), 0);
+    fn partition_capped_at_available() {
+        assert_eq!(diff_with(&[1, 2]).partition(10).len(), 2);
+        assert_eq!(diff_with(&[1, 2]).partition(0).len(), 0);
     }
 
     #[test]
