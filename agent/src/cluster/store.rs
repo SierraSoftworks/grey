@@ -30,12 +30,11 @@ pub trait GossipStore {
     /// Computes the difference between the local state and a provided digest, returning the updates
     /// needed to bring the remote digest up to date with the local state.
     ///
-    /// The returned delta is bounded to at most `max_delta_bytes` once serialized, so it fits the
-    /// caller's transport; any remaining updates are carried by subsequent gossip rounds.
+    /// The full delta is returned; it is the transport's responsibility to fit it into its frame
+    /// (dropping the newest entries and re-sending them on a later round) if it is too large.
     fn diff(
         &self,
         digest: ClusterStateDigest<Self::Id>,
-        max_delta_bytes: usize,
     ) -> impl Future<
         Output = Result<ClusterStateDiff<Self::Id, Self::State>, Box<dyn std::error::Error>>,
     >;
@@ -159,7 +158,6 @@ mod in_memory {
         async fn diff(
             &self,
             digest: ClusterStateDigest<Self::Id>,
-            _max_delta_bytes: usize,
         ) -> Result<ClusterStateDiff<Self::Id, Self::State>, Box<dyn Error>> {
             Ok(self
                 .state
@@ -267,7 +265,7 @@ mod tests {
         );
 
         let diff = store
-            .diff(ClusterStateDigest::new().with_max_version(node_id, 0), usize::MAX)
+            .diff(ClusterStateDigest::new().with_max_version(node_id, 0))
             .await
             .unwrap();
         assert_eq!(

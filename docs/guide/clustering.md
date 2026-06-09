@@ -197,6 +197,20 @@ For clusters with N nodes, optimal gossip_factor is typically `log₂(N) + 1`:
 - 5-8 nodes: gossip_factor = 3  
 - 9-16 nodes: gossip_factor = 4
 
+#### max_message_size
+The maximum size, in bytes, of an encrypted gossip datagram this node will emit. Messages larger
+than this (for example a big catch-up after a node has been offline) are automatically split across
+multiple gossip rounds, sending the oldest un-propagated records first.
+
+The default is the theoretical maximum UDP payload, which relies on IP fragmentation. If your
+network path has a smaller MTU, lower this (for example to around `1400`) so each datagram fits in a
+single IP packet and isn't dropped by fragmentation-averse middleboxes.
+
+```yaml
+cluster:
+  max_message_size: 65507  # Default
+```
+
 #### gc_interval
 How frequently to run the garbage collector to remove stale peers and expired probes.
 

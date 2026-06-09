@@ -123,6 +123,9 @@ pub struct ClusterConfig {
     #[serde(default = "default::cluster::gossip_factor")]
     pub gossip_factor: usize,
 
+    #[serde(default = "default::cluster::max_message_size")]
+    pub max_message_size: usize,
+
     #[serde(default = "default::cluster::gc_interval")]
     #[serde(with = "humantime_serde")]
     pub gc_interval: std::time::Duration,
@@ -144,6 +147,7 @@ impl Default for ClusterConfig {
             secrets: vec![],
             gossip_interval: default::cluster::gossip_interval(),
             gossip_factor: default::cluster::gossip_factor(),
+            max_message_size: default::cluster::max_message_size(),
             gc_interval: default::cluster::gc_interval(),
             gc_probe_expiry: default::cluster::gc_probe_expiry(),
             gc_peer_expiry: default::cluster::gc_peer_expiry(),
@@ -187,6 +191,12 @@ mod default {
 
         pub fn gossip_factor() -> usize {
             2
+        }
+
+        pub fn max_message_size() -> usize {
+            // Theoretical maximum UDP datagram payload. Lower this below your path MTU (e.g. ~1400)
+            // to avoid IP fragmentation; over-large gossip messages are partitioned across rounds.
+            65507
         }
 
         pub fn gc_interval() -> std::time::Duration {

@@ -59,6 +59,7 @@ impl Engine {
         if self.state.get_config().cluster.enabled {
             let cluster_transport = cluster::UdpGossipTransport::new(
                 &self.state.get_config().cluster.listen,
+                self.state.get_config().cluster.max_message_size,
                 cluster::Aes256Gcm,
                 self.state.clone(),
             )

@@ -10,14 +10,10 @@ pub use tests::InMemoryGossipTransport;
 pub trait GossipTransport<Id: Eq + Hash, State: Versioned> {
     type Address;
 
-    /// The maximum number of bytes that a state delta may occupy in a single gossip message on
-    /// this transport, after reserving room for the rest of the message (envelope, metadata, the
-    /// accompanying digest) and any transport framing such as encryption.
-    ///
-    /// Implementations bound by a datagram size (e.g. UDP) return a finite budget; transports with
-    /// no practical limit return [`usize::MAX`].
-    fn max_delta_size(&self) -> usize;
-
+    /// Sends a gossip message to the given peer. A transport bound by a frame size (e.g. UDP) is
+    /// responsible for fitting the message into that frame itself — for example by partitioning an
+    /// over-large message with [`Message::partition`] and letting the dropped entries be re-sent on
+    /// a later gossip round.
     fn send(
         &self,
         address: Self::Address,
@@ -75,10 +71,6 @@ mod tests {
         T: Versioned + Send + 'static,
     {
         type Address = P;
-
-        fn max_delta_size(&self) -> usize {
-            usize::MAX
-        }
 
         async fn send(
             &self,

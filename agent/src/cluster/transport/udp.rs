@@ -4,18 +4,9 @@ use serde::{Serialize, de::DeserializeOwned};
 use tokio::net::UdpSocket;
 use crate::cluster::transport::encryption::{EncryptionKeyProvider, EncryptionProvider};
 
-/// Theoretical maximum size of a single UDP datagram payload (IPv4: 65535 - 20-byte IP header -
-/// 8-byte UDP header). A gossip message must fit within this once encrypted.
+/// Largest UDP datagram payload we will ever receive (IPv4: 65535 - 20-byte IP header - 8-byte UDP
+/// header). Used to size the receive buffer; the per-message send limit is configurable.
 const MAX_DATAGRAM_SIZE: usize = 65507;
-/// AES-256-GCM framing added to every datagram: a 12-byte nonce prefix and a 16-byte auth tag.
-const ENCRYPTION_OVERHEAD: usize = 12 + 16;
-/// Headroom reserved within each datagram for the rest of the gossip message that accompanies a
-/// delta — the enum discriminant, the sender metadata (id + trace context), and the cluster-state
-/// digest. 8 KiB comfortably covers the digest for clusters of a few hundred nodes.
-const ENVELOPE_RESERVE: usize = 8 * 1024;
-/// Bytes available for a state delta in a single datagram, after encryption framing and the
-/// reserved envelope headroom.
-const MAX_DELTA_SIZE: usize = MAX_DATAGRAM_SIZE - ENCRYPTION_OVERHEAD - ENVELOPE_RESERVE;
 
 pub struct UdpGossipTransport<E, K>
 where
@@ -25,6 +16,9 @@ where
     socket: Arc<UdpSocket>,
     encryption_provider: E,
     key_provider: K,
+    /// Maximum size, in bytes, of an encrypted datagram this transport will emit. Larger messages
+    /// are partitioned across rounds to fit. Lower it below the path MTU to avoid IP fragmentation.
+    max_message_size: usize,
 }
 
 impl<E, K> UdpGossipTransport<E, K>
@@ -34,6 +28,7 @@ where
 {
     pub async fn new(
         addr: &str,
+        max_message_size: usize,
         encryption_provider: E,
         key_provider: K,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -44,6 +39,7 @@ where
             socket: Arc::new(socket),
             encryption_provider,
             key_provider,
+            max_message_size,
         })
     }
 }
@@ -52,24 +48,38 @@ impl <E, K, P, T> GossipTransport<P, T> for UdpGossipTransport<E, K>
 where
     E: EncryptionProvider,
     K: EncryptionKeyProvider<Key = E::Key>,
-    P: Eq + Hash + Serialize + DeserializeOwned + Send + 'static,
+    P: Eq + Hash + Clone + Serialize + DeserializeOwned + Send + 'static,
     T: Versioned + Serialize + DeserializeOwned + Send + 'static,
 {
     type Address = SocketAddr;
-
-    fn max_delta_size(&self) -> usize {
-        MAX_DELTA_SIZE
-    }
 
     async fn send(
         &self,
         address: Self::Address,
         msg: Message<P, T>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let data = rmp_serde::to_vec(&msg)?;
-        let encrypted_data = self.encryption_provider.encrypt(&self.key_provider, &data)?;
-        self.socket.send_to(&encrypted_data, address).await?;
-        Ok(())
+        let mut msg = msg;
+        loop {
+            let data = rmp_serde::to_vec(&msg)?;
+            let encrypted = self.encryption_provider.encrypt(&self.key_provider, &data)?;
+
+            // Send once the encrypted datagram fits the frame, or once the message has been reduced
+            // to its digest and cannot be partitioned further. The latter is best effort: `send_to`
+            // surfaces any oversize error (e.g. a digest larger than the frame) to the caller.
+            if encrypted.len() <= self.max_message_size || msg.is_empty() {
+                self.socket.send_to(&encrypted, address).await?;
+                return Ok(());
+            }
+
+            // Estimate how many of the current entries will fit from the measured oversize ratio.
+            // Integer division undershoots, which we prefer: gossip is frequent, so sending a few
+            // fewer entries now is cheaper than extra serialization passes chasing the exact
+            // maximum. Re-measuring each pass lets the estimate self-correct for fixed overhead
+            // (metadata, digest) so it converges in one or two iterations.
+            let items = msg.len();
+            let keep = (items.saturating_mul(self.max_message_size) / encrypted.len()).min(items - 1);
+            msg = msg.partition(keep);
+        }
     }
 
     async fn try_receive(
@@ -108,18 +118,52 @@ mod tests {
         (addr_str, addr)
     }
 
-    #[test]
-    fn full_budget_delta_plus_envelope_fits_one_datagram() {
-        // Worst case: a delta filling the whole budget plus the reserved envelope headroom. After
-        // AES-256-GCM framing it must still fit within a single UDP datagram.
-        let plaintext = vec![0u8; MAX_DELTA_SIZE + ENVELOPE_RESERVE];
-        let encrypted = Aes256Gcm.encrypt_with([0u8; 32], &plaintext).unwrap();
-        assert!(
-            encrypted.len() <= MAX_DATAGRAM_SIZE,
-            "encrypted full-budget message ({} bytes) must fit the datagram limit ({MAX_DATAGRAM_SIZE})",
-            encrypted.len()
-        );
-        assert!(MAX_DELTA_SIZE > 32 * 1024, "delta budget should stay generous for catch-up");
+    #[tokio::test]
+    async fn send_partitions_oversized_message_keeping_oldest() {
+        let key_provider = StaticKeyProvider::new([7u8; 32]);
+        let (addr1_str, _addr1) = random_local_addr();
+        let (addr2_str, addr2) = random_local_addr();
+
+        // A deliberately small frame so a modest message must be partitioned to fit.
+        let frame = 300usize;
+        let sender = UdpGossipTransport::new(&addr1_str, frame, Aes256Gcm, key_provider.clone()).await.unwrap();
+        let receiver = UdpGossipTransport::new(&addr2_str, MAX_DATAGRAM_SIZE, Aes256Gcm, key_provider).await.unwrap();
+
+        let peer = TestPeer("p".to_string());
+        let total = 50u64;
+        let mut diff = ClusterStateDiff::new();
+        for v in 0..total {
+            diff.update(peer.clone(), format!("field-{v:03}"), LastWriteWinsValue::new(v as i32).with_version(v));
+        }
+        let msg = Message::<TestPeer, LastWriteWinsValue<i32>>::Ack(MessageMetadata::new(peer.clone()), diff);
+        assert_eq!(msg.len(), total as usize);
+
+        sender.send(addr2, msg).await.unwrap();
+
+        let (_src, received): (SocketAddr, Message<TestPeer, LastWriteWinsValue<i32>>) =
+            timeout(Duration::from_secs(1), async {
+                loop {
+                    if let Some(x) = receiver.try_receive().await.unwrap() {
+                        break x;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            }).await.expect("timed out waiting for partitioned message");
+
+        match received {
+            Message::Ack(_, diff) => {
+                let len = diff.len();
+                assert!(len > 0 && len < total as usize, "message must be partitioned (got {len} of {total})");
+                let inner = diff.into_inner();
+                let fields = &inner[&peer];
+                assert!(fields.contains_key("field-000"), "the oldest entry must be kept");
+                assert!(
+                    !fields.contains_key(&format!("field-{:03}", total - 1)),
+                    "the newest entry must be dropped and re-sent later"
+                );
+            }
+            other => panic!("expected Ack, got {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -130,8 +174,8 @@ mod tests {
         let (addr1_str, addr1) = random_local_addr();
         let (addr2_str, addr2) = random_local_addr();
 
-        let transport1 = UdpGossipTransport::new(&addr1_str, Aes256Gcm, key_provider.clone()).await.unwrap();
-        let transport2 = UdpGossipTransport::new(&addr2_str, Aes256Gcm, key_provider).await.unwrap();
+        let transport1 = UdpGossipTransport::new(&addr1_str, MAX_DATAGRAM_SIZE, Aes256Gcm, key_provider.clone()).await.unwrap();
+        let transport2 = UdpGossipTransport::new(&addr2_str, MAX_DATAGRAM_SIZE, Aes256Gcm, key_provider).await.unwrap();
 
         // Build a simple Syn message
         let peer1 = TestPeer("peer1".to_string());
@@ -188,8 +232,8 @@ mod tests {
         let (addr1_str, _addr1) = random_local_addr();
         let (addr2_str, addr2) = random_local_addr();
 
-        let transport1 = UdpGossipTransport::new(&addr1_str, Aes256Gcm, StaticKeyProvider::new(shared_secret1)).await.unwrap();
-        let transport2 = UdpGossipTransport::new(&addr2_str, Aes256Gcm, StaticKeyProvider::new(shared_secret2)).await.unwrap();
+        let transport1 = UdpGossipTransport::new(&addr1_str, MAX_DATAGRAM_SIZE, Aes256Gcm, StaticKeyProvider::new(shared_secret1)).await.unwrap();
+        let transport2 = UdpGossipTransport::new(&addr2_str, MAX_DATAGRAM_SIZE, Aes256Gcm, StaticKeyProvider::new(shared_secret2)).await.unwrap();
 
         let peer1 = TestPeer("peer1".to_string());
         let mut digest = ClusterStateDigest::new();
