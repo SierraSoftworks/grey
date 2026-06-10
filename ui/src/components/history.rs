@@ -191,13 +191,13 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::S
             </div>
             <div class="tooltip-details">
                 <div class="tooltip-row">
-                    <span class="tooltip-label">{"Start:"}</span>
+                    <span class="tooltip-label">{"Bucket:"}</span>
                     <span>{timestamp}</span>
                 </div>
                 if let Some(streak) = streak {
                     if let Some(since) = streak.since() {
                         <div class="tooltip-row">
-                            <span class="tooltip-label">{if streak.passing() { "Passing since:" } else { "Failing since:" }}</span>
+                            <span class="tooltip-label">{"Since:"}</span>
                             <span>{since.format("%Y-%m-%d %H:%M:%S UTC").to_string()}</span>
                         </div>
                     }

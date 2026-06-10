@@ -6,7 +6,7 @@ use yew::prelude::*;
 use crate::components::status::StatusLevel;
 use crate::contexts::{NoticesProvider, PeersProvider, ProbesProvider, UiConfigProvider, use_probes};
 
-use super::components::{Banner, BannerKind, Header, PeerList, ProbeList, Timeline};
+use super::components::{Banner, BannerKind, Header, ProbeList, Timeline};
 
 #[cfg(feature = "wasm")]
 pub enum ClientMsg {
@@ -224,7 +224,6 @@ fn app_content(props: &AppContentProps) -> Html {
             <div class="content">
                 <Banner kind={banner_kind} text={status_text.to_string()} />
                 <ProbeList />
-                <PeerList />
             </div>
 
             <Timeline />

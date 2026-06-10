@@ -1,5 +1,5 @@
 use super::History;
-use crate::formatters::availability;
+use crate::formatters::{availability, compact_duration};
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
@@ -23,6 +23,16 @@ pub fn probe(props: &ProbeProps) -> Html {
     };
 
     let active_observers = props.probe.history.last().map(|h| h.observations.len()).unwrap_or(props.probe.observations.len());
+
+    // How long the probe has held its current state, e.g. "healthy for 5d" or "unhealthy for 17m".
+    let streak_text = streak.since().map(|since| {
+        let held_for = compact_duration(chrono::Utc::now().signed_duration_since(since));
+        if streak.passing() {
+            format!("healthy for {held_for}")
+        } else {
+            format!("unhealthy for {held_for}")
+        }
+    });
 
     html! {
         <div class="probe">
@@ -48,6 +58,9 @@ pub fn probe(props: &ProbeProps) -> Html {
                     <span class="icon-eye"></span>
                     {format!("{}", active_observers)}
                 </div>
+                if let Some(streak_text) = streak_text {
+                    <div class="probe-streak">{streak_text}</div>
+                }
                 <div class="availability">{availability(props.probe.availability())}</div>
             </div>
             <History samples={props.probe.history.clone()} streak={streak} />

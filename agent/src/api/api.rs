@@ -94,6 +94,8 @@ mod tests {
         let body_bytes = resp.into_body().try_into_bytes().unwrap();
         let body = String::from_utf8_lossy(&body_bytes);
         let peers: Vec<grey_api::Peer> = serde_json::from_str(&body).unwrap();
-        assert_eq!(peers.len(), 1);
+        // One gossiped peer plus the serving node itself.
+        assert_eq!(peers.len(), 2);
+        assert_eq!(peers.iter().filter(|p| p.current).count(), 1);
     }
 }

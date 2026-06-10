@@ -1,3 +1,4 @@
+use super::cluster_status::ClusterStatus;
 use super::status::{Status, StatusLevel};
 use crate::contexts::use_ui_config;
 use yew::prelude::*;
@@ -48,6 +49,7 @@ pub fn header(props: &HeaderProps) -> Html {
             }
 
             <div class="header-controls">
+                <ClusterStatus />
                 <Status status={props.status} text={props.status_text.clone()} />
 
                 if has_links {

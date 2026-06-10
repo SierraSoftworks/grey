@@ -42,4 +42,10 @@ pub struct Peer {
     /// [`PeerHealth::Offline`].
     #[serde(default)]
     pub health: PeerHealth,
+
+    /// Whether this record describes the node which served the API response. The membership
+    /// registry only tracks remote peers, so the serving node adds itself when answering;
+    /// responses from older agents deserialize this as `false`.
+    #[serde(default)]
+    pub current: bool,
 }

@@ -1,0 +1,105 @@
+use crate::contexts::use_peers;
+use grey_api::{Peer, PeerHealth};
+use yew::prelude::*;
+
+/// A "Cluster" entry for the header status area: a coloured indicator summarising the health of
+/// the cluster, with a popover (hanging below and to the left) listing every member — including
+/// the node serving this page, which is tagged as the current one. Renders nothing when no
+/// members are known (for example when talking to an older agent which doesn't report itself).
+#[function_component(ClusterStatus)]
+pub fn cluster_status() -> Html {
+    let peers_ctx = use_peers();
+
+    if peers_ctx.peers.is_empty() {
+        return html! {};
+    }
+
+    // Current node first, then healthiest, then by id for a stable order.
+    let mut members = peers_ctx.peers.clone();
+    members.sort_by(|a, b| {
+        b.current
+            .cmp(&a.current)
+            .then_with(|| health_rank(a.health).cmp(&health_rank(b.health)))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+
+    let online = members
+        .iter()
+        .filter(|p| p.health == PeerHealth::Online)
+        .count();
+
+    let level_class = if members.iter().any(|p| p.health == PeerHealth::Offline) {
+        "error"
+    } else if members.iter().any(|p| p.health == PeerHealth::Suspect) {
+        "warning"
+    } else {
+        "good"
+    };
+
+    html! {
+        // tabindex makes the chip focusable so the popover also opens via keyboard/touch
+        // (the stylesheet shows it on :hover and :focus-within).
+        <div class={format!("status-indicator cluster-status {level_class}")} tabindex="0">
+            <div class="status-dot"></div>
+            <span class="status-text">{"Cluster"}</span>
+
+            <div class="cluster-popover">
+                <div class="cluster-popover-content">
+                    <div class="cluster-popover-title">
+                        <span>{"Cluster Members"}</span>
+                        <span class="cluster-popover-summary">{format!("{online}/{} online", members.len())}</span>
+                    </div>
+                    {for members.iter().map(render_member)}
+                </div>
+            </div>
+        </div>
+    }
+}
+
+fn render_member(peer: &Peer) -> Html {
+    let class = peer.health.as_str();
+    html! {
+        <div class="peer">
+            <div class="peer-identity">
+                <div class={format!("peer-status-dot {class}")}></div>
+                <span class="peer-id">{&peer.id}</span>
+                if peer.current {
+                    <span class="peer-current-tag">{"this node"}</span>
+                }
+            </div>
+            <span class={format!("peer-health {class}")}>{health_label(peer.health)}</span>
+            <span class="peer-last-seen">{relative_time(peer.last_seen)}</span>
+        </div>
+    }
+}
+
+/// Sort key placing healthier peers first.
+fn health_rank(health: PeerHealth) -> u8 {
+    match health {
+        PeerHealth::Online => 0,
+        PeerHealth::Transitive => 1,
+        PeerHealth::Suspect => 2,
+        PeerHealth::Offline => 3,
+    }
+}
+
+fn health_label(health: PeerHealth) -> &'static str {
+    match health {
+        PeerHealth::Online => "Online",
+        PeerHealth::Transitive => "Transitive",
+        PeerHealth::Suspect => "Suspect",
+        PeerHealth::Offline => "Offline",
+    }
+}
+
+/// A compact "x ago" rendering of when the peer was last heard from.
+fn relative_time(when: chrono::DateTime<chrono::Utc>) -> String {
+    let seconds = chrono::Utc::now().signed_duration_since(when).num_seconds();
+    if seconds < 5 {
+        return "just now".to_string();
+    }
+    format!(
+        "{} ago",
+        crate::formatters::compact_duration(chrono::Duration::seconds(seconds))
+    )
+}
