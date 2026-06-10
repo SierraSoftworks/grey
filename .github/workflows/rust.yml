@@ -39,6 +39,21 @@ jobs:
     runs-on: macos-latest
 
     steps:
+      - name: Check out code
+        uses: actions/checkout@v6
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      # Install trunk before switching the default Rust toolchain so that the
+      # rustup override doesn't interfere, and pass the GITHUB_TOKEN so that
+      # binstall isn't rate-limited by the GitHub API (which forces a slow
+      # build from source).
+      - name: Install trunk (for building web UI)
+        run: cargo binstall --no-confirm trunk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Get Rust Stable
         uses: actions-rs/toolchain@v1.0.7
         with:
@@ -46,19 +61,6 @@ jobs:
           override: true
           target: wasm32-unknown-unknown
           components: llvm-tools-preview
-
-      - name: Check out code
-        uses: actions/checkout@v6
-
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
-        if: ${{ !matrix.cross }}
-
-      - name: Install trunk (for building web UI)
-        if: ${{ !matrix.cross }}
-        run: |
-          cargo binstall --no-confirm trunk
-          echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
 
       - name: Setup Cache
         uses: Swatinem/rust-cache@v2
