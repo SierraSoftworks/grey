@@ -142,6 +142,7 @@ pub struct Policy {
 mod tests {
     use chrono::NaiveTime;
     use super::*;
+    use crate::Streak;
     
     #[test]
     fn test_probe_merge() {
@@ -270,8 +271,8 @@ mod tests {
         // which has watched the probe pass for longer.
         probe.status.insert("restarted".into(), ProbeStatus::from_sample(true, now - chrono::Duration::minutes(5)));
         probe.status.insert("continuous".into(), ProbeStatus {
-            passing_since: Some(now - chrono::Duration::days(3)),
-            failing_since: None,
+            observed: Streak { passing_since: Some(now - chrono::Duration::days(3)), failing_since: None },
+            converged: Streak { passing_since: Some(now - chrono::Duration::days(3)), failing_since: None },
             updated: now,
         });
         let status = probe.current_status().expect("a current status");
@@ -281,8 +282,14 @@ mod tests {
 
         // A failure reported by any live observer wins over the passing reports.
         probe.status.insert("failing".into(), ProbeStatus {
-            passing_since: Some(now - chrono::Duration::days(3)),
-            failing_since: Some(now - chrono::Duration::minutes(30)),
+            observed: Streak {
+                passing_since: Some(now - chrono::Duration::days(3)),
+                failing_since: Some(now - chrono::Duration::minutes(30)),
+            },
+            converged: Streak {
+                passing_since: Some(now - chrono::Duration::days(3)),
+                failing_since: Some(now - chrono::Duration::minutes(30)),
+            },
             updated: now,
         });
         let status = probe.current_status().expect("a current status");
@@ -311,8 +318,14 @@ mod tests {
                 total_latency: std::time::Duration::from_secs(5),
             })].into_iter().collect(),
             status: vec![("observer1".into(), ProbeStatus {
-                passing_since: Some(chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap()),
-                failing_since: Some(chrono::DateTime::from_timestamp(1_699_999_000, 0).unwrap()),
+                observed: Streak {
+                    passing_since: Some(chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap()),
+                    failing_since: Some(chrono::DateTime::from_timestamp(1_699_999_000, 0).unwrap()),
+                },
+                converged: Streak {
+                    passing_since: Some(chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap()),
+                    failing_since: Some(chrono::DateTime::from_timestamp(1_699_999_000, 0).unwrap()),
+                },
                 updated: chrono::DateTime::from_timestamp(1_700_000_060, 0).unwrap(),
             })].into_iter().collect(),
         };

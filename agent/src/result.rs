@@ -163,7 +163,7 @@ mod tests {
         let status = probe.status.get("node").expect("a status for the observing node");
         assert!(status.passing());
         assert_eq!(status.since(), Some(start));
-        assert_eq!(status.failing_since, None);
+        assert_eq!(status.observed.failing_since, None);
 
         // A failure starts a failing streak, keeping the passing marker as history...
         let failed_at = start + Duration::minutes(180);
@@ -171,16 +171,16 @@ mod tests {
         let status = probe.status.get("node").unwrap();
         assert!(status.failing());
         assert_eq!(status.since(), Some(failed_at));
-        assert_eq!(status.passing_since, Some(start));
+        assert_eq!(status.observed.passing_since, Some(start));
 
-        // ...and a long gap in sampling (e.g. a process restart) resets both markers, so
-        // the time we weren't watching is treated as unknown and the node rejoins as a
-        // fresh observer whose history is repaired from its peers.
+        // ...and a long gap in sampling (e.g. a process restart) resets the observed
+        // streak, so the time we weren't watching is treated as unknown and the node
+        // rejoins as a fresh observer whose history is repaired from its peers.
         let restarted_at = start + Duration::minutes(300);
         result_at(restarted_at, true).apply("node", &mut probe, max_gap);
         let status = probe.status.get("node").unwrap();
         assert!(status.passing());
         assert_eq!(status.since(), Some(restarted_at));
-        assert_eq!(status.failing_since, None);
+        assert_eq!(status.observed.failing_since, None);
     }
 }

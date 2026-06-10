@@ -675,10 +675,14 @@ mod tests {
         // A peer has watched this probe pass for three days, having witnessed the
         // failure which preceded the streak.
         let peer = NodeID::new();
-        let mut peer_record = probe_at(&probe.name, now);
-        peer_record.status.insert(peer.to_string(), grey_api::ProbeStatus {
+        let peer_streak = grey_api::Streak {
             passing_since: Some(streak_start),
             failing_since: Some(streak_start - chrono::Duration::hours(1)),
+        };
+        let mut peer_record = probe_at(&probe.name, now);
+        peer_record.status.insert(peer.to_string(), grey_api::ProbeStatus {
+            observed: peer_streak.clone(),
+            converged: peer_streak,
             updated: now,
         });
 
@@ -710,7 +714,10 @@ mod tests {
             .expect("a status entry for this node");
         assert!(own_status.passing());
         assert_eq!(own_status.since(), Some(streak_start));
-        assert_eq!(own_status.failing_since, Some(streak_start - chrono::Duration::hours(1)));
+        assert_eq!(own_status.converged.failing_since, Some(streak_start - chrono::Duration::hours(1)));
+        // The node's own observation remains its own: only the converged view adopted
+        // the peer's history.
+        assert_eq!(own_status.observed.failing_since, None);
     }
 
     fn b64_key(byte: u8) -> String {

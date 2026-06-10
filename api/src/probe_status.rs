@@ -2,59 +2,40 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use crate::Mergeable;
 
-/// The state of a probe as reported by a single observer, expressed as a pair of streak
-/// markers: when the current (or most recent) passing streak began, and when the current
-/// (or most recent) failure began. Whichever marker is more recent is the observer's
-/// current state; the other is retained as history so the cluster can converge on an
-/// agreed "healthy since" / "unhealthy since" across restarts.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ProbeStatus {
-    /// When the probe was last observed to enter a passing state. A record which also
-    /// carries a `failing_since` witnessed the recovery this marker describes; a record
-    /// without one has merely been watching the probe pass since this time.
+/// A pair of streak markers describing a probe's state over time: when the current (or
+/// most recent) passing streak began, and when the current (or most recent) failure
+/// began. Whichever marker is more recent is the current state; the other is retained as
+/// history. A streak which carries a `failing_since` witnessed the recovery its
+/// `passing_since` describes; one without has merely been watching the probe pass.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Streak {
     #[serde(default, with = "chrono::serde::ts_milliseconds_option")]
     pub passing_since: Option<DateTime<Utc>>,
 
-    /// When the probe was last observed to enter a failing state. Retained as history
-    /// once the probe recovers, bounding how far back a passing streak may reach.
     #[serde(default, with = "chrono::serde::ts_milliseconds_option")]
     pub failing_since: Option<DateTime<Utc>>,
-
-    /// When this status was last confirmed by a sample. Statuses which haven't been
-    /// confirmed recently belong to observers that have stopped reporting and should be
-    /// ignored when aggregating or repairing.
-    #[serde(with = "chrono::serde::ts_milliseconds")]
-    pub updated: DateTime<Utc>,
 }
 
-impl ProbeStatus {
-    /// How long a reported status remains valid without being confirmed by a new sample.
-    fn validity() -> chrono::Duration {
-        chrono::Duration::hours(1)
-    }
-
-    /// Begins tracking state from a first sample; the state before it is unknown, so the
-    /// record starts with no history and doesn't constrain the rest of the cluster.
-    pub fn from_sample(passing: bool, time: DateTime<Utc>) -> Self {
+impl Streak {
+    fn from_sample(passing: bool, time: DateTime<Utc>) -> Self {
         Self {
             passing_since: passing.then_some(time),
             failing_since: (!passing).then_some(time),
-            updated: time,
         }
     }
 
-    /// Whether this observer currently considers the probe to be failing. A tie between
+    /// Whether the probe is currently failing according to this streak. A tie between
     /// the markers is treated pessimistically.
     pub fn failing(&self) -> bool {
         self.failing_since.is_some() && self.failing_since >= self.passing_since
     }
 
-    /// Whether this observer currently considers the probe to be passing.
+    /// Whether the probe is currently passing according to this streak.
     pub fn passing(&self) -> bool {
         !self.failing()
     }
 
-    /// When the current state was entered, as far back as this record can attest.
+    /// When the current state was entered, as far back as this streak can attest.
     pub fn since(&self) -> Option<DateTime<Utc>> {
         if self.failing() {
             self.failing_since
@@ -63,27 +44,9 @@ impl ProbeStatus {
         }
     }
 
-    /// Whether this status has been confirmed by a sample recently enough to count when
-    /// aggregating or repairing.
-    pub fn is_current(&self, now: DateTime<Utc>) -> bool {
-        now - self.updated < Self::validity()
-    }
-
-    /// Records a subsequent sample. The marker for the observed state only moves when the
-    /// state flips, so it marks the start of the current streak. Samples further than
-    /// `max_gap` apart break coverage: the time in between is unknown, so both markers
-    /// reset and the record rejoins the cluster as a fresh, non-voting observer (its
-    /// streak history is repaired from its peers, not silently bridged).
-    pub fn record(&mut self, passing: bool, time: DateTime<Utc>, max_gap: chrono::Duration) {
-        if time < self.updated {
-            return;
-        }
-
-        if time - self.updated > max_gap {
-            *self = Self::from_sample(passing, time);
-            return;
-        }
-
+    /// Applies a sample: the marker for the observed state only moves when the state
+    /// flips, so it marks the start of the current streak.
+    fn observe(&mut self, passing: bool, time: DateTime<Utc>) {
         if passing {
             if self.passing_since.is_none() || self.failing_since > self.passing_since {
                 self.passing_since = Some(time);
@@ -91,15 +54,11 @@ impl ProbeStatus {
         } else if self.failing_since.is_none() || self.passing_since > self.failing_since {
             self.failing_since = Some(time);
         }
-
-        self.updated = time;
     }
 
-    /// Adopts streak history from a peer's report without ever changing the state this
-    /// observer is seeing with its own samples — only the markers are refined. This is
-    /// what lets a freshly restarted node re-learn the cluster's streak so rolling
-    /// restarts don't lose it.
-    pub fn repair(&mut self, other: &Self) {
+    /// Adopts history from a peer's streak without ever changing the state this streak
+    /// currently reports — only the markers are refined.
+    fn repair(&mut self, other: &Self) {
         match (self.failing(), other.failing()) {
             // Both failing: push our failure start back to the peer's earlier claim,
             // unless we observed the probe passing after that claim began.
@@ -119,16 +78,19 @@ impl ProbeStatus {
 
             // The peer reports an active failure we aren't seeing: our own samples
             // define our state, and read-time aggregation already defers to the peer.
+            // Adopting it here would echo the failure back to the peer's own repairs,
+            // and the cluster could never converge back to passing.
             (false, true) => {}
 
             (false, false) => self.combine_passing(other),
         }
     }
 
-    /// Combines two passing reports. Records which witnessed a failure "vote": the streak
-    /// only reaches back to the point everyone agrees it recovered (latest `passing_since`
-    /// among them). Records which never witnessed a failure don't vote — they adopt a
-    /// voter's streak wholesale, or pool pure coverage (earliest start) with each other.
+    /// Combines two passing streaks. Streaks which witnessed a failure "vote": the merged
+    /// streak only reaches back to the point everyone agrees it recovered (latest
+    /// `passing_since` among them). Streaks which never witnessed a failure don't vote —
+    /// they adopt a voter's streak wholesale, or pool pure coverage (earliest start)
+    /// with each other.
     fn combine_passing(&mut self, other: &Self) {
         match (self.failing_since, other.failing_since) {
             (Some(_), Some(_)) => {
@@ -148,13 +110,10 @@ impl ProbeStatus {
             }
         }
     }
-}
 
-impl Mergeable for ProbeStatus {
-    /// Read-time aggregation across observers. Unlike [`ProbeStatus::repair`] this defers
-    /// to an active failure reported by either side, and it is order-independent: any
-    /// active failure wins, pushed back to the earliest claim that no observer has seen
-    /// the probe pass since.
+    /// Read-time aggregation. Unlike [`Streak::repair`] this defers to an active failure
+    /// reported by either side, and it is order-independent: any active failure wins,
+    /// pushed back to the earliest claim that no observer has seen the probe pass since.
     fn merge(&mut self, other: &Self) {
         match (self.failing(), other.failing()) {
             (true, true) => {
@@ -188,7 +147,105 @@ impl Mergeable for ProbeStatus {
             }
             (false, false) => self.combine_passing(other),
         }
+    }
+}
 
+/// The state of a probe as reported by a single observer: the streak it has observed
+/// with its own samples, and the cluster-converged streak it derives from peers.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProbeStatus {
+    /// The streak this observer has seen with its own samples. Only ever updated by
+    /// [`ProbeStatus::record`] — peers never influence it — and only meaningful to the
+    /// observer which authored the record.
+    #[serde(default)]
+    pub observed: Streak,
+
+    /// The cluster-converged streak: re-seeded from `observed` at every sample and then
+    /// refined from peers via [`ProbeStatus::repair`], so adopted history is always
+    /// backed by a currently-live record. This is the view exposed to the API/UI.
+    #[serde(default)]
+    pub converged: Streak,
+
+    /// When this status was last confirmed by a sample. Statuses which haven't been
+    /// confirmed recently belong to observers that have stopped reporting and should be
+    /// ignored when aggregating or repairing.
+    #[serde(with = "chrono::serde::ts_milliseconds")]
+    pub updated: DateTime<Utc>,
+}
+
+impl ProbeStatus {
+    /// How long a reported status remains valid without being confirmed by a new sample.
+    fn validity() -> chrono::Duration {
+        chrono::Duration::hours(1)
+    }
+
+    /// Begins tracking state from a first sample; the state before it is unknown, so the
+    /// record starts with no history and doesn't constrain the rest of the cluster.
+    pub fn from_sample(passing: bool, time: DateTime<Utc>) -> Self {
+        let observed = Streak::from_sample(passing, time);
+        Self {
+            converged: observed.clone(),
+            observed,
+            updated: time,
+        }
+    }
+
+    /// Whether this observer currently considers the probe to be failing.
+    pub fn failing(&self) -> bool {
+        self.converged.failing()
+    }
+
+    /// Whether this observer currently considers the probe to be passing.
+    pub fn passing(&self) -> bool {
+        self.converged.passing()
+    }
+
+    /// When the current state was entered, as far back as the cluster can attest.
+    pub fn since(&self) -> Option<DateTime<Utc>> {
+        self.converged.since()
+    }
+
+    /// Whether this status has been confirmed by a sample recently enough to count when
+    /// aggregating or repairing.
+    pub fn is_current(&self, now: DateTime<Utc>) -> bool {
+        now - self.updated < Self::validity()
+    }
+
+    /// Records a sample against the observed streak. Samples further than `max_gap`
+    /// apart break coverage: the time in between is unknown, so the observed streak
+    /// resets and the record rejoins the cluster as a fresh, non-voting observer (its
+    /// history is repaired from its peers, not silently bridged). The converged streak
+    /// is re-seeded from the observed one, washing out any previously adopted history
+    /// which the peers no longer attest.
+    pub fn record(&mut self, passing: bool, time: DateTime<Utc>, max_gap: chrono::Duration) {
+        if time < self.updated {
+            return;
+        }
+
+        if time - self.updated > max_gap {
+            self.observed = Streak::from_sample(passing, time);
+        } else {
+            self.observed.observe(passing, time);
+        }
+
+        self.converged = self.observed.clone();
+        self.updated = time;
+    }
+
+    /// Adopts streak history from a peer's converged view into our own, without ever
+    /// changing the state this observer is seeing with its own samples. This is what
+    /// lets a freshly restarted node re-learn the cluster's streak so rolling restarts
+    /// don't lose it.
+    pub fn repair(&mut self, other: &Self) {
+        self.converged.repair(&other.converged);
+    }
+}
+
+impl Mergeable for ProbeStatus {
+    /// Read-time aggregation of two observers' converged views, deferring to an active
+    /// failure reported by either side.
+    fn merge(&mut self, other: &Self) {
+        self.converged.merge(&other.converged);
         self.updated = self.updated.max(other.updated);
     }
 }
@@ -201,10 +258,18 @@ mod tests {
         DateTime::from_timestamp(secs, 0).unwrap()
     }
 
-    fn status(passing_since: Option<i64>, failing_since: Option<i64>, updated: i64) -> ProbeStatus {
-        ProbeStatus {
+    fn streak(passing_since: Option<i64>, failing_since: Option<i64>) -> Streak {
+        Streak {
             passing_since: passing_since.map(ts),
             failing_since: failing_since.map(ts),
+        }
+    }
+
+    /// A status as it would look right after a sample: observed and converged agree.
+    fn status(passing_since: Option<i64>, failing_since: Option<i64>, updated: i64) -> ProbeStatus {
+        ProbeStatus {
+            observed: streak(passing_since, failing_since),
+            converged: streak(passing_since, failing_since),
             updated: ts(updated),
         }
     }
@@ -218,7 +283,7 @@ mod tests {
         let mut s = ProbeStatus::from_sample(true, ts(100));
         assert!(s.passing());
         assert_eq!(s.since(), Some(ts(100)));
-        assert_eq!(s.failing_since, None);
+        assert_eq!(s.converged.failing_since, None);
 
         // Repeating the same state keeps the streak and refreshes the confirmation time.
         s.record(true, ts(160), gap());
@@ -229,13 +294,13 @@ mod tests {
         s.record(false, ts(220), gap());
         assert!(s.failing());
         assert_eq!(s.since(), Some(ts(220)));
-        assert_eq!(s.passing_since, Some(ts(100)));
+        assert_eq!(s.converged.passing_since, Some(ts(100)));
 
         // Recovery starts a new passing streak, keeping the failure as history.
         s.record(true, ts(280), gap());
         assert!(s.passing());
         assert_eq!(s.since(), Some(ts(280)));
-        assert_eq!(s.failing_since, Some(ts(220)));
+        assert_eq!(s.converged.failing_since, Some(ts(220)));
 
         // Out-of-order older samples are ignored.
         s.record(false, ts(250), gap());
@@ -247,12 +312,30 @@ mod tests {
     fn test_record_gap_resets_to_fresh_observer() {
         let mut s = status(Some(280), Some(220), 280);
 
-        // A coverage gap resets both markers: the record rejoins as a non-voter whose
-        // history will be repaired from its peers rather than silently bridged.
+        // A coverage gap resets the observed streak: the record rejoins as a non-voter
+        // whose history will be repaired from its peers rather than silently bridged.
         s.record(true, ts(280 + 3600), gap());
         assert!(s.passing());
-        assert_eq!(s.passing_since, Some(ts(280 + 3600)));
-        assert_eq!(s.failing_since, None);
+        assert_eq!(s.observed.passing_since, Some(ts(280 + 3600)));
+        assert_eq!(s.observed.failing_since, None);
+        assert_eq!(s.converged, s.observed);
+    }
+
+    #[test]
+    fn test_record_reseeds_converged_from_observed() {
+        // A non-voter adopts a peer's streak into its converged view...
+        let mut s = status(Some(8_000), None, 9_000);
+        s.repair(&status(Some(1_000), Some(500), 9_000));
+        assert_eq!(s.converged.passing_since, Some(ts(1_000)));
+
+        // ...without its own observations being touched...
+        assert_eq!(s.observed.passing_since, Some(ts(8_000)));
+
+        // ...and the adoption washes out at the next sample, only to be re-adopted if
+        // the peers still attest it.
+        s.record(true, ts(9_060), gap());
+        assert_eq!(s.converged.passing_since, Some(ts(8_000)));
+        assert_eq!(s.converged.failing_since, None);
     }
 
     #[test]
@@ -262,15 +345,15 @@ mod tests {
         let mut restarted = ProbeStatus::from_sample(true, ts(9_000));
         restarted.repair(&status(Some(1_000), Some(500), 9_000));
         assert!(restarted.passing());
-        assert_eq!(restarted.passing_since, Some(ts(1_000)));
-        assert_eq!(restarted.failing_since, Some(ts(500)));
+        assert_eq!(restarted.converged.passing_since, Some(ts(1_000)));
+        assert_eq!(restarted.converged.failing_since, Some(ts(500)));
 
         // ...including when the peer's recovery is more recent than our own coverage,
         // since the peer witnessed a failure we never saw.
         let mut covering = status(Some(1_000), None, 9_000);
         covering.repair(&status(Some(8_000), Some(7_000), 9_000));
-        assert_eq!(covering.passing_since, Some(ts(8_000)));
-        assert_eq!(covering.failing_since, Some(ts(7_000)));
+        assert_eq!(covering.converged.passing_since, Some(ts(8_000)));
+        assert_eq!(covering.converged.failing_since, Some(ts(7_000)));
     }
 
     #[test]
@@ -278,19 +361,19 @@ mod tests {
         // Two failure witnesses must agree: the streak starts at the latest recovery.
         let mut voter = status(Some(5_000), Some(4_000), 9_000);
         voter.repair(&status(Some(6_000), Some(5_500), 9_000));
-        assert_eq!(voter.passing_since, Some(ts(6_000)));
-        assert_eq!(voter.failing_since, Some(ts(5_500)));
+        assert_eq!(voter.converged.passing_since, Some(ts(6_000)));
+        assert_eq!(voter.converged.failing_since, Some(ts(5_500)));
 
         // A non-voter cannot drag a witness's recovery backwards.
         let mut witness = status(Some(5_000), Some(4_000), 9_000);
         witness.repair(&status(Some(1_000), None, 9_000));
-        assert_eq!(witness.passing_since, Some(ts(5_000)));
+        assert_eq!(witness.converged.passing_since, Some(ts(5_000)));
 
         // Two non-voters pool pure coverage: the earliest attested start wins.
         let mut fresh = status(Some(8_000), None, 9_000);
         fresh.repair(&status(Some(2_000), None, 9_000));
-        assert_eq!(fresh.passing_since, Some(ts(2_000)));
-        assert_eq!(fresh.failing_since, None);
+        assert_eq!(fresh.converged.passing_since, Some(ts(2_000)));
+        assert_eq!(fresh.converged.failing_since, None);
     }
 
     #[test]
@@ -299,12 +382,12 @@ mod tests {
         let mut failing = status(Some(1_000), Some(8_000), 9_000);
         failing.repair(&status(None, Some(6_000), 9_000));
         assert!(failing.failing());
-        assert_eq!(failing.failing_since, Some(ts(6_000)));
+        assert_eq!(failing.converged.failing_since, Some(ts(6_000)));
 
         // ...unless we saw the probe pass after that claim began.
         let mut seen_passing = status(Some(7_000), Some(8_000), 9_000);
         seen_passing.repair(&status(Some(1_000), Some(6_000), 9_000));
-        assert_eq!(seen_passing.failing_since, Some(ts(8_000)));
+        assert_eq!(seen_passing.converged.failing_since, Some(ts(8_000)));
     }
 
     #[test]
@@ -313,18 +396,18 @@ mod tests {
         let mut passing = status(Some(5_000), None, 9_000);
         passing.repair(&status(Some(1_000), Some(6_000), 9_000));
         assert!(passing.passing());
-        assert_eq!(passing.passing_since, Some(ts(5_000)));
+        assert_eq!(passing.converged.passing_since, Some(ts(5_000)));
 
         // ...and a failing node doesn't adopt a passing marker that would mask its
         // failure, though earlier attestations refine its history.
         let mut failing = status(Some(1_000), Some(6_000), 9_000);
         failing.repair(&status(Some(7_000), None, 9_000));
         assert!(failing.failing());
-        assert_eq!(failing.passing_since, Some(ts(1_000)));
+        assert_eq!(failing.converged.passing_since, Some(ts(1_000)));
 
         failing.repair(&status(Some(2_000), None, 9_000));
         assert!(failing.failing());
-        assert_eq!(failing.passing_since, Some(ts(2_000)));
+        assert_eq!(failing.converged.passing_since, Some(ts(2_000)));
     }
 
     #[test]
@@ -397,7 +480,7 @@ mod tests {
 
             assert!(acc.passing(), "order {order:?}");
             assert_eq!(acc.since(), Some(ts(5_000)), "order {order:?}");
-            assert_eq!(acc.failing_since, Some(ts(4_000)), "order {order:?}");
+            assert_eq!(acc.converged.failing_since, Some(ts(4_000)), "order {order:?}");
             assert_eq!(acc.updated, ts(9_200), "order {order:?}");
         }
     }
