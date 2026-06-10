@@ -10,7 +10,7 @@ pub struct ProbeProps {
 #[function_component(Probe)]
 pub fn probe(props: &ProbeProps) -> Html {
     let recent_availability = props.probe.recent(2).success_rate();
-    let streak = props.probe.current_streak().cloned();
+    let streak = props.probe.streak.clone();
 
     // Key the status off the currently observed state so a recovery is reflected
     // immediately, using the recent average only to grade how severe an ongoing failure is.

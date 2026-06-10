@@ -41,18 +41,14 @@ impl Probe {
         self.total().success_rate()
     }
 
-    /// This probe's cluster-converged streak record, or `None` when it carries no
-    /// observations (e.g. data recorded by older agents).
-    pub fn current_streak(&self) -> Option<&Streak> {
-        (!self.streak.is_empty()).then_some(&self.streak)
-    }
-
     /// Whether this probe is currently passing, falling back to the latest history
     /// bucket's result when the streak record carries no observations.
     pub fn passing(&self) -> bool {
-        self.current_streak()
-            .map(|s| s.passing())
-            .unwrap_or_else(|| self.history.last().map(|h| h.pass).unwrap_or(true))
+        if self.streak.is_empty() {
+            self.history.last().map(|h| h.pass).unwrap_or(true)
+        } else {
+            self.streak.passing()
+        }
     }
 
     /// Calculate recent availability percentage based on successful vs total samples
@@ -239,7 +235,7 @@ mod tests {
 
         // With an empty streak record (e.g. data from older agents), the probe falls
         // back to the latest history bucket's result.
-        assert_eq!(probe.current_streak(), None);
+        assert!(probe.streak.is_empty());
         assert!(probe.passing());
         probe.history.push(ProbeHistoryBucket {
             start_time: now,
@@ -252,9 +248,8 @@ mod tests {
 
         // A streak record with a long-standing coverage claim reports passing...
         probe.streak.observe(true, now - chrono::Duration::days(3));
-        let streak = probe.current_streak().expect("a streak record");
-        assert!(streak.passing_at(now));
-        assert_eq!(streak.since_at(now), Some(now - chrono::Duration::days(3)));
+        assert!(probe.streak.passing_at(now));
+        assert_eq!(probe.streak.since_at(now), Some(now - chrono::Duration::days(3)));
         assert!(probe.passing());
 
         // ...until a failure is observed by any node, which wins immediately.
@@ -326,7 +321,7 @@ mod tests {
             assert_eq!(unpacked.name, "probe");
             assert_eq!(unpacked.observations.len(), 1);
             assert!(unpacked.streak.is_empty());
-            assert_eq!(unpacked.current_streak(), None);
+            assert!(unpacked.streak.is_empty());
         }
     }
 }

@@ -19,7 +19,7 @@ pub struct HistoryProps {
     /// The probe's cluster-converged streak record, used to render the most recent
     /// segment (and its tooltip) from the live state rather than the bucket's average.
     #[prop_or_default]
-    pub streak: Option<grey_api::Streak>,
+    pub streak: grey_api::Streak,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -102,7 +102,8 @@ pub fn history(props: &HistoryProps) -> Html {
                 // performed on average, while one that has recovered is at worst degraded.
                 // Older segments only have their averages to go on.
                 let is_current = index + 1 == props.samples.len();
-                let current_passing = props.streak.as_ref().filter(|_| is_current).map(|s| s.passing());
+                let current_streak = (is_current && !props.streak.is_empty()).then_some(&props.streak);
+                let current_passing = current_streak.map(|s| s.passing());
                 let sample_class = match (current_passing, sample.max_availability()) {
                     (Some(false), _) => "error",
                     (Some(true), sli) if sli > 99.9 => "ok",
@@ -127,7 +128,7 @@ pub fn history(props: &HistoryProps) -> Html {
                     >
                         if is_tooltip_target {
                             if let Some(probe_result) = &tooltip_data.probe_result {
-                                {render_tooltip(probe_result, props.streak.as_ref().filter(|_| is_current))}
+                                {render_tooltip(probe_result, current_streak)}
                             } else {
                                 // Fallback for SSR or when probe_result is None
                                 <div class="tooltip visible">
