@@ -259,25 +259,6 @@ impl State {
             let result = {
                 let mut table = txn.open_table(CLUSTER_FIELDS_TABLE)?;
 
-                // Join the peers' streak registers into this node's own record ahead of
-                // time: every record converges on the cluster-wide register, so streak
-                // history survives rolling restarts and even the eventual garbage
-                // collection of a departed peer's records.
-                let own_id: u128 = self.node_id.into();
-                let peer_streaks: Vec<grey_api::Streak> = table
-                    .iter()?
-                    .filter_map(|entry| entry.ok())
-                    .filter(|(key, _)| {
-                        let (node_id, name) = key.value();
-                        node_id != own_id && name == probe.name
-                    })
-                    .filter_map(|(_, value)| {
-                        let (_version, data) = value.value();
-                        rmp_serde::from_slice::<ProbeState>(data).ok()
-                    })
-                    .map(|peer| peer.streak)
-                    .collect();
-
                 let (mut snapshot, _version) = table
                     .get((self.node_id.into(), probe.name.clone()))?
                     .map(|existing| {
@@ -293,9 +274,6 @@ impl State {
                     .unwrap_or_else(|| (probe.into(), 0));
 
                 probe_result.apply(self.node_id, &mut snapshot);
-                for peer_streak in &peer_streaks {
-                    snapshot.streak.join(peer_streak);
-                }
 
                 let new_data = rmp_serde::to_vec_named(&snapshot)?;
                 table.insert(
@@ -512,6 +490,8 @@ impl GossipStore for State {
         {
             let mut table_fields = txn.open_table(CLUSTER_FIELDS_TABLE)?;
 
+            let own_id: u128 = self.node_id.into();
+
             for (peer, node_diff) in diff.into_inner() {
                 let peer_id: u128 = peer.into();
 
@@ -535,6 +515,28 @@ impl GossipStore for State {
                             ),
                         )
                             .map_err(|e| format!("Failed to store new probe state: {e:?}"))?;
+                    }
+
+                    // Fold the cluster's streak into this node's own record as it arrives,
+                    // so the converged "passing since" history survives the eventual garbage
+                    // collection of the originating peer's record. Done here — O(1) per
+                    // received diff — it replaces a per-sample scan over every peer record.
+                    // The version is left untouched so this doesn't itself re-trigger gossip;
+                    // the inherited streak rides along on the node's next sampled update.
+                    if peer_id != own_id
+                        && !probe_state.streak.is_empty()
+                        && let Ok(Some(mut own)) = table_fields.get_mut((own_id, probe_name.clone()))
+                    {
+                        let (version, data) = own.value();
+                        let mut own_state: ProbeState = rmp_serde::from_slice(data)
+                            .map_err(|e| format!("Failed to parse own probe state for streak inheritance: {e:?}"))?;
+                        let before = own_state.streak.clone();
+                        own_state.streak.join(&probe_state.streak);
+                        if own_state.streak != before {
+                            own.insert((version, rmp_serde::to_vec_named(&own_state)
+                                .map_err(|e| format!("Failed to serialize own probe state for streak inheritance: {e:?}"))?.as_slice()))
+                                .map_err(|e| format!("Failed to store own probe state: {e:?}"))?;
+                        }
                     }
                 }
             }
@@ -654,10 +656,10 @@ mod tests {
         );
     }
 
-    /// A record received from a peer carries the cluster's streak register; joining it
-    /// into our copy of that peer's record (the normal gossip path) and then pooling
-    /// must surface the inherited coverage — this is what lets rolling restarts keep
-    /// the "passing since" history without any per-peer bookkeeping.
+    /// A record received from a peer carries the cluster's streak register; the gossip
+    /// `apply` path folds it both into our copy of that peer's record and into our own
+    /// record, so pooling surfaces the inherited coverage — this is what lets rolling
+    /// restarts keep the "passing since" history without any per-peer bookkeeping.
     #[tokio::test]
     async fn streak_is_inherited_through_gossip() {
         let dir = tempfile::tempdir().unwrap();
@@ -674,28 +676,18 @@ mod tests {
         let mut peer_record = probe_at(&probe.name, now);
         peer_record.streak.observe(true, streak_start);
 
-        {
-            let txn = state.database.begin_write().unwrap();
-            {
-                let mut table = txn.open_table(CLUSTER_FIELDS_TABLE).unwrap();
-                let data = rmp_serde::to_vec_named(&peer_record).unwrap();
-                table
-                    .insert((peer.into(), probe.name.clone()), (peer_record.version(), data.as_slice()))
-                    .unwrap();
-            }
-            txn.commit().unwrap();
-        }
-
-        // This node samples the probe itself; its own fresh observation cannot shorten
-        // the inherited coverage once the records are pooled.
-        state.update_probe_state(&probe.name, &ProbeResult::test()).await.unwrap();
+        // Deliver the peer's record through the normal gossip apply path. This stores the
+        // peer's record and folds its streak into this node's own record in one step.
+        let mut diff = cluster::ClusterStateDiff::new();
+        diff.update(peer, probe.name.clone(), peer_record);
+        state.apply(diff).await.unwrap();
 
         let pooled = state.get_probe_states().await.unwrap();
         let pooled_probe = pooled.get(&probe.name).expect("the probe to be pooled");
         assert!(pooled_probe.passing());
         assert_eq!(pooled_probe.streak.since_at(now), Some(streak_start));
 
-        // The sample also joined the peer's register into this node's own stored
+        // The apply also joined the peer's register into this node's own stored
         // record, so the claim survives even if the peer's record is eventually
         // garbage-collected.
         let txn = state.database.begin_read().unwrap();
