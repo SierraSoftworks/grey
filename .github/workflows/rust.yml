@@ -208,6 +208,13 @@ jobs:
 
       - name: Setup Cache
         uses: Swatinem/rust-cache@v2
+        with:
+          # Give each matrix entry its own cache scope. Without this, every
+          # entry in the matrix shares the same automatic cache key (derived
+          # from the job name + Cargo.lock), so the jobs clobber one another's
+          # caches and targets like aarch64 (built via cross) never get a
+          # usable cache restored, forcing a full rebuild on every run.
+          key: ${{ matrix.target }}
 
       - name: cargo build
         uses: actions-rs/cargo@v1.0.3
