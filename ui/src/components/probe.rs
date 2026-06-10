@@ -22,8 +22,6 @@ pub fn probe(props: &ProbeProps) -> Html {
         "error"
     };
 
-    let active_observers = props.probe.history.last().map(|h| h.observations.len()).unwrap_or(props.probe.observations.len());
-
     // How long the probe has held its current state, e.g. "healthy for 5d" or "unhealthy for 17m".
     let streak_text = streak.since().map(|since| {
         let held_for = compact_duration(chrono::Utc::now().signed_duration_since(since));
