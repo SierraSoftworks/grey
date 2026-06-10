@@ -15,6 +15,11 @@ use gloo_console as console;
 #[derive(Properties, PartialEq)]
 pub struct HistoryProps {
     pub samples: Vec<ProbeHistoryBucket>,
+
+    /// The probe's current aggregated status, used to render the most recent segment
+    /// (and its tooltip) from the live state rather than the bucket's average.
+    #[prop_or_default]
+    pub status: Option<grey_api::ProbeStatus>,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -92,13 +97,19 @@ pub fn history(props: &HistoryProps) -> Html {
     html! {
         <div class="history">
             {for props.samples.iter().enumerate().map(|(index, sample)| {
-                // A segment that is currently failing is an error regardless of how well it
-                // performed on average, while one that has recovered is at worst degraded —
-                // this makes both failures and recoveries visible immediately.
-                let sample_class = match (sample.passing(), sample.max_availability()) {
-                    (false, _) => "error",
-                    (true, sli) if sli > 99.9 => "ok",
-                    (true, _) => "warn",
+                // The most recent segment is rendered from the probe's current state — a
+                // segment that is failing right now is an error regardless of how well it
+                // performed on average, while one that has recovered is at worst degraded.
+                // Older segments only have their averages to go on.
+                let is_current = index + 1 == props.samples.len();
+                let current_passing = props.status.as_ref().filter(|_| is_current).map(|s| s.passing);
+                let sample_class = match (current_passing, sample.max_availability()) {
+                    (Some(false), _) => "error",
+                    (Some(true), sli) if sli > 99.9 => "ok",
+                    (Some(true), _) => "warn",
+                    (None, sli) if sli > 99.9 => "ok",
+                    (None, sli) if sli < 90.0 => "error",
+                    (None, _) => "warn",
                 };
 
                 // Serialize the entire ProbeResult to JSON
@@ -116,7 +127,7 @@ pub fn history(props: &HistoryProps) -> Html {
                     >
                         if is_tooltip_target {
                             if let Some(probe_result) = &tooltip_data.probe_result {
-                                {render_tooltip(probe_result)}
+                                {render_tooltip(probe_result, props.status.as_ref().filter(|_| is_current))}
                             } else {
                                 // Fallback for SSR or when probe_result is None
                                 <div class="tooltip visible">
@@ -140,14 +151,15 @@ pub fn history(props: &HistoryProps) -> Html {
     }
 }
 
-fn render_tooltip(probe_result: &ProbeHistoryBucket) -> Html {
-    let passing = probe_result.passing();
-    let status_text = match (passing, probe_result.max_availability()) {
-        (true, sli) if sli == 100.0 => "Passing",
-        (true, _) => "Recovered",
-        (false, _) => "Failing",
+fn render_tooltip(probe_result: &ProbeHistoryBucket, status: Option<&grey_api::ProbeStatus>) -> Html {
+    let (status_text, status_class) = match status {
+        Some(status) if status.passing => ("Passing", "ok"),
+        Some(_) => ("Failing", "error"),
+        None => (
+            if probe_result.max_availability() == 100.0 { "Passed" } else { "Failed" },
+            if probe_result.pass { "ok" } else { "error" },
+        ),
     };
-    let status_class = if passing { "ok" } else { "error" };
 
     // Format the timestamp
     let timestamp = probe_result
@@ -165,14 +177,8 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket) -> Html {
 
     let samples = si_magnitude(overall_stats.total_samples as f64, "");
 
-    // Surface currently-failing observers first, then order by how poorly they performed.
     let mut relevant_observations = probe_result.observations.iter().collect::<Vec<_>>();
-    relevant_observations.sort_by(|a, b| {
-        let currently_failing = |obs: &grey_api::Observation| obs.has_state() && !obs.passing;
-        currently_failing(b.1)
-            .cmp(&currently_failing(a.1))
-            .then(a.1.success_rate().partial_cmp(&b.1.success_rate()).unwrap_or(std::cmp::Ordering::Equal))
-    });
+    relevant_observations.sort_by(|a, b| a.1.success_rate().partial_cmp(&b.1.success_rate()).unwrap_or(std::cmp::Ordering::Equal)); // (|(_, obs)| obs.success_rate());
     relevant_observations.truncate(probe_result.validations.len().max(3));
 
 
@@ -187,10 +193,10 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket) -> Html {
                     <span class="tooltip-label">{"Start:"}</span>
                     <span>{timestamp}</span>
                 </div>
-                if let Some(since) = probe_result.since() {
+                if let Some(status) = status {
                     <div class="tooltip-row">
-                        <span class="tooltip-label">{if passing { "Passing since:" } else { "Failing since:" }}</span>
-                        <span>{since.format("%Y-%m-%d %H:%M:%S UTC").to_string()}</span>
+                        <span class="tooltip-label">{if status.passing { "Passing since:" } else { "Failing since:" }}</span>
+                        <span>{status.since.format("%Y-%m-%d %H:%M:%S UTC").to_string()}</span>
                     </div>
                 }
                 <div class="tooltip-row">
@@ -223,14 +229,7 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket) -> Html {
                         <div class="tooltip-section">
                             <div class="tooltip-section-title">{"Observers"}</div>
                             {for relevant_observations.iter().map(|(name, observation)| {
-                                // Prefer the observer's most recent state; older agents only
-                                // report aggregate counters, so fall back to the average there.
-                                let observer_ok = if observation.has_state() {
-                                    observation.passing
-                                } else {
-                                    observation.success_rate() > 99.0
-                                };
-                                let validation_class = if observer_ok { "ok" } else { "error" };
+                                let validation_class = if observation.success_rate() > 99.0 { "ok" } else { "error" };
                                 html! {
                                     <div class="tooltip-section-entry">
                                         <div class="tooltip-section-entry-header">

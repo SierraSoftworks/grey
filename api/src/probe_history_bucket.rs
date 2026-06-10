@@ -36,25 +36,6 @@ impl ProbeHistoryBucket {
     pub fn availability(&self) -> f64 {
         self.total().success_rate()
     }
-
-    /// The most recent pass/fail state reported by any observer in this bucket, falling
-    /// back to the bucket-level `pass` flag when no observer reports a state (data
-    /// recorded by older agents).
-    pub fn passing(&self) -> bool {
-        let total = self.total();
-        if total.has_state() {
-            total.passing
-        } else {
-            self.pass
-        }
-    }
-
-    /// The time at which this bucket's most recent state was entered, if any observer
-    /// reported one.
-    pub fn since(&self) -> Option<chrono::DateTime<chrono::Utc>> {
-        let total = self.total();
-        total.has_state().then_some(total.since)
-    }
     
     pub fn max_availability(&self) -> f64 {
         if self.observations.is_empty() {
@@ -130,8 +111,8 @@ mod tests {
             message: "".into(),
             validations: HashMap::new(),
             observations: vec![
-                ("observer1".into(), Observation { total_samples: 5, successful_samples: 5, total_retries: 0, total_latency: std::time::Duration::from_millis(500), ..Default::default() }),
-                ("observer2".into(), Observation { total_samples: 5, successful_samples: 4, total_retries: 1, total_latency: std::time::Duration::from_millis(600), ..Default::default() }),
+                ("observer1".into(), Observation { total_samples: 5, successful_samples: 5, total_retries: 0, total_latency: std::time::Duration::from_millis(500) }),
+                ("observer2".into(), Observation { total_samples: 5, successful_samples: 4, total_retries: 1, total_latency: std::time::Duration::from_millis(600) }),
             ].into_iter().collect(),
         };
         
@@ -143,8 +124,8 @@ mod tests {
                 ("response_time".into(), ValidationResult::fail("response_time", "Exceeded threshold")),
             ].into_iter().collect(),
             observations: vec![
-                ("observer2".into(), Observation { total_samples: 5, successful_samples: 3, total_retries: 2, total_latency: std::time::Duration::from_millis(700), ..Default::default() }),
-                ("observer3".into(), Observation { total_samples: 5, successful_samples: 5, total_retries: 0, total_latency: std::time::Duration::from_millis(400), ..Default::default() }),
+                ("observer2".into(), Observation { total_samples: 5, successful_samples: 3, total_retries: 2, total_latency: std::time::Duration::from_millis(700) }),
+                ("observer3".into(), Observation { total_samples: 5, successful_samples: 5, total_retries: 0, total_latency: std::time::Duration::from_millis(400) }),
             ].into_iter().collect(),
         };
         
@@ -158,34 +139,6 @@ mod tests {
         assert_eq!(bucket1.observations.get("observer3").unwrap().total_samples, 5);
     }
     
-    #[test]
-    fn test_probe_history_bucket_passing_and_since() {
-        let mut bucket = ProbeHistoryBucket {
-            start_time: chrono::Utc::now(),
-            pass: false,
-            message: "Timeout".into(),
-            validations: HashMap::new(),
-            observations: HashMap::new(),
-        };
-
-        // Without any observer state we fall back to the bucket-level pass flag.
-        assert!(!bucket.passing());
-        assert_eq!(bucket.since(), None);
-
-        // A recovery reported by an observer takes precedence over both the bucket's
-        // pass flag and the average success rate.
-        let recovered_at = chrono::DateTime::from_timestamp(200, 0).unwrap();
-        bucket.observations.insert("observer1".into(), Observation {
-            total_samples: 10,
-            successful_samples: 2,
-            passing: true,
-            since: recovered_at,
-            ..Default::default()
-        });
-        assert!(bucket.passing());
-        assert_eq!(bucket.since(), Some(recovered_at));
-    }
-
     #[test]
     fn test_validation_result_constructors() {
         let pass_result = ValidationResult::pass("status_code_200");
@@ -210,8 +163,8 @@ mod tests {
             message: "".into(),
             validations: HashMap::new(),
             observations: vec![
-                ("observer1".into(), Observation { total_samples: 10, successful_samples: 8, total_retries: 2, total_latency: std::time::Duration::from_millis(1000), ..Default::default() }),
-                ("observer2".into(), Observation { total_samples: 5, successful_samples: 5, total_retries: 0, total_latency: std::time::Duration::from_millis(300), ..Default::default() }),
+                ("observer1".into(), Observation { total_samples: 10, successful_samples: 8, total_retries: 2, total_latency: std::time::Duration::from_millis(1000) }),
+                ("observer2".into(), Observation { total_samples: 5, successful_samples: 5, total_retries: 0, total_latency: std::time::Duration::from_millis(300) }),
             ].into_iter().collect(),
         };
         
@@ -237,7 +190,7 @@ mod tests {
                 ("response_time".into(), ValidationResult::fail("response_time", "Too slow")),
             ].into_iter().collect(),
             observations: vec![
-                ("observer1".into(), Observation { total_samples: 10, successful_samples: 9, total_retries: 1, total_latency: std::time::Duration::from_millis(900), ..Default::default() }),
+                ("observer1".into(), Observation { total_samples: 10, successful_samples: 9, total_retries: 1, total_latency: std::time::Duration::from_millis(900) }),
             ].into_iter().collect(),
         };
         

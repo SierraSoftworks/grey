@@ -273,7 +273,7 @@ impl State {
                     })
                     .unwrap_or_else(|| (probe.into(), 0));
 
-                probe_result.apply(self.node_id, &mut snapshot);
+                probe_result.apply(self.node_id, &mut snapshot, probe.policy.max_sample_gap());
                 let new_data = rmp_serde::to_vec_named(&snapshot)?;
                 table.insert(
                     (self.node_id.into(), probe.name.clone()),
@@ -548,6 +548,7 @@ impl Versioned for Probe {
                     .cloned()
                     .collect(),
                 observations: self.observations.clone(),
+                status: self.status.clone(),
             })
         } else {
             None
@@ -572,6 +573,7 @@ mod tests {
             last_updated: when,
             history: Vec::new(),
             observations: HashMap::new(),
+            status: HashMap::new(),
         }
     }
 

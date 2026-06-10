@@ -1,8 +1,15 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{Mergeable, ProbeHistoryBucket};
+use crate::{Mergeable, ProbeHistoryBucket, ProbeStatus};
 use crate::observation::Observation;
+
+/// How long a reported status remains valid without being confirmed by a new sample.
+/// Observers which haven't reported within this window have stopped sampling (or become
+/// unreachable) and no longer contribute to the aggregated probe status.
+fn status_validity() -> chrono::Duration {
+    chrono::Duration::hours(1)
+}
 
 /// Raw probe data as returned by the /api/v1/probes endpoint
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
@@ -21,6 +28,10 @@ pub struct Probe {
     /// Observations collected from this probe, keyed by observer ID
     #[serde(default)]
     pub observations: HashMap<String, Observation>,
+
+    /// The current state of this probe as reported by each observer, keyed by observer ID
+    #[serde(default)]
+    pub status: HashMap<String, ProbeStatus>,
 }
 
 impl Probe {
@@ -37,16 +48,35 @@ impl Probe {
         self.total().success_rate()
     }
 
-    /// The most recent pass/fail state reported by any observer of this probe, falling
-    /// back to the latest history bucket's result when no observer reports a state
-    /// (data recorded by older agents).
+    /// The current state of this probe aggregated across all live observers: a failure
+    /// reported by any observer wins, while passing observers extend each other's
+    /// coverage so the streak reaches back as far as any of them can attest (but never
+    /// past an observed failure). Returns `None` when no observer has confirmed a
+    /// status recently (e.g. data recorded by older agents).
+    pub fn current_status(&self) -> Option<ProbeStatus> {
+        self.current_status_at(chrono::Utc::now())
+    }
+
+    fn current_status_at(&self, now: chrono::DateTime<chrono::Utc>) -> Option<ProbeStatus> {
+        let cutoff = now - status_validity();
+        self.status
+            .values()
+            .filter(|s| s.updated > cutoff)
+            .fold(None, |acc, status| match acc {
+                Some(mut merged) => {
+                    merged.merge(status);
+                    Some(merged)
+                }
+                None => Some(status.clone()),
+            })
+    }
+
+    /// Whether this probe is currently passing, falling back to the latest history
+    /// bucket's result when no observer reports a current status.
     pub fn passing(&self) -> bool {
-        let total = self.total();
-        if total.has_state() {
-            total.passing
-        } else {
-            self.history.last().map(|h| h.passing()).unwrap_or(true)
-        }
+        self.current_status()
+            .map(|s| s.passing)
+            .unwrap_or_else(|| self.history.last().map(|h| h.pass).unwrap_or(true))
     }
 
     /// Calculate recent availability percentage based on successful vs total samples
@@ -74,6 +104,7 @@ impl Mergeable for Probe {
 
         self.last_updated = self.last_updated.max(other.last_updated);
         self.observations.extend(other.observations.clone());
+        self.status.extend(other.status.clone());
 
         let mut i = 0;
         let mut j = 0;
@@ -132,8 +163,8 @@ mod tests {
                 successful_samples: 9,
                 total_retries: 2,
                 total_latency: std::time::Duration::from_secs(5),
-                ..Default::default()
             })].into_iter().collect(),
+            status: HashMap::new(),
         };
 
         let probe2 = Probe {
@@ -146,8 +177,8 @@ mod tests {
                 successful_samples: 4,
                 total_retries: 1,
                 total_latency: std::time::Duration::from_secs(3),
-                ..Default::default()
             })].into_iter().collect(),
+            status: HashMap::new(),
         };
 
         probe1.merge(&probe2);
@@ -172,16 +203,15 @@ mod tests {
                     successful_samples: 9,
                     total_retries: 2,
                     total_latency: std::time::Duration::from_secs(5),
-                    ..Default::default()
                 }),
                 ("observer2".into(), Observation {
                     total_samples: 5,
                     successful_samples: 4,
                     total_retries: 1,
                     total_latency: std::time::Duration::from_secs(3),
-                    ..Default::default()
                 }),
             ].into_iter().collect(),
+            status: HashMap::new(),
         };
 
         let total = probe.total();
@@ -204,16 +234,15 @@ mod tests {
                     successful_samples: 9,
                     total_retries: 2,
                     total_latency: std::time::Duration::from_secs(5),
-                    ..Default::default()
                 }),
                 ("observer2".into(), Observation {
                     total_samples: 5,
                     successful_samples: 4,
                     total_retries: 1,
                     total_latency: std::time::Duration::from_secs(3),
-                    ..Default::default()
                 }),
             ].into_iter().collect(),
+            status: HashMap::new(),
         };
 
         let availability = probe.availability();
@@ -221,26 +250,23 @@ mod tests {
     }
     
     #[test]
-    fn test_probe_passing() {
+    fn test_probe_current_status() {
+        let now = chrono::Utc::now();
         let mut probe = Probe {
             name: "probe".into(),
             tags: HashMap::new(),
-            last_updated: chrono::Utc::now(),
+            last_updated: now,
             history: vec![],
             observations: HashMap::new(),
+            status: HashMap::new(),
         };
 
-        // With no observations or history, a probe is assumed to be passing.
+        // With no reported statuses (e.g. data from older agents), there is no current
+        // status and the probe falls back to the latest history bucket's result.
+        assert_eq!(probe.current_status(), None);
         assert!(probe.passing());
-
-        // Stateless observations (from older agents) fall back to the latest history bucket.
-        probe.observations.insert("observer1".into(), Observation {
-            total_samples: 10,
-            successful_samples: 10,
-            ..Default::default()
-        });
         probe.history.push(ProbeHistoryBucket {
-            start_time: chrono::Utc::now(),
+            start_time: now,
             pass: false,
             message: "Timeout".into(),
             validations: HashMap::new(),
@@ -248,23 +274,37 @@ mod tests {
         });
         assert!(!probe.passing());
 
-        // The most recently transitioned state across observers wins, even when the
-        // average performance disagrees with it.
-        probe.observations.insert("observer2".into(), Observation {
-            total_samples: 100,
-            successful_samples: 1,
+        // A node which restarted recently has its unknown coverage repaired by a node
+        // which has watched the probe pass for longer.
+        probe.status.insert("restarted".into(), ProbeStatus::from_sample(true, now - chrono::Duration::minutes(5)));
+        probe.status.insert("continuous".into(), ProbeStatus {
             passing: true,
-            since: chrono::DateTime::from_timestamp(200, 0).unwrap(),
-            ..Default::default()
+            since: now - chrono::Duration::days(3),
+            transition: false,
+            updated: now,
         });
-        probe.observations.insert("observer3".into(), Observation {
-            total_samples: 100,
-            successful_samples: 99,
-            passing: false,
-            since: chrono::DateTime::from_timestamp(100, 0).unwrap(),
-            ..Default::default()
-        });
+        let status = probe.current_status().expect("a current status");
+        assert!(status.passing);
+        assert_eq!(status.since, now - chrono::Duration::days(3));
         assert!(probe.passing());
+
+        // A failure reported by any live observer wins over the passing reports.
+        probe.status.insert("failing".into(), ProbeStatus {
+            passing: false,
+            since: now - chrono::Duration::minutes(30),
+            transition: true,
+            updated: now,
+        });
+        let status = probe.current_status().expect("a current status");
+        assert!(!status.passing);
+        assert_eq!(status.since, now - chrono::Duration::minutes(30));
+        assert!(!probe.passing());
+
+        // ...but once that observer stops reporting, its stale status no longer counts.
+        probe.status.get_mut("failing").unwrap().updated = now - chrono::Duration::hours(2);
+        let status = probe.current_status().expect("a current status");
+        assert!(status.passing);
+        assert_eq!(status.since, now - chrono::Duration::days(3));
     }
 
     #[test]
@@ -279,12 +319,53 @@ mod tests {
                 successful_samples: 9,
                 total_retries: 2,
                 total_latency: std::time::Duration::from_secs(5),
-                ..Default::default()
+            })].into_iter().collect(),
+            status: vec![("observer1".into(), ProbeStatus {
+                passing: true,
+                since: chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
+                transition: true,
+                updated: chrono::DateTime::from_timestamp(1_700_000_060, 0).unwrap(),
             })].into_iter().collect(),
         };
-        
+
         let packed = rmp_serde::to_vec(&probe).unwrap();
         let unpacked: Probe = rmp_serde::from_slice(&packed).unwrap();
         assert_eq!(probe, unpacked);
+    }
+
+    #[test]
+    fn test_decodes_legacy_probes() {
+        // Probe records stored or gossiped by agents which pre-date status tracking lack
+        // the status map; they must decode with an empty one in both wire formats.
+        #[derive(Serialize)]
+        struct LegacyProbe {
+            name: String,
+            tags: HashMap<String, String>,
+            #[serde(with = "chrono::serde::ts_seconds")]
+            last_updated: chrono::DateTime<chrono::Utc>,
+            history: Vec<ProbeHistoryBucket>,
+            observations: HashMap<String, Observation>,
+        }
+
+        let legacy = LegacyProbe {
+            name: "probe".into(),
+            tags: HashMap::new(),
+            last_updated: chrono::Utc::now().with_time(NaiveTime::from_hms_opt(1, 2, 3).unwrap()).unwrap(),
+            history: vec![],
+            observations: vec![("observer1".into(), Observation {
+                total_samples: 10,
+                successful_samples: 9,
+                total_retries: 2,
+                total_latency: std::time::Duration::from_secs(5),
+            })].into_iter().collect(),
+        };
+
+        for packed in [rmp_serde::to_vec(&legacy).unwrap(), rmp_serde::to_vec_named(&legacy).unwrap()] {
+            let unpacked: Probe = rmp_serde::from_slice(&packed).unwrap();
+            assert_eq!(unpacked.name, "probe");
+            assert_eq!(unpacked.observations.len(), 1);
+            assert!(unpacked.status.is_empty());
+            assert_eq!(unpacked.current_status(), None);
+        }
     }
 }

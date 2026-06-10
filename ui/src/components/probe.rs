@@ -10,8 +10,9 @@ pub struct ProbeProps {
 #[function_component(Probe)]
 pub fn probe(props: &ProbeProps) -> Html {
     let recent_availability = props.probe.recent(2).success_rate();
+    let status = props.probe.current_status();
 
-    // Key the status off the most recently observed state so a recovery is reflected
+    // Key the status off the currently observed state so a recovery is reflected
     // immediately, using the recent average only to grade how severe an ongoing failure is.
     let probe_class = if props.probe.passing() {
         "ok"
@@ -49,7 +50,7 @@ pub fn probe(props: &ProbeProps) -> Html {
                 </div>
                 <div class="availability">{availability(props.probe.availability())}</div>
             </div>
-            <History samples={props.probe.history.clone()} />
+            <History samples={props.probe.history.clone()} status={status} />
         </div>
     }
 }
