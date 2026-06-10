@@ -55,11 +55,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get Rust Stable
-        uses: actions-rs/toolchain@v1.0.7
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          override: true
-          target: wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown
           components: llvm-tools-preview
 
       - name: Setup Cache
@@ -83,10 +81,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          override: true
           components: llvm-tools-preview
 
       - name: install protoc
@@ -191,11 +187,9 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Get Rust Stable
-        uses: actions-rs/toolchain@v1.0.7
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          override: true
-          target: ${{ matrix.target }}
+          targets: ${{ matrix.target }}
           components: llvm-tools-preview
 
       - name: Check out code
