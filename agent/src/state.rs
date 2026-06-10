@@ -259,12 +259,12 @@ impl State {
             let result = {
                 let mut table = txn.open_table(CLUSTER_FIELDS_TABLE)?;
 
-                // Collect the peers' live view of this probe so the node can repair its
-                // own streak history from records which kept watching — this is what
-                // lets a rolling restart re-learn "passing since" instead of losing it.
+                // Join the peers' streak registers into this node's own record ahead of
+                // time: every record converges on the cluster-wide register, so streak
+                // history survives rolling restarts and even the eventual garbage
+                // collection of a departed peer's records.
                 let own_id: u128 = self.node_id.into();
-                let now = chrono::Utc::now();
-                let peer_statuses: Vec<grey_api::ProbeStatus> = table
+                let peer_streaks: Vec<grey_api::Streak> = table
                     .iter()?
                     .filter_map(|entry| entry.ok())
                     .filter(|(key, _)| {
@@ -275,8 +275,7 @@ impl State {
                         let (_version, data) = value.value();
                         rmp_serde::from_slice::<ProbeState>(data).ok()
                     })
-                    .flat_map(|peer| peer.status.into_values())
-                    .filter(|status| status.is_current(now))
+                    .map(|peer| peer.streak)
                     .collect();
 
                 let (mut snapshot, _version) = table
@@ -293,12 +292,9 @@ impl State {
                     })
                     .unwrap_or_else(|| (probe.into(), 0));
 
-                probe_result.apply(self.node_id, &mut snapshot, probe.policy.max_sample_gap());
-
-                if let Some(own_status) = snapshot.status.get_mut(&self.node_id.to_string()) {
-                    for peer_status in &peer_statuses {
-                        own_status.repair(peer_status);
-                    }
+                probe_result.apply(self.node_id, &mut snapshot);
+                for peer_streak in &peer_streaks {
+                    snapshot.streak.join(peer_streak);
                 }
 
                 let new_data = rmp_serde::to_vec_named(&snapshot)?;
@@ -575,7 +571,7 @@ impl Versioned for Probe {
                     .cloned()
                     .collect(),
                 observations: self.observations.clone(),
-                status: self.status.clone(),
+                streak: self.streak.clone(),
             })
         } else {
             None
@@ -600,7 +596,7 @@ mod tests {
             last_updated: when,
             history: Vec::new(),
             observations: HashMap::new(),
-            status: HashMap::new(),
+            streak: grey_api::Streak::default(),
         }
     }
 
@@ -658,11 +654,12 @@ mod tests {
         );
     }
 
-    /// A node whose own coverage only just began (e.g. after a restart) must adopt the
-    /// streak attested by a peer's record when it applies a sample, so rolling restarts
-    /// of the cluster don't lose the "passing since" history.
+    /// A record received from a peer carries the cluster's streak register; joining it
+    /// into our copy of that peer's record (the normal gossip path) and then pooling
+    /// must surface the inherited coverage — this is what lets rolling restarts keep
+    /// the "passing since" history without any per-peer bookkeeping.
     #[tokio::test]
-    async fn update_probe_state_repairs_streak_from_peers() {
+    async fn streak_is_inherited_through_gossip() {
         let dir = tempfile::tempdir().unwrap();
         let state = State::test(dir.path().to_path_buf()).await;
         let probe = state.get_config().probes[0].clone();
@@ -672,19 +669,10 @@ mod tests {
         let now = chrono::DateTime::from_timestamp_millis(chrono::Utc::now().timestamp_millis()).unwrap();
         let streak_start = now - chrono::Duration::days(3);
 
-        // A peer has watched this probe pass for three days, having witnessed the
-        // failure which preceded the streak.
+        // A peer's record attests three days of coverage.
         let peer = NodeID::new();
-        let peer_streak = grey_api::Streak {
-            passing_since: Some(streak_start),
-            failing_since: Some(streak_start - chrono::Duration::hours(1)),
-        };
         let mut peer_record = probe_at(&probe.name, now);
-        peer_record.status.insert(peer.to_string(), grey_api::ProbeStatus {
-            observed: peer_streak.clone(),
-            converged: peer_streak,
-            updated: now,
-        });
+        peer_record.streak.observe(true, streak_start);
 
         {
             let txn = state.database.begin_write().unwrap();
@@ -698,26 +686,24 @@ mod tests {
             txn.commit().unwrap();
         }
 
-        // This node applies a fresh passing sample of its own...
+        // This node samples the probe itself; its own fresh observation cannot shorten
+        // the inherited coverage once the records are pooled.
         state.update_probe_state(&probe.name, &ProbeResult::test()).await.unwrap();
 
-        // ...and its own stored record now attests the peer's three-day streak.
+        let pooled = state.get_probe_states().await.unwrap();
+        let pooled_probe = pooled.get(&probe.name).expect("the probe to be pooled");
+        assert!(pooled_probe.passing());
+        assert_eq!(pooled_probe.streak.since_at(now), Some(streak_start));
+
+        // The sample also joined the peer's register into this node's own stored
+        // record, so the claim survives even if the peer's record is eventually
+        // garbage-collected.
         let txn = state.database.begin_read().unwrap();
         let table = txn.open_table(CLUSTER_FIELDS_TABLE).unwrap();
         let entry = table.get((state.node_id.into(), probe.name.clone())).unwrap().unwrap();
         let (_version, data) = entry.value();
         let own_record: ProbeState = rmp_serde::from_slice(data).unwrap();
-
-        let own_status = own_record
-            .status
-            .get(&state.node_id.to_string())
-            .expect("a status entry for this node");
-        assert!(own_status.passing());
-        assert_eq!(own_status.since(), Some(streak_start));
-        assert_eq!(own_status.converged.failing_since, Some(streak_start - chrono::Duration::hours(1)));
-        // The node's own observation remains its own: only the converged view adopted
-        // the peer's history.
-        assert_eq!(own_status.observed.failing_since, None);
+        assert_eq!(own_record.streak.covered_since, Some(streak_start));
     }
 
     fn b64_key(byte: u8) -> String {

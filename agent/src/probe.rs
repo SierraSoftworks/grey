@@ -40,7 +40,7 @@ impl Into<grey_api::Probe> for &Probe {
             last_updated: chrono::DateTime::UNIX_EPOCH,
             history: Vec::new(),
             observations: HashMap::new(),
-            status: HashMap::new(),
+            streak: grey_api::Streak::default(),
         }
     }
 }

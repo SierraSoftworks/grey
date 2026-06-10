@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{Mergeable, ProbeHistoryBucket, ProbeStatus};
+use crate::{Mergeable, ProbeHistoryBucket, Streak};
 use crate::observation::Observation;
 
 /// Raw probe data as returned by the /api/v1/probes endpoint
@@ -22,9 +22,9 @@ pub struct Probe {
     #[serde(default)]
     pub observations: HashMap<String, Observation>,
 
-    /// The current state of this probe as reported by each observer, keyed by observer ID
+    /// The cluster-converged record of this probe's pass/fail streaks
     #[serde(default)]
-    pub status: HashMap<String, ProbeStatus>,
+    pub streak: Streak,
 }
 
 impl Probe {
@@ -41,32 +41,16 @@ impl Probe {
         self.total().success_rate()
     }
 
-    /// The current state of this probe aggregated across all live observers: an active
-    /// failure reported by any observer wins, while passing observers converge on the
-    /// streak everyone can agree on — observers which witnessed the last failure vote on
-    /// when the probe recovered, and the rest pool their coverage. Returns `None` when
-    /// no observer has confirmed a status recently (e.g. data recorded by older agents).
-    pub fn current_status(&self) -> Option<ProbeStatus> {
-        self.current_status_at(chrono::Utc::now())
-    }
-
-    fn current_status_at(&self, now: chrono::DateTime<chrono::Utc>) -> Option<ProbeStatus> {
-        self.status
-            .values()
-            .filter(|s| s.is_current(now))
-            .fold(None, |acc, status| match acc {
-                Some(mut merged) => {
-                    merged.merge(status);
-                    Some(merged)
-                }
-                None => Some(status.clone()),
-            })
+    /// This probe's cluster-converged streak record, or `None` when it carries no
+    /// observations (e.g. data recorded by older agents).
+    pub fn current_streak(&self) -> Option<&Streak> {
+        (!self.streak.is_empty()).then_some(&self.streak)
     }
 
     /// Whether this probe is currently passing, falling back to the latest history
-    /// bucket's result when no observer reports a current status.
+    /// bucket's result when the streak record carries no observations.
     pub fn passing(&self) -> bool {
-        self.current_status()
+        self.current_streak()
             .map(|s| s.passing())
             .unwrap_or_else(|| self.history.last().map(|h| h.pass).unwrap_or(true))
     }
@@ -96,7 +80,7 @@ impl Mergeable for Probe {
 
         self.last_updated = self.last_updated.max(other.last_updated);
         self.observations.extend(other.observations.clone());
-        self.status.extend(other.status.clone());
+        self.streak.join(&other.streak);
 
         let mut i = 0;
         let mut j = 0;
@@ -142,7 +126,6 @@ pub struct Policy {
 mod tests {
     use chrono::NaiveTime;
     use super::*;
-    use crate::Streak;
     
     #[test]
     fn test_probe_merge() {
@@ -157,7 +140,7 @@ mod tests {
                 total_retries: 2,
                 total_latency: std::time::Duration::from_secs(5),
             })].into_iter().collect(),
-            status: HashMap::new(),
+            streak: Streak::default(),
         };
 
         let probe2 = Probe {
@@ -171,7 +154,7 @@ mod tests {
                 total_retries: 1,
                 total_latency: std::time::Duration::from_secs(3),
             })].into_iter().collect(),
-            status: HashMap::new(),
+            streak: Streak::default(),
         };
 
         probe1.merge(&probe2);
@@ -204,7 +187,7 @@ mod tests {
                     total_latency: std::time::Duration::from_secs(3),
                 }),
             ].into_iter().collect(),
-            status: HashMap::new(),
+            streak: Streak::default(),
         };
 
         let total = probe.total();
@@ -235,7 +218,7 @@ mod tests {
                     total_latency: std::time::Duration::from_secs(3),
                 }),
             ].into_iter().collect(),
-            status: HashMap::new(),
+            streak: Streak::default(),
         };
 
         let availability = probe.availability();
@@ -243,7 +226,7 @@ mod tests {
     }
     
     #[test]
-    fn test_probe_current_status() {
+    fn test_probe_passing() {
         let now = chrono::Utc::now();
         let mut probe = Probe {
             name: "probe".into(),
@@ -251,12 +234,12 @@ mod tests {
             last_updated: now,
             history: vec![],
             observations: HashMap::new(),
-            status: HashMap::new(),
+            streak: Streak::default(),
         };
 
-        // With no reported statuses (e.g. data from older agents), there is no current
-        // status and the probe falls back to the latest history bucket's result.
-        assert_eq!(probe.current_status(), None);
+        // With an empty streak record (e.g. data from older agents), the probe falls
+        // back to the latest history bucket's result.
+        assert_eq!(probe.current_streak(), None);
         assert!(probe.passing());
         probe.history.push(ProbeHistoryBucket {
             start_time: now,
@@ -267,41 +250,23 @@ mod tests {
         });
         assert!(!probe.passing());
 
-        // A node which restarted recently has its unknown coverage repaired by a node
-        // which has watched the probe pass for longer.
-        probe.status.insert("restarted".into(), ProbeStatus::from_sample(true, now - chrono::Duration::minutes(5)));
-        probe.status.insert("continuous".into(), ProbeStatus {
-            observed: Streak { passing_since: Some(now - chrono::Duration::days(3)), failing_since: None },
-            converged: Streak { passing_since: Some(now - chrono::Duration::days(3)), failing_since: None },
-            updated: now,
-        });
-        let status = probe.current_status().expect("a current status");
-        assert!(status.passing());
-        assert_eq!(status.since(), Some(now - chrono::Duration::days(3)));
+        // A streak record with a long-standing coverage claim reports passing...
+        probe.streak.observe(true, now - chrono::Duration::days(3));
+        let streak = probe.current_streak().expect("a streak record");
+        assert!(streak.passing_at(now));
+        assert_eq!(streak.since_at(now), Some(now - chrono::Duration::days(3)));
         assert!(probe.passing());
 
-        // A failure reported by any live observer wins over the passing reports.
-        probe.status.insert("failing".into(), ProbeStatus {
-            observed: Streak {
-                passing_since: Some(now - chrono::Duration::days(3)),
-                failing_since: Some(now - chrono::Duration::minutes(30)),
-            },
-            converged: Streak {
-                passing_since: Some(now - chrono::Duration::days(3)),
-                failing_since: Some(now - chrono::Duration::minutes(30)),
-            },
-            updated: now,
-        });
-        let status = probe.current_status().expect("a current status");
-        assert!(status.failing());
-        assert_eq!(status.since(), Some(now - chrono::Duration::minutes(30)));
+        // ...until a failure is observed by any node, which wins immediately.
+        probe.streak.observe(false, now - chrono::Duration::minutes(1));
         assert!(!probe.passing());
+        assert_eq!(probe.streak.since_at(now), Some(now - chrono::Duration::minutes(1)));
 
-        // ...but once that observer stops reporting, its stale status no longer counts.
-        probe.status.get_mut("failing").unwrap().updated = now - chrono::Duration::hours(2);
-        let status = probe.current_status().expect("a current status");
-        assert!(status.passing());
-        assert_eq!(status.since(), Some(now - chrono::Duration::days(3)));
+        // Once no failures have been seen for the recovery window, the probe reads as
+        // passing again, since the last failing observation.
+        let later = now + Streak::recovery_window();
+        assert!(probe.streak.passing_at(later));
+        assert_eq!(probe.streak.since_at(later), Some(now - chrono::Duration::minutes(1)));
     }
 
     #[test]
@@ -317,17 +282,11 @@ mod tests {
                 total_retries: 2,
                 total_latency: std::time::Duration::from_secs(5),
             })].into_iter().collect(),
-            status: vec![("observer1".into(), ProbeStatus {
-                observed: Streak {
-                    passing_since: Some(chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap()),
-                    failing_since: Some(chrono::DateTime::from_timestamp(1_699_999_000, 0).unwrap()),
-                },
-                converged: Streak {
-                    passing_since: Some(chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap()),
-                    failing_since: Some(chrono::DateTime::from_timestamp(1_699_999_000, 0).unwrap()),
-                },
-                updated: chrono::DateTime::from_timestamp(1_700_000_060, 0).unwrap(),
-            })].into_iter().collect(),
+            streak: Streak {
+                failing_since: Some(chrono::DateTime::from_timestamp(1_699_999_000, 0).unwrap()),
+                failing_until: Some(chrono::DateTime::from_timestamp(1_699_999_900, 0).unwrap()),
+                covered_since: Some(chrono::DateTime::from_timestamp(1_690_000_000, 0).unwrap()),
+            },
         };
 
         let packed = rmp_serde::to_vec(&probe).unwrap();
@@ -337,8 +296,8 @@ mod tests {
 
     #[test]
     fn test_decodes_legacy_probes() {
-        // Probe records stored or gossiped by agents which pre-date status tracking lack
-        // the status map; they must decode with an empty one in both wire formats.
+        // Probe records stored or gossiped by agents which pre-date streak tracking lack
+        // the streak register; they must decode with an empty one in both wire formats.
         #[derive(Serialize)]
         struct LegacyProbe {
             name: String,
@@ -366,8 +325,8 @@ mod tests {
             let unpacked: Probe = rmp_serde::from_slice(&packed).unwrap();
             assert_eq!(unpacked.name, "probe");
             assert_eq!(unpacked.observations.len(), 1);
-            assert!(unpacked.status.is_empty());
-            assert_eq!(unpacked.current_status(), None);
+            assert!(unpacked.streak.is_empty());
+            assert_eq!(unpacked.current_streak(), None);
         }
     }
 }

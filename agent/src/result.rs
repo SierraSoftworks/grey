@@ -52,7 +52,7 @@ impl ProbeResult {
         self
     }
 
-    pub fn apply<Id: ToString>(&self, node_id: Id, probe: &mut grey_api::Probe, max_gap: Duration) {
+    pub fn apply<Id: ToString>(&self, node_id: Id, probe: &mut grey_api::Probe) {
         let sample_time = self.start_time + self.duration;
         probe.last_updated = sample_time;
 
@@ -100,10 +100,7 @@ impl ProbeResult {
             .or_insert_with(Default::default);
         observation.add_sample(self.pass, self.retries as u64, std::time::Duration::from_millis(self.duration.num_milliseconds() as u64));
 
-        probe.status
-            .entry(node_id.to_string())
-            .and_modify(|status| status.record(self.pass, sample_time, max_gap))
-            .or_insert_with(|| grey_api::ProbeStatus::from_sample(self.pass, sample_time));
+        probe.streak.observe(self.pass, sample_time);
     }
 }
 
@@ -143,44 +140,39 @@ mod tests {
             last_updated: chrono::DateTime::UNIX_EPOCH,
             history: Vec::new(),
             observations: HashMap::new(),
-            status: HashMap::new(),
+            streak: grey_api::Streak::default(),
         }
     }
 
-    /// The status streak must span history bucket boundaries: hours of uninterrupted
-    /// passing samples report a single `since` at the start of the run.
+    /// The streak must span history bucket boundaries: hours of uninterrupted passing
+    /// samples report a single coverage claim at the start of the run.
     #[test]
-    fn apply_maintains_status_across_buckets() {
+    fn apply_maintains_streak_across_buckets() {
         let mut probe = empty_probe();
-        let max_gap = Duration::minutes(2);
         let start = Utc.with_ymd_and_hms(2026, 6, 7, 12, 0, 0).unwrap();
 
         for i in 0..180 {
-            result_at(start + Duration::minutes(i), true).apply("node", &mut probe, max_gap);
+            result_at(start + Duration::minutes(i), true).apply("node", &mut probe);
         }
 
         assert!(probe.history.len() >= 3, "three hours of samples should span multiple buckets");
-        let status = probe.status.get("node").expect("a status for the observing node");
-        assert!(status.passing());
-        assert_eq!(status.since(), Some(start));
-        assert_eq!(status.observed.failing_since, None);
+        let sampled_until = start + Duration::minutes(179);
+        assert!(probe.streak.passing_at(sampled_until));
+        assert_eq!(probe.streak.since_at(sampled_until), Some(start));
 
-        // A failure starts a failing streak, keeping the passing marker as history...
+        // A failure starts an episode immediately, and further failing samples refresh
+        // it without moving the onset...
         let failed_at = start + Duration::minutes(180);
-        result_at(failed_at, false).apply("node", &mut probe, max_gap);
-        let status = probe.status.get("node").unwrap();
-        assert!(status.failing());
-        assert_eq!(status.since(), Some(failed_at));
-        assert_eq!(status.observed.passing_since, Some(start));
+        result_at(failed_at, false).apply("node", &mut probe);
+        result_at(failed_at + Duration::minutes(1), false).apply("node", &mut probe);
+        assert!(probe.streak.failing_at(failed_at + Duration::minutes(1)));
+        assert_eq!(probe.streak.since_at(failed_at + Duration::minutes(1)), Some(failed_at));
 
-        // ...and a long gap in sampling (e.g. a process restart) resets the observed
-        // streak, so the time we weren't watching is treated as unknown and the node
-        // rejoins as a fresh observer whose history is repaired from its peers.
-        let restarted_at = start + Duration::minutes(300);
-        result_at(restarted_at, true).apply("node", &mut probe, max_gap);
-        let status = probe.status.get("node").unwrap();
-        assert!(status.passing());
-        assert_eq!(status.since(), Some(restarted_at));
-        assert_eq!(status.observed.failing_since, None);
+        // ...and once no failures have been observed for the recovery window, the probe
+        // reads as passing since the last failing observation.
+        let recovered = failed_at + Duration::minutes(1) + grey_api::Streak::recovery_window() + Duration::seconds(1);
+        result_at(recovered, true).apply("node", &mut probe);
+        assert!(probe.streak.passing_at(recovered));
+        assert_eq!(probe.streak.since_at(recovered), Some(failed_at + Duration::minutes(1)));
     }
 }
