@@ -103,3 +103,104 @@ fn relative_time(when: chrono::DateTime<chrono::Utc>) -> String {
         crate::formatters::compact_duration(chrono::Duration::seconds(seconds))
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::contexts::PeersProvider;
+
+    #[derive(Properties, PartialEq)]
+    struct HarnessProps {
+        peers: Vec<Peer>,
+    }
+
+    /// Wraps the component in the peers context it expects, mirroring the real app tree.
+    #[function_component(Harness)]
+    fn harness(props: &HarnessProps) -> Html {
+        html! {
+            <PeersProvider peers={props.peers.clone()}>
+                <ClusterStatus />
+            </PeersProvider>
+        }
+    }
+
+    async fn render(peers: Vec<Peer>) -> String {
+        yew::ServerRenderer::<Harness>::with_props(move || HarnessProps { peers })
+            .render()
+            .await
+    }
+
+    fn peer(id: &str, health: PeerHealth, current: bool) -> Peer {
+        Peer {
+            id: id.to_string(),
+            last_seen: chrono::Utc::now(),
+            health,
+            current,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_renders_nothing_without_members() {
+        let html = render(vec![]).await;
+        assert!(!html.contains("cluster-status"), "expected no chip, got: {html}");
+    }
+
+    #[tokio::test]
+    async fn test_renders_members_with_current_node_first() {
+        let html = render(vec![
+            peer("remote-node", PeerHealth::Online, false),
+            peer("local-node", PeerHealth::Online, true),
+        ])
+        .await;
+
+        assert!(html.contains("cluster-status good"), "expected a healthy chip, got: {html}");
+        assert!(html.contains("2/2 online"), "expected the online summary, got: {html}");
+        assert!(html.contains("this node"), "expected the current-node tag, got: {html}");
+
+        let local = html.find("local-node").unwrap();
+        let remote = html.find("remote-node").unwrap();
+        assert!(local < remote, "expected the current node to be listed first, got: {html}");
+    }
+
+    #[tokio::test]
+    async fn test_summarises_cluster_health() {
+        let html = render(vec![
+            peer("local-node", PeerHealth::Online, true),
+            peer("remote-node", PeerHealth::Suspect, false),
+        ])
+        .await;
+        assert!(html.contains("cluster-status warning"), "expected a suspect member to warn, got: {html}");
+
+        let html = render(vec![
+            peer("local-node", PeerHealth::Online, true),
+            peer("remote-node", PeerHealth::Offline, false),
+        ])
+        .await;
+        assert!(html.contains("cluster-status error"), "expected an offline member to error, got: {html}");
+        assert!(html.contains("1/2 online"), "expected the online summary, got: {html}");
+    }
+
+    #[test]
+    fn test_health_rank_orders_healthiest_first() {
+        assert!(health_rank(PeerHealth::Online) < health_rank(PeerHealth::Transitive));
+        assert!(health_rank(PeerHealth::Transitive) < health_rank(PeerHealth::Suspect));
+        assert!(health_rank(PeerHealth::Suspect) < health_rank(PeerHealth::Offline));
+    }
+
+    #[test]
+    fn test_health_labels() {
+        assert_eq!(health_label(PeerHealth::Online), "Online");
+        assert_eq!(health_label(PeerHealth::Transitive), "Transitive");
+        assert_eq!(health_label(PeerHealth::Suspect), "Suspect");
+        assert_eq!(health_label(PeerHealth::Offline), "Offline");
+    }
+
+    #[test]
+    fn test_relative_time() {
+        let now = chrono::Utc::now();
+        assert_eq!(relative_time(now), "just now");
+        assert_eq!(relative_time(now - chrono::Duration::seconds(42)), "42s ago");
+        assert_eq!(relative_time(now - chrono::Duration::minutes(17)), "17m ago");
+        assert_eq!(relative_time(now - chrono::Duration::days(5)), "5d ago");
+    }
+}

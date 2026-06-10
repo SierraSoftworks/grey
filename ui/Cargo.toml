@@ -28,6 +28,9 @@ wasm-bindgen-futures = { workspace = true, optional = true }
 wasm-logger = { workspace = true, optional = true }
 web-sys = { workspace = true, optional = true }
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
 [features]
 default = ["wasm"]
 ssr = []

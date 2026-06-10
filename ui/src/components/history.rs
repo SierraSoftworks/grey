@@ -279,3 +279,52 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::S
         </div>
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Properties, PartialEq)]
+    struct HarnessProps {
+        bucket: ProbeHistoryBucket,
+        streak: grey_api::Streak,
+    }
+
+    /// Renders the tooltip directly — in the app it only appears on hover, which SSR can't reach.
+    #[function_component(Harness)]
+    fn harness(props: &HarnessProps) -> Html {
+        let streak = (!props.streak.is_empty()).then_some(&props.streak);
+        render_tooltip(&props.bucket, streak)
+    }
+
+    async fn render(streak: grey_api::Streak) -> String {
+        let bucket = ProbeHistoryBucket {
+            start_time: chrono::Utc::now(),
+            pass: true,
+            message: String::new(),
+            validations: Default::default(),
+            observations: Default::default(),
+        };
+        yew::ServerRenderer::<Harness>::with_props(move || HarnessProps { bucket, streak })
+            .render()
+            .await
+    }
+
+    #[tokio::test]
+    async fn test_tooltip_labels_bucket_and_streak_timestamps() {
+        let mut streak = grey_api::Streak::default();
+        streak.observe(true, chrono::Utc::now() - chrono::Duration::days(5));
+
+        let html = render(streak).await;
+        assert!(html.contains("Bucket:"), "expected the bucket timestamp label, got: {html}");
+        assert!(html.contains("Since:"), "expected the streak timestamp label, got: {html}");
+        assert!(html.contains("Passing"), "expected the streak status, got: {html}");
+    }
+
+    #[tokio::test]
+    async fn test_tooltip_omits_streak_row_for_legacy_records() {
+        let html = render(grey_api::Streak::default()).await;
+        assert!(html.contains("Bucket:"), "expected the bucket timestamp label, got: {html}");
+        assert!(!html.contains("Since:"), "expected no streak row, got: {html}");
+    }
+}
