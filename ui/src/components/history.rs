@@ -102,7 +102,7 @@ pub fn history(props: &HistoryProps) -> Html {
                 // performed on average, while one that has recovered is at worst degraded.
                 // Older segments only have their averages to go on.
                 let is_current = index + 1 == props.samples.len();
-                let current_passing = props.status.as_ref().filter(|_| is_current).map(|s| s.passing);
+                let current_passing = props.status.as_ref().filter(|_| is_current).map(|s| s.passing());
                 let sample_class = match (current_passing, sample.max_availability()) {
                     (Some(false), _) => "error",
                     (Some(true), sli) if sli > 99.9 => "ok",
@@ -153,7 +153,7 @@ pub fn history(props: &HistoryProps) -> Html {
 
 fn render_tooltip(probe_result: &ProbeHistoryBucket, status: Option<&grey_api::ProbeStatus>) -> Html {
     let (status_text, status_class) = match status {
-        Some(status) if status.passing => ("Passing", "ok"),
+        Some(status) if status.passing() => ("Passing", "ok"),
         Some(_) => ("Failing", "error"),
         None => (
             if probe_result.max_availability() == 100.0 { "Passed" } else { "Failed" },
@@ -194,10 +194,12 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket, status: Option<&grey_api::P
                     <span>{timestamp}</span>
                 </div>
                 if let Some(status) = status {
-                    <div class="tooltip-row">
-                        <span class="tooltip-label">{if status.passing { "Passing since:" } else { "Failing since:" }}</span>
-                        <span>{status.since.format("%Y-%m-%d %H:%M:%S UTC").to_string()}</span>
-                    </div>
+                    if let Some(since) = status.since() {
+                        <div class="tooltip-row">
+                            <span class="tooltip-label">{if status.passing() { "Passing since:" } else { "Failing since:" }}</span>
+                            <span>{since.format("%Y-%m-%d %H:%M:%S UTC").to_string()}</span>
+                        </div>
+                    }
                 }
                 <div class="tooltip-row">
                     <span class="tooltip-label">{"Latency:"}</span>

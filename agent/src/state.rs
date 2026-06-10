@@ -259,6 +259,26 @@ impl State {
             let result = {
                 let mut table = txn.open_table(CLUSTER_FIELDS_TABLE)?;
 
+                // Collect the peers' live view of this probe so the node can repair its
+                // own streak history from records which kept watching — this is what
+                // lets a rolling restart re-learn "passing since" instead of losing it.
+                let own_id: u128 = self.node_id.into();
+                let now = chrono::Utc::now();
+                let peer_statuses: Vec<grey_api::ProbeStatus> = table
+                    .iter()?
+                    .filter_map(|entry| entry.ok())
+                    .filter(|(key, _)| {
+                        let (node_id, name) = key.value();
+                        node_id != own_id && name == probe.name
+                    })
+                    .filter_map(|(_, value)| {
+                        let (_version, data) = value.value();
+                        rmp_serde::from_slice::<ProbeState>(data).ok()
+                    })
+                    .flat_map(|peer| peer.status.into_values())
+                    .filter(|status| status.is_current(now))
+                    .collect();
+
                 let (mut snapshot, _version) = table
                     .get((self.node_id.into(), probe.name.clone()))?
                     .map(|existing| {
@@ -274,6 +294,13 @@ impl State {
                     .unwrap_or_else(|| (probe.into(), 0));
 
                 probe_result.apply(self.node_id, &mut snapshot, probe.policy.max_sample_gap());
+
+                if let Some(own_status) = snapshot.status.get_mut(&self.node_id.to_string()) {
+                    for peer_status in &peer_statuses {
+                        own_status.repair(peer_status);
+                    }
+                }
+
                 let new_data = rmp_serde::to_vec_named(&snapshot)?;
                 table.insert(
                     (self.node_id.into(), probe.name.clone()),
@@ -629,6 +656,61 @@ mod tests {
             table.get((node.into(), "stale".to_string())).unwrap().is_none(),
             "an hour-old probe must expire under a 60s expiry (i.e. version read as milliseconds)"
         );
+    }
+
+    /// A node whose own coverage only just began (e.g. after a restart) must adopt the
+    /// streak attested by a peer's record when it applies a sample, so rolling restarts
+    /// of the cluster don't lose the "passing since" history.
+    #[tokio::test]
+    async fn update_probe_state_repairs_streak_from_peers() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = State::test(dir.path().to_path_buf()).await;
+        let probe = state.get_config().probes[0].clone();
+
+        // Truncated to milliseconds, since that's the precision the markers survive
+        // serialization with.
+        let now = chrono::DateTime::from_timestamp_millis(chrono::Utc::now().timestamp_millis()).unwrap();
+        let streak_start = now - chrono::Duration::days(3);
+
+        // A peer has watched this probe pass for three days, having witnessed the
+        // failure which preceded the streak.
+        let peer = NodeID::new();
+        let mut peer_record = probe_at(&probe.name, now);
+        peer_record.status.insert(peer.to_string(), grey_api::ProbeStatus {
+            passing_since: Some(streak_start),
+            failing_since: Some(streak_start - chrono::Duration::hours(1)),
+            updated: now,
+        });
+
+        {
+            let txn = state.database.begin_write().unwrap();
+            {
+                let mut table = txn.open_table(CLUSTER_FIELDS_TABLE).unwrap();
+                let data = rmp_serde::to_vec_named(&peer_record).unwrap();
+                table
+                    .insert((peer.into(), probe.name.clone()), (peer_record.version(), data.as_slice()))
+                    .unwrap();
+            }
+            txn.commit().unwrap();
+        }
+
+        // This node applies a fresh passing sample of its own...
+        state.update_probe_state(&probe.name, &ProbeResult::test()).await.unwrap();
+
+        // ...and its own stored record now attests the peer's three-day streak.
+        let txn = state.database.begin_read().unwrap();
+        let table = txn.open_table(CLUSTER_FIELDS_TABLE).unwrap();
+        let entry = table.get((state.node_id.into(), probe.name.clone())).unwrap().unwrap();
+        let (_version, data) = entry.value();
+        let own_record: ProbeState = rmp_serde::from_slice(data).unwrap();
+
+        let own_status = own_record
+            .status
+            .get(&state.node_id.to_string())
+            .expect("a status entry for this node");
+        assert!(own_status.passing());
+        assert_eq!(own_status.since(), Some(streak_start));
+        assert_eq!(own_status.failing_since, Some(streak_start - chrono::Duration::hours(1)));
     }
 
     fn b64_key(byte: u8) -> String {

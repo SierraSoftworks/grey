@@ -161,25 +161,26 @@ mod tests {
 
         assert!(probe.history.len() >= 3, "three hours of samples should span multiple buckets");
         let status = probe.status.get("node").expect("a status for the observing node");
-        assert!(status.passing);
-        assert_eq!(status.since, start);
-        assert!(!status.transition);
+        assert!(status.passing());
+        assert_eq!(status.since(), Some(start));
+        assert_eq!(status.failing_since, None);
 
-        // A failure ends the streak with an observed transition...
+        // A failure starts a failing streak, keeping the passing marker as history...
         let failed_at = start + Duration::minutes(180);
         result_at(failed_at, false).apply("node", &mut probe, max_gap);
         let status = probe.status.get("node").unwrap();
-        assert!(!status.passing);
-        assert_eq!(status.since, failed_at);
-        assert!(status.transition);
+        assert!(status.failing());
+        assert_eq!(status.since(), Some(failed_at));
+        assert_eq!(status.passing_since, Some(start));
 
-        // ...and a long gap in sampling (e.g. a process restart) resets coverage, so the
-        // time we weren't watching is treated as unknown rather than part of a streak.
+        // ...and a long gap in sampling (e.g. a process restart) resets both markers, so
+        // the time we weren't watching is treated as unknown and the node rejoins as a
+        // fresh observer whose history is repaired from its peers.
         let restarted_at = start + Duration::minutes(300);
         result_at(restarted_at, true).apply("node", &mut probe, max_gap);
         let status = probe.status.get("node").unwrap();
-        assert!(status.passing);
-        assert_eq!(status.since, restarted_at);
-        assert!(!status.transition);
+        assert!(status.passing());
+        assert_eq!(status.since(), Some(restarted_at));
+        assert_eq!(status.failing_since, None);
     }
 }

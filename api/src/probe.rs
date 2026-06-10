@@ -4,13 +4,6 @@ use std::collections::HashMap;
 use crate::{Mergeable, ProbeHistoryBucket, ProbeStatus};
 use crate::observation::Observation;
 
-/// How long a reported status remains valid without being confirmed by a new sample.
-/// Observers which haven't reported within this window have stopped sampling (or become
-/// unreachable) and no longer contribute to the aggregated probe status.
-fn status_validity() -> chrono::Duration {
-    chrono::Duration::hours(1)
-}
-
 /// Raw probe data as returned by the /api/v1/probes endpoint
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct Probe {
@@ -48,20 +41,19 @@ impl Probe {
         self.total().success_rate()
     }
 
-    /// The current state of this probe aggregated across all live observers: a failure
-    /// reported by any observer wins, while passing observers extend each other's
-    /// coverage so the streak reaches back as far as any of them can attest (but never
-    /// past an observed failure). Returns `None` when no observer has confirmed a
-    /// status recently (e.g. data recorded by older agents).
+    /// The current state of this probe aggregated across all live observers: an active
+    /// failure reported by any observer wins, while passing observers converge on the
+    /// streak everyone can agree on — observers which witnessed the last failure vote on
+    /// when the probe recovered, and the rest pool their coverage. Returns `None` when
+    /// no observer has confirmed a status recently (e.g. data recorded by older agents).
     pub fn current_status(&self) -> Option<ProbeStatus> {
         self.current_status_at(chrono::Utc::now())
     }
 
     fn current_status_at(&self, now: chrono::DateTime<chrono::Utc>) -> Option<ProbeStatus> {
-        let cutoff = now - status_validity();
         self.status
             .values()
-            .filter(|s| s.updated > cutoff)
+            .filter(|s| s.is_current(now))
             .fold(None, |acc, status| match acc {
                 Some(mut merged) => {
                     merged.merge(status);
@@ -75,7 +67,7 @@ impl Probe {
     /// bucket's result when no observer reports a current status.
     pub fn passing(&self) -> bool {
         self.current_status()
-            .map(|s| s.passing)
+            .map(|s| s.passing())
             .unwrap_or_else(|| self.history.last().map(|h| h.pass).unwrap_or(true))
     }
 
@@ -278,33 +270,31 @@ mod tests {
         // which has watched the probe pass for longer.
         probe.status.insert("restarted".into(), ProbeStatus::from_sample(true, now - chrono::Duration::minutes(5)));
         probe.status.insert("continuous".into(), ProbeStatus {
-            passing: true,
-            since: now - chrono::Duration::days(3),
-            transition: false,
+            passing_since: Some(now - chrono::Duration::days(3)),
+            failing_since: None,
             updated: now,
         });
         let status = probe.current_status().expect("a current status");
-        assert!(status.passing);
-        assert_eq!(status.since, now - chrono::Duration::days(3));
+        assert!(status.passing());
+        assert_eq!(status.since(), Some(now - chrono::Duration::days(3)));
         assert!(probe.passing());
 
         // A failure reported by any live observer wins over the passing reports.
         probe.status.insert("failing".into(), ProbeStatus {
-            passing: false,
-            since: now - chrono::Duration::minutes(30),
-            transition: true,
+            passing_since: Some(now - chrono::Duration::days(3)),
+            failing_since: Some(now - chrono::Duration::minutes(30)),
             updated: now,
         });
         let status = probe.current_status().expect("a current status");
-        assert!(!status.passing);
-        assert_eq!(status.since, now - chrono::Duration::minutes(30));
+        assert!(status.failing());
+        assert_eq!(status.since(), Some(now - chrono::Duration::minutes(30)));
         assert!(!probe.passing());
 
         // ...but once that observer stops reporting, its stale status no longer counts.
         probe.status.get_mut("failing").unwrap().updated = now - chrono::Duration::hours(2);
         let status = probe.current_status().expect("a current status");
-        assert!(status.passing);
-        assert_eq!(status.since, now - chrono::Duration::days(3));
+        assert!(status.passing());
+        assert_eq!(status.since(), Some(now - chrono::Duration::days(3)));
     }
 
     #[test]
@@ -321,9 +311,8 @@ mod tests {
                 total_latency: std::time::Duration::from_secs(5),
             })].into_iter().collect(),
             status: vec![("observer1".into(), ProbeStatus {
-                passing: true,
-                since: chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
-                transition: true,
+                passing_since: Some(chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap()),
+                failing_since: Some(chrono::DateTime::from_timestamp(1_699_999_000, 0).unwrap()),
                 updated: chrono::DateTime::from_timestamp(1_700_000_060, 0).unwrap(),
             })].into_iter().collect(),
         };
