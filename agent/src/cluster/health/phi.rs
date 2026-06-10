@@ -1,36 +1,6 @@
-use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-/// The liveness verdict for a peer, derived from the phi-accrual detector and (for the
-/// unidirectional case) the per-address send/receive signals tracked in the membership registry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Liveness {
-    /// We are confident the peer is reachable.
-    Healthy,
-    /// The peer has been quiet for longer than expected; it may be failing.
-    Suspect,
-    /// The peer is considered failed (no observed heartbeats for a long time).
-    Dead,
-    /// The peer is alive (its heartbeat is still advancing, as learned via other peers) but our own
-    /// messages to it are not being answered — a one-way/asymmetric link from us to the peer.
-    Unidirectional,
-}
-
-impl Liveness {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Liveness::Healthy => "healthy",
-            Liveness::Suspect => "suspect",
-            Liveness::Dead => "dead",
-            Liveness::Unidirectional => "unidirectional",
-        }
-    }
-
-    /// Whether this verdict warrants an operator warning (as opposed to a healthy/info state).
-    pub fn is_degraded(&self) -> bool {
-        !matches!(self, Liveness::Healthy)
-    }
-}
+use crate::cluster::helpers::WindowedAggregation;
 
 /// A phi-accrual failure detector (Hayashibara et al.), in the simplified form popularised by
 /// quickwit/chitchat: phi is the ratio of the time elapsed since the last observed heartbeat to the
@@ -43,9 +13,7 @@ impl Liveness {
 #[derive(Debug, Clone)]
 pub struct PhiAccrualDetector {
     /// Recent inter-arrival intervals (in milliseconds) between observed heartbeat advances.
-    intervals: VecDeque<f64>,
-    /// Maximum number of intervals retained.
-    window: usize,
+    intervals: WindowedAggregation,
     /// Prior mean interval (milliseconds) used to seed the estimate before enough samples have
     /// accrued, preventing a cold-start false positive.
     prior_mean_ms: f64,
@@ -56,8 +24,7 @@ pub struct PhiAccrualDetector {
 impl PhiAccrualDetector {
     pub fn new(window: usize, prior_mean: Duration) -> Self {
         Self {
-            intervals: VecDeque::with_capacity(window.min(1024)),
-            window: window.max(1),
+            intervals: WindowedAggregation::new(window),
             prior_mean_ms: (prior_mean.as_secs_f64() * 1000.0).max(1.0),
             last_arrival: None,
         }
@@ -68,10 +35,7 @@ impl PhiAccrualDetector {
         if let Some(last) = self.last_arrival {
             let interval = now.saturating_duration_since(last).as_secs_f64() * 1000.0;
             if interval > 0.0 {
-                if self.intervals.len() >= self.window {
-                    self.intervals.pop_front();
-                }
-                self.intervals.push_back(interval);
+                self.intervals.push(interval);
             }
         }
         self.last_arrival = Some(now);
@@ -80,8 +44,7 @@ impl PhiAccrualDetector {
     /// The mean inter-arrival interval (milliseconds), smoothed with the prior so that a small
     /// number of samples cannot produce a wildly optimistic or pessimistic estimate.
     fn mean_ms(&self) -> f64 {
-        let sum: f64 = self.intervals.iter().sum();
-        (sum + self.prior_mean_ms) / (self.intervals.len() as f64 + 1.0)
+        (self.intervals.sum() + self.prior_mean_ms) / (self.intervals.len() as f64 + 1.0)
     }
 
     /// The current phi value at `now`. Returns 0 when we have never observed a heartbeat (so a peer
@@ -142,13 +105,5 @@ mod tests {
         }
         // With a ~100ms mean, a full second of silence is ~10 mean intervals ⇒ well past threshold.
         assert!(fast.phi(base + ms(400 + 1000)) > 8.0);
-    }
-
-    #[test]
-    fn liveness_degraded_classification() {
-        assert!(!Liveness::Healthy.is_degraded());
-        assert!(Liveness::Suspect.is_degraded());
-        assert!(Liveness::Dead.is_degraded());
-        assert!(Liveness::Unidirectional.is_degraded());
     }
 }

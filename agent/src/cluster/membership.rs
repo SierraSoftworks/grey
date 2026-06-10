@@ -3,18 +3,23 @@ use std::fmt::Display;
 use std::hash::Hash;
 use std::str::FromStr;
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use grey_api::PeerHealth;
 use serde::{Deserialize, Serialize};
 
+use super::backoff::{Backoff, ExponentialBackoff};
 use super::health::{Liveness, PhiAccrualDetector};
+use super::helpers::shuffle;
 
 /// A single node's membership record as it travels on the wire inside a [`MembershipSample`]. It
 /// deliberately carries no `last_seen` — that is a *local* observation ("when did **I** last hear
 /// from this node") and gossiping it would corrupt failure detection.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MemberRecord {
+pub struct MemberRecord<Peer> {
+    /// The node this record describes.
+    pub peer: Peer,
     /// Addresses the advertising node believes are working for this member.
     pub addresses: Vec<String>,
     /// The member's boot generation: a persisted, monotonically increasing counter bumped on every
@@ -24,7 +29,7 @@ pub struct MemberRecord {
     pub heartbeat: u64,
 }
 
-impl MemberRecord {
+impl<Peer> MemberRecord<Peer> {
     /// A single comparable version for last-write-wins reconciliation: generation dominates, with
     /// the heartbeat breaking ties within a generation.
     pub fn version(&self) -> u128 {
@@ -35,21 +40,21 @@ impl MemberRecord {
 /// A bounded, fire-and-forget sample of the memberlist gossiped to peers. Receivers merge it into
 /// their own registry; it is never reconciled with a Syn/Ack handshake.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MembershipSample<Peer: Eq + Hash>(HashMap<Peer, MemberRecord>);
+pub struct MembershipSample<Peer>(Vec<MemberRecord<Peer>>);
 
-impl<Peer: Eq + Hash> Default for MembershipSample<Peer> {
+impl<Peer> Default for MembershipSample<Peer> {
     fn default() -> Self {
-        Self(HashMap::new())
+        Self(Vec::new())
     }
 }
 
-impl<Peer: Eq + Hash> MembershipSample<Peer> {
+impl<Peer> MembershipSample<Peer> {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn insert(&mut self, peer: Peer, record: MemberRecord) {
-        self.0.insert(peer, record);
+    pub fn push(&mut self, record: MemberRecord<Peer>) {
+        self.0.push(record);
     }
 
     pub fn len(&self) -> usize {
@@ -61,14 +66,12 @@ impl<Peer: Eq + Hash> MembershipSample<Peer> {
     }
 
     /// Consumes the sample, returning one with at most `max` records (the rest ride a later round).
-    pub fn truncate(self, max: usize) -> Self {
-        if self.0.len() <= max {
-            return self;
-        }
-        Self(self.0.into_iter().take(max).collect())
+    pub fn truncate(mut self, max: usize) -> Self {
+        self.0.truncate(max);
+        self
     }
 
-    pub fn into_inner(self) -> HashMap<Peer, MemberRecord> {
+    pub fn into_inner(self) -> Vec<MemberRecord<Peer>> {
         self.0
     }
 }
@@ -85,7 +88,7 @@ struct AddressHealth {
     last_confirmed: Option<Instant>,
     /// Consecutive sends to this address that were not (yet) confirmed.
     consecutive_misses: u32,
-    /// Earliest time we will gossip to this address again (per-address exponential backoff).
+    /// Earliest time we will gossip to this address again (per-address retry backoff).
     backoff_until: Instant,
 }
 
@@ -141,29 +144,108 @@ impl<Addr: Eq + Hash> Member<Addr> {
 /// Tuning parameters for the membership registry, derived from [`crate::config::ClusterConfig`].
 #[derive(Debug, Clone)]
 pub struct MembershipConfig {
+    /// Number of heartbeat-arrival intervals the failure detector retains per peer when estimating
+    /// its expected gossip cadence; larger windows smooth out jitter at the cost of slower
+    /// adaptation when the cadence changes.
     pub failure_detector_window: usize,
+    /// The interval the failure detector assumes between heartbeats before it has observed enough
+    /// real samples, preventing cold-start false positives. Should match the gossip interval.
     pub phi_prior: Duration,
+    /// The phi value above which a peer is suspected of having failed; higher values tolerate more
+    /// missed heartbeats before raising suspicion.
     pub phi_threshold: f64,
+    /// How long after the last observed heartbeat a suspected peer is declared dead, and how long a
+    /// dead peer is retained (and still occasionally contacted) before being forgotten entirely.
     pub dead_grace: Duration,
+    /// Maximum number of addresses retained per member; the least-recently-useful are evicted so
+    /// address churn cannot grow records without bound.
     pub max_addresses: usize,
+    /// How recently an address must have produced traffic (inbound or a confirmed reply) to be
+    /// considered "working", i.e. advertised to other peers and preferred as a gossip target.
     pub working_window: Duration,
+    /// Base delay applied to an address after its first unanswered send.
     pub backoff_base: Duration,
+    /// Upper bound on the per-address retry backoff, so an address is never deferred past the point
+    /// where its member would expire from the registry.
     pub backoff_max: Duration,
+    /// How long a member is retained after we last had any signal about it before it is forgotten.
     pub member_expiry: Duration,
+}
+
+impl Default for MembershipConfig {
+    fn default() -> Self {
+        Self {
+            // Matches chitchat's default sampling window: ample history without unbounded growth.
+            failure_detector_window: 1000,
+            // The default gossip interval; heartbeats advance roughly once per round.
+            phi_prior: Duration::from_secs(30),
+            // The conventional phi-accrual threshold: low enough to detect failures within a few
+            // missed heartbeats, high enough that one dropped datagram raises no alarm.
+            phi_threshold: 8.0,
+            // Long enough for transient outages (restarts, brief partitions) to recover before the
+            // peer is forgotten, short enough that departed nodes don't linger for days.
+            dead_grace: Duration::from_secs(60 * 60),
+            // A node is rarely reachable at more than a few addresses (per network segment).
+            max_addresses: 8,
+            // Three default gossip rounds: a single missed round doesn't demote an address.
+            working_window: Duration::from_secs(90),
+            // First retry after one missed gossip round.
+            backoff_base: Duration::from_secs(30),
+            // Capped well below member expiry so a backed-off address is always retried again
+            // before its member could expire.
+            backoff_max: Duration::from_secs(15 * 60),
+            // Matches the default `gc_peer_expiry`.
+            member_expiry: Duration::from_secs(30 * 60),
+        }
+    }
 }
 
 /// Raw per-peer signals derived from the failure detector and per-address timestamps.
 struct Signals {
-    /// The failure detector has not flagged the peer (or has no samples yet).
-    alive: bool,
-    /// We have received datagrams directly from the peer recently.
-    received: bool,
-    /// One of our sends to the peer was answered recently (a confirmed direct link).
-    confirmed: bool,
-    /// We are actively sending to the peer.
-    sending: bool,
-    /// No heartbeat has been observed for longer than the dead-node grace period.
-    long_silence: bool,
+    /// We suspect the node is unavailable: its phi value has crossed the suspicion threshold.
+    suspect: bool,
+    /// We have received messages from the node recently.
+    broadcasting: bool,
+    /// The node has replied to messages from us recently.
+    replying: bool,
+    /// The node is eligible to receive messages from us (we have been sending to it recently).
+    eligible: bool,
+    /// We have not observed a heartbeat in more than the dead-node grace period.
+    dead: bool,
+}
+
+impl From<Signals> for Liveness {
+    fn from(s: Signals) -> Self {
+        if s.suspect {
+            if s.dead {
+                Liveness::Dead
+            } else {
+                Liveness::Suspect
+            }
+        } else if s.eligible && s.broadcasting && !s.replying {
+            // The peer is online and reaching us, and we are actively sending to it, yet none of
+            // our messages are being answered: it is unreachable from this node.
+            Liveness::Unreachable
+        } else {
+            Liveness::Healthy
+        }
+    }
+}
+
+impl From<Signals> for PeerHealth {
+    fn from(s: Signals) -> Self {
+        if !s.suspect {
+            if s.replying {
+                PeerHealth::Online
+            } else {
+                PeerHealth::Transitive
+            }
+        } else if s.dead {
+            PeerHealth::Offline
+        } else {
+            PeerHealth::Suspect
+        }
+    }
 }
 
 /// A candidate peer (and the specific address) to gossip with this round.
@@ -177,18 +259,19 @@ pub struct GossipCandidate<Id, Addr> {
 
 /// The in-memory cluster membership registry: who we know about, which of their addresses work, and
 /// how healthy each peer is. Shared between the gossip client (writer) and the API (reader) behind an
-/// [`Arc`]; all interior state is guarded by a single [`RwLock`].
+/// [`Arc`]; the member map is guarded by a [`RwLock`] while the local node's identity and addresses
+/// are immutable and its heartbeat is atomic.
 pub struct Membership<Id: Eq + Hash, Addr: Eq + Hash> {
-    self_id: Id,
-    self_generation: u64,
+    local_id: Id,
+    local_generation: u64,
+    /// The addresses this node advertises about itself (typically the configured advertised or
+    /// listen address). May be empty (e.g. a wildcard listener with no advertised address); fixed
+    /// after startup.
+    local_addresses: Vec<String>,
+    local_heartbeat: AtomicU64,
     config: MembershipConfig,
-    inner: RwLock<Inner<Id, Addr>>,
-}
-
-struct Inner<Id: Eq + Hash, Addr: Eq + Hash> {
-    self_heartbeat: u64,
-    self_addresses: Vec<String>,
-    members: HashMap<Id, Member<Addr>>,
+    backoff: Box<dyn Backoff + Send + Sync>,
+    members: RwLock<HashMap<Id, Member<Addr>>>,
 }
 
 impl<Id, Addr> Membership<Id, Addr>
@@ -200,44 +283,44 @@ where
     /// boot counter (see `State::load_and_bump_generation`): because it grows on every restart, this
     /// node's fresh record always supersedes the stale one peers still hold, whose heartbeat may be
     /// higher.
-    pub fn new(self_id: Id, generation: u64, config: MembershipConfig) -> Self {
+    pub fn new(
+        local_id: Id,
+        generation: u64,
+        local_addresses: Vec<String>,
+        config: MembershipConfig,
+    ) -> Self {
+        let backoff = ExponentialBackoff::new(config.backoff_base, config.backoff_max);
         Self {
-            self_id,
-            self_generation: generation,
+            local_id,
+            local_generation: generation,
+            local_addresses,
+            local_heartbeat: AtomicU64::new(0),
             config,
-            inner: RwLock::new(Inner {
-                self_heartbeat: 0,
-                self_addresses: Vec::new(),
-                members: HashMap::new(),
-            }),
+            backoff: Box::new(backoff),
+            members: RwLock::new(HashMap::new()),
         }
     }
 
-    pub fn self_generation(&self) -> u64 {
-        self.self_generation
-    }
-
-    /// Sets the addresses this node advertises about itself (typically the configured advertised or
-    /// listen address). May be empty (e.g. a wildcard listener with no advertised address).
-    pub fn set_self_addresses(&self, addresses: Vec<String>) {
-        self.inner.write().unwrap().self_addresses = addresses;
+    /// Replaces the retry-backoff strategy applied to unresponsive addresses.
+    #[allow(dead_code)]
+    pub fn with_backoff(mut self, backoff: impl Backoff + Send + Sync + 'static) -> Self {
+        self.backoff = Box::new(backoff);
+        self
     }
 
     /// Bumps this node's own heartbeat counter; called once per gossip round so peers observe a
     /// regular liveness signal.
     pub fn bump_heartbeat(&self) -> u64 {
-        let mut inner = self.inner.write().unwrap();
-        inner.self_heartbeat = inner.self_heartbeat.saturating_add(1);
-        inner.self_heartbeat
+        self.local_heartbeat.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     fn ensure_member<'a>(
-        inner: &'a mut Inner<Id, Addr>,
+        members: &'a mut HashMap<Id, Member<Addr>>,
         config: &MembershipConfig,
         id: &Id,
         now: Instant,
     ) -> &'a mut Member<Addr> {
-        inner.members.entry(id.clone()).or_insert_with(|| Member {
+        members.entry(id.clone()).or_insert_with(|| Member {
             generation: 0,
             heartbeat: 0,
             addresses: HashMap::new(),
@@ -253,12 +336,12 @@ where
     /// definition, a working address for that peer — this is the primary way the working-address set
     /// grows and the basis for only ever gossiping addresses we know to work.
     pub fn record_inbound(&self, peer: &Id, addr: Addr, now: Instant) {
-        if peer == &self.self_id {
+        if peer == &self.local_id {
             return;
         }
-        let mut inner = self.inner.write().unwrap();
+        let mut members = self.members.write().unwrap();
         let max_addresses = self.config.max_addresses;
-        let member = Self::ensure_member(&mut inner, &self.config, peer, now);
+        let member = Self::ensure_member(&mut members, &self.config, peer, now);
         member.last_seen = now;
         member.last_seen_wall = chrono::Utc::now();
         member.dead_since = None;
@@ -266,16 +349,16 @@ where
         health.last_inbound = Some(now);
         health.consecutive_misses = 0;
         health.backoff_until = now;
-        Self::bound_addresses(member, max_addresses, now);
+        Self::bound_addresses(member, max_addresses);
     }
 
     /// Records that we sent a gossip message to `addr` for `peer`.
     pub fn record_send(&self, peer: &Id, addr: &Addr, now: Instant) {
-        if peer == &self.self_id {
+        if peer == &self.local_id {
             return;
         }
-        let mut inner = self.inner.write().unwrap();
-        if let Some(member) = inner.members.get_mut(peer)
+        let mut members = self.members.write().unwrap();
+        if let Some(member) = members.get_mut(peer)
             && let Some(health) = member.addresses.get_mut(addr)
         {
             health.last_send = Some(now);
@@ -285,11 +368,11 @@ where
     /// Records that a reply from `peer` arrived after we sent it a `Syn` — proof that at least one of
     /// the addresses we recently sent to is reachable. We confirm the most-recently-sent addresses.
     pub fn record_confirmation(&self, peer: &Id, now: Instant) {
-        if peer == &self.self_id {
+        if peer == &self.local_id {
             return;
         }
-        let mut inner = self.inner.write().unwrap();
-        if let Some(member) = inner.members.get_mut(peer) {
+        let mut members = self.members.write().unwrap();
+        if let Some(member) = members.get_mut(peer) {
             for health in member.addresses.values_mut() {
                 if health.last_send.is_some() {
                     health.last_confirmed = Some(now);
@@ -304,13 +387,13 @@ where
     /// (last-write-wins on generation then heartbeat), union in any new advertised addresses, and
     /// feed observed heartbeat advances to the failure detector.
     pub fn merge_sample(&self, sample: MembershipSample<Id>, now: Instant) {
-        let mut inner = self.inner.write().unwrap();
+        let mut members = self.members.write().unwrap();
         let max_addresses = self.config.max_addresses;
-        for (peer, record) in sample.into_inner() {
-            if peer == self.self_id {
+        for record in sample.into_inner() {
+            if record.peer == self.local_id {
                 continue;
             }
-            let member = Self::ensure_member(&mut inner, &self.config, &peer, now);
+            let member = Self::ensure_member(&mut members, &self.config, &record.peer, now);
             let incoming = record.version();
             if incoming > member.version() {
                 // The peer is demonstrably alive and producing: count this as a heartbeat advance.
@@ -329,13 +412,13 @@ where
                         .or_insert_with(|| AddressHealth::new(now));
                 }
             }
-            Self::bound_addresses(member, max_addresses, now);
+            Self::bound_addresses(member, max_addresses);
         }
     }
 
     /// Keeps a member's address set within the configured cap, evicting the least-recently-useful
     /// addresses first (never-confirmed before stale-confirmed).
-    fn bound_addresses(member: &mut Member<Addr>, max: usize, _now: Instant) {
+    fn bound_addresses(member: &mut Member<Addr>, max: usize) {
         if member.addresses.len() <= max {
             return;
         }
@@ -353,21 +436,22 @@ where
         }
     }
 
-    /// The raw per-peer signals the classifiers are derived from.
+    /// The raw per-peer signals the [`Liveness`] and [`PeerHealth`] classifications derive from.
     fn signals(&self, member: &Member<Addr>, now: Instant) -> Signals {
         let window = self.config.working_window;
         let recent = |t: Option<Instant>| {
             t.map(|t| now.saturating_duration_since(t) <= window).unwrap_or(false)
         };
-        let phi = member.detector.phi(now);
+        // A node with no heartbeat samples yet is never suspected, so a just-learned peer is not
+        // immediately declared dead.
+        let suspect = member.detector.last_arrival().is_some()
+            && member.detector.phi(now) >= self.config.phi_threshold;
         Signals {
-            // A node with no heartbeat samples yet is treated as alive so a just-learned peer is
-            // never immediately declared dead.
-            alive: member.detector.last_arrival().is_none() || phi < self.config.phi_threshold,
-            received: member.addresses.values().any(|h| recent(h.last_inbound)),
-            confirmed: member.addresses.values().any(|h| recent(h.last_confirmed)),
-            sending: member.addresses.values().any(|h| recent(h.last_send)),
-            long_silence: member
+            suspect,
+            broadcasting: member.addresses.values().any(|h| recent(h.last_inbound)),
+            replying: member.addresses.values().any(|h| recent(h.last_confirmed)),
+            eligible: member.addresses.values().any(|h| recent(h.last_send)),
+            dead: member
                 .detector
                 .last_arrival()
                 .map(|t| now.saturating_duration_since(t) > self.config.dead_grace)
@@ -375,64 +459,36 @@ where
         }
     }
 
-    /// The fine-grained liveness used for operator-facing health reporting (including the
-    /// unidirectional-link signal).
+    /// The fine-grained liveness used for operator-facing health reporting.
     fn classify(&self, member: &Member<Addr>, now: Instant) -> Liveness {
-        let s = self.signals(member, now);
-        if !s.alive {
-            if s.long_silence {
-                Liveness::Dead
-            } else {
-                Liveness::Suspect
-            }
-        } else if s.sending && s.received && !s.confirmed {
-            // The peer is alive and reaching us, and we are actively sending to it, yet none of our
-            // sends are being answered: a one-way (asymmetric) link from us to the peer.
-            Liveness::Unidirectional
-        } else {
-            Liveness::Healthy
-        }
+        self.signals(member, now).into()
     }
 
     /// The coarse, API/UI-facing aggregate health for a peer — the best state across all of its
     /// addresses. `Online` requires a confirmed direct two-way link; `Transitive` means the peer is
     /// alive (its heartbeat advances) but we have no confirmed direct link to it.
     fn aggregate_health(&self, member: &Member<Addr>, now: Instant) -> PeerHealth {
-        let s = self.signals(member, now);
-        if s.alive {
-            if s.confirmed {
-                PeerHealth::Online
-            } else {
-                PeerHealth::Transitive
-            }
-        } else if s.long_silence {
-            PeerHealth::Offline
-        } else {
-            PeerHealth::Suspect
-        }
+        self.signals(member, now).into()
     }
 
     /// Builds a bounded random sample of the memberlist to gossip, including our own record and, for
     /// each peer, only the addresses we currently believe are working.
     pub fn sample_for_gossip(&self, max_records: usize, now: Instant) -> MembershipSample<Id> {
-        let inner = self.inner.read().unwrap();
+        let members = self.members.read().unwrap();
         let mut sample = MembershipSample::new();
 
         // Always advertise ourselves (if we have an address to advertise).
-        if !inner.self_addresses.is_empty() {
-            sample.insert(
-                self.self_id.clone(),
-                MemberRecord {
-                    addresses: inner.self_addresses.clone(),
-                    generation: self.self_generation,
-                    heartbeat: inner.self_heartbeat,
-                },
-            );
+        if !self.local_addresses.is_empty() {
+            sample.push(MemberRecord {
+                peer: self.local_id.clone(),
+                addresses: self.local_addresses.clone(),
+                generation: self.local_generation,
+                heartbeat: self.local_heartbeat.load(Ordering::Relaxed),
+            });
         }
 
         // Collect peers that have at least one working address, then take a bounded random subset.
-        let mut candidates: Vec<&Id> = inner
-            .members
+        let mut candidates: Vec<&Id> = members
             .iter()
             .filter(|(_, m)| {
                 m.addresses
@@ -447,7 +503,7 @@ where
             if sample.len() >= max_records {
                 break;
             }
-            let member = &inner.members[id];
+            let member = &members[id];
             let addresses: Vec<String> = member
                 .addresses
                 .iter()
@@ -457,14 +513,12 @@ where
             if addresses.is_empty() {
                 continue;
             }
-            sample.insert(
-                id.clone(),
-                MemberRecord {
-                    addresses,
-                    generation: member.generation,
-                    heartbeat: member.heartbeat,
-                },
-            );
+            sample.push(MemberRecord {
+                peer: id.clone(),
+                addresses,
+                generation: member.generation,
+                heartbeat: member.heartbeat,
+            });
         }
 
         sample
@@ -473,9 +527,9 @@ where
     /// The peers (and the single best address for each) we should consider gossiping with this round,
     /// annotated with liveness and whether the address is out of backoff.
     pub fn gossip_candidates(&self, now: Instant) -> Vec<GossipCandidate<Id, Addr>> {
-        let inner = self.inner.read().unwrap();
+        let members = self.members.read().unwrap();
         let mut out = Vec::new();
-        for (id, member) in inner.members.iter() {
+        for (id, member) in members.iter() {
             // Pick the best address: prefer working ones, ranked by the most recent good signal.
             let best = member
                 .addresses
@@ -497,14 +551,13 @@ where
     /// liveness transitions to the tracing pipeline, and expire members that have been dead beyond
     /// the grace period or unseen beyond the member-expiry window.
     pub fn sweep(&self, now: Instant) {
-        let mut inner = self.inner.write().unwrap();
+        let mut members = self.members.write().unwrap();
         let config = self.config.clone();
-        let self_id = self.self_id.clone();
 
         let mut to_remove: Vec<Id> = Vec::new();
-        for (id, member) in inner.members.iter_mut() {
+        for (id, member) in members.iter_mut() {
             // Per-address backoff: a send that was never confirmed (and is older than one working
-            // window) counts as a miss and pushes the address into exponential backoff.
+            // window) counts as a miss and defers the address per the backoff strategy.
             for health in member.addresses.values_mut() {
                 if let Some(sent) = health.last_send {
                     let confirmed_after_send = health
@@ -521,12 +574,7 @@ where
                         && now >= health.backoff_until
                     {
                         health.consecutive_misses = health.consecutive_misses.saturating_add(1);
-                        let backoff = exponential_backoff(
-                            config.backoff_base,
-                            config.backoff_max,
-                            health.consecutive_misses,
-                        );
-                        health.backoff_until = now + backoff;
+                        health.backoff_until = now + self.backoff.backoff(health.consecutive_misses);
                     }
                 }
             }
@@ -545,10 +593,10 @@ where
             if member.last_reported != Some(liveness) {
                 let phi = member.detector.phi(now);
                 match liveness {
-                    Liveness::Unidirectional => tracing::warn!(
+                    Liveness::Unreachable => tracing::warn!(
                         name: "cluster.health.transition",
                         { peer.id = %id, state = liveness.as_str(), kind = liveness.as_str(), phi = phi },
-                        "Peer {id} can reach us but is not receiving our messages (unidirectional link)."
+                        "Peer {id} is online but is not responding to our messages (unreachable)."
                     ),
                     Liveness::Suspect | Liveness::Dead => tracing::warn!(
                         name: "cluster.health.transition",
@@ -580,8 +628,8 @@ where
         }
 
         for id in to_remove {
-            if id != self_id {
-                inner.members.remove(&id);
+            if id != self.local_id {
+                members.remove(&id);
             }
         }
     }
@@ -591,9 +639,8 @@ where
     /// reachable on the public internet).
     pub fn redacted_peers(&self) -> Vec<(String, chrono::DateTime<chrono::Utc>, PeerHealth)> {
         let now = Instant::now();
-        let inner = self.inner.read().unwrap();
-        inner
-            .members
+        let members = self.members.read().unwrap();
+        members
             .iter()
             .map(|(id, m)| (id.to_string(), m.last_seen_wall, self.aggregate_health(m, now)))
             .collect()
@@ -601,25 +648,23 @@ where
 
     #[cfg(test)]
     pub fn liveness_of(&self, peer: &Id, now: Instant) -> Option<Liveness> {
-        let inner = self.inner.read().unwrap();
-        inner.members.get(peer).map(|m| self.classify(m, now))
+        let members = self.members.read().unwrap();
+        members.get(peer).map(|m| self.classify(m, now))
     }
 
     #[cfg(test)]
     pub fn health_of(&self, peer: &Id, now: Instant) -> PeerHealth {
-        let inner = self.inner.read().unwrap();
-        inner
-            .members
+        let members = self.members.read().unwrap();
+        members
             .get(peer)
             .map(|m| self.aggregate_health(m, now))
-            .unwrap_or(PeerHealth::Offline)
+            .unwrap_or_default()
     }
 
     #[cfg(test)]
     pub fn known_addresses(&self, peer: &Id) -> Vec<Addr> {
-        let inner = self.inner.read().unwrap();
-        inner
-            .members
+        let members = self.members.read().unwrap();
+        members
             .get(peer)
             .map(|m| m.addresses.keys().cloned().collect())
             .unwrap_or_default()
@@ -627,28 +672,7 @@ where
 
     #[cfg(test)]
     pub fn member_count(&self) -> usize {
-        self.inner.read().unwrap().members.len()
-    }
-}
-
-/// `min(base * 2^(misses-1), max)`, saturating, used for per-address retry backoff.
-fn exponential_backoff(base: Duration, max: Duration, misses: u32) -> Duration {
-    if misses == 0 {
-        return Duration::ZERO;
-    }
-    let shift = (misses - 1).min(32);
-    let scaled = base.saturating_mul(1u32 << shift);
-    scaled.min(max)
-}
-
-/// In-place Fisher–Yates shuffle (we only need a cheap, unbiased reorder for sampling).
-fn shuffle<T>(items: &mut [T]) {
-    use rand::RngExt;
-    let mut rng = rand::rng();
-    let len = items.len();
-    for i in (1..len).rev() {
-        let j = rng.random_range(0..=i);
-        items.swap(i, j);
+        self.members.read().unwrap().len()
     }
 }
 
@@ -670,6 +694,10 @@ mod tests {
         }
     }
 
+    fn membership() -> Membership<crate::cluster::NodeID, std::net::SocketAddr> {
+        Membership::new(nid(1), 1, Vec::new(), test_config())
+    }
+
     fn nid(n: u128) -> crate::cluster::NodeID {
         crate::cluster::NodeID::from(n)
     }
@@ -678,8 +706,14 @@ mod tests {
         s.parse().unwrap()
     }
 
-    fn record(addrs: &[&str], generation: u64, heartbeat: u64) -> MemberRecord {
+    fn record(
+        peer: crate::cluster::NodeID,
+        addrs: &[&str],
+        generation: u64,
+        heartbeat: u64,
+    ) -> MemberRecord<crate::cluster::NodeID> {
         MemberRecord {
+            peer,
             addresses: addrs.iter().map(|s| s.to_string()).collect(),
             generation,
             heartbeat,
@@ -689,58 +723,56 @@ mod tests {
     #[test]
     fn record_version_orders_by_generation_then_heartbeat() {
         // A restart (higher generation, heartbeat reset to 0) supersedes a high pre-restart heartbeat.
-        let restarted = record(&[], 5, 0);
-        let pre_restart = record(&[], 4, u64::MAX);
+        let restarted = record(nid(2), &[], 5, 0);
+        let pre_restart = record(nid(2), &[], 4, u64::MAX);
         assert!(restarted.version() > pre_restart.version());
     }
 
     #[test]
     fn merge_unions_addresses_and_supersedes_by_version() {
-        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
+        let m = membership();
         let base = Instant::now();
 
         let mut s1 = MembershipSample::new();
-        s1.insert(nid(2), record(&["10.0.0.2:8888"], 1, 1));
+        s1.push(record(nid(2), &["10.0.0.2:8888"], 1, 1));
         m.merge_sample(s1, base);
         assert_eq!(m.known_addresses(&nid(2)).len(), 1);
 
         // A newer record adds another address.
         let mut s2 = MembershipSample::new();
-        s2.insert(nid(2), record(&["10.0.0.2:8888", "10.1.0.2:8888"], 1, 2));
+        s2.push(record(nid(2), &["10.0.0.2:8888", "10.1.0.2:8888"], 1, 2));
         m.merge_sample(s2, base + Duration::from_secs(1));
         let known = m.known_addresses(&nid(2));
         assert_eq!(known.len(), 2, "the new address should be unioned in");
     }
 
     #[test]
-    fn merge_drops_self_records() {
-        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
+    fn merge_drops_local_records() {
+        let m = membership();
         let mut s = MembershipSample::new();
-        s.insert(nid(1), record(&["127.0.0.1:1"], 9, 9));
+        s.push(record(nid(1), &["127.0.0.1:1"], 9, 9));
         m.merge_sample(s, Instant::now());
         assert_eq!(m.member_count(), 0, "we must never store a member record for ourselves");
     }
 
     #[test]
     fn address_set_is_bounded() {
-        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
+        let m = membership();
         let base = Instant::now();
         let mut s = MembershipSample::new();
-        s.insert(
+        s.push(record(
             nid(2),
-            record(
-                &["10.0.0.1:1", "10.0.0.2:1", "10.0.0.3:1", "10.0.0.4:1", "10.0.0.5:1", "10.0.0.6:1"],
-                1,
-                1,
-            ),
-        );
+            &["10.0.0.1:1", "10.0.0.2:1", "10.0.0.3:1", "10.0.0.4:1", "10.0.0.5:1", "10.0.0.6:1"],
+            1,
+            1,
+        ));
         m.merge_sample(s, base);
         assert!(m.known_addresses(&nid(2)).len() <= 4, "address set must respect max_addresses");
     }
 
     #[test]
     fn inbound_marks_address_working_and_keeps_node_healthy() {
-        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
+        let m = membership();
         let base = Instant::now();
         m.record_inbound(&nid(2), addr("10.0.0.2:8888"), base);
         // Healthy: we have a working address and the detector has no reason to suspect.
@@ -748,35 +780,35 @@ mod tests {
     }
 
     #[test]
-    fn unidirectional_when_alive_but_our_sends_are_unanswered() {
-        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
+    fn unreachable_when_online_but_our_sends_are_unanswered() {
+        let m = membership();
         let base = Instant::now();
         let a = addr("10.0.0.2:8888");
 
         // The peer's gossip reaches us (so its address is a working inbound source and its heartbeat
-        // keeps advancing — it is alive), mirroring how `handle_message` records an inbound for every
-        // datagram before merging the sample.
+        // keeps advancing — it is online), mirroring how `handle_message` records an inbound for
+        // every datagram before merging the sample.
         for hb in 1..6 {
             m.record_inbound(&nid(2), a, base + Duration::from_secs(hb));
             let mut s = MembershipSample::new();
-            s.insert(nid(2), record(&["10.0.0.2:8888"], 1, hb));
+            s.push(record(nid(2), &["10.0.0.2:8888"], 1, hb));
             m.merge_sample(s, base + Duration::from_secs(hb));
         }
         // We send to it, but our messages are never answered (no confirmation).
         m.record_send(&nid(2), &a, base + Duration::from_secs(6));
 
         let now = base + Duration::from_secs(7);
-        assert_eq!(m.liveness_of(&nid(2), now), Some(Liveness::Unidirectional));
+        assert_eq!(m.liveness_of(&nid(2), now), Some(Liveness::Unreachable));
     }
 
     #[test]
     fn dead_when_heartbeats_stop_for_long_enough() {
-        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
+        let m = membership();
         let base = Instant::now();
         // Establish a ~1s heartbeat cadence.
         for hb in 1..5 {
             let mut s = MembershipSample::new();
-            s.insert(nid(2), record(&["10.0.0.2:8888"], 1, hb));
+            s.push(record(nid(2), &["10.0.0.2:8888"], 1, hb));
             m.merge_sample(s, base + Duration::from_secs(hb));
         }
         // Long after the last heartbeat (well past dead_grace), with no inbound, it is Dead.
@@ -785,30 +817,40 @@ mod tests {
     }
 
     #[test]
-    fn sample_includes_self_and_only_working_peer_addresses() {
-        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
-        m.set_self_addresses(vec!["10.0.0.1:8888".to_string()]);
+    fn sample_includes_local_node_and_only_working_peer_addresses() {
+        let m = Membership::<_, std::net::SocketAddr>::new(
+            nid(1),
+            1,
+            vec!["10.0.0.1:8888".to_string()],
+            test_config(),
+        );
         let base = Instant::now();
 
         // A working peer (we received from it) and a peer we only heard about (no working address).
         m.record_inbound(&nid(2), addr("10.0.0.2:8888"), base);
         let mut s = MembershipSample::new();
-        s.insert(nid(3), record(&["10.0.0.3:8888"], 1, 1));
+        s.push(record(nid(3), &["10.0.0.3:8888"], 1, 1));
         m.merge_sample(s, base);
 
         m.bump_heartbeat();
         let sample = m.sample_for_gossip(16, base).into_inner();
-        assert!(sample.contains_key(&nid(1)), "our own record must be advertised");
-        assert!(sample.contains_key(&nid(2)), "a working peer must be advertised");
         assert!(
-            !sample.contains_key(&nid(3)),
+            sample.iter().any(|r| r.peer == nid(1)),
+            "our own record must be advertised"
+        );
+        assert!(
+            sample.iter().any(|r| r.peer == nid(2)),
+            "a working peer must be advertised"
+        );
+        assert!(
+            !sample.iter().any(|r| r.peer == nid(3)),
             "a peer with no confirmed-working address must not be advertised"
         );
     }
 
     #[test]
     fn aggregate_health_reflects_best_address_state() {
-        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
+        let m = membership();
         let base = Instant::now();
         let a = addr("10.0.0.2:8888");
 
@@ -817,7 +859,7 @@ mod tests {
 
         // Learned via gossip (alive, but no confirmed direct link) → Transitive.
         let mut s = MembershipSample::new();
-        s.insert(nid(2), record(&["10.0.0.2:8888"], 1, 1));
+        s.push(record(nid(2), &["10.0.0.2:8888"], 1, 1));
         m.merge_sample(s, base);
         assert_eq!(m.health_of(&nid(2), base), PeerHealth::Transitive);
 
@@ -829,11 +871,11 @@ mod tests {
 
     #[test]
     fn aggregate_health_is_offline_after_long_silence() {
-        let m = Membership::<_, std::net::SocketAddr>::new(nid(1), 1, test_config());
+        let m = membership();
         let base = Instant::now();
         for hb in 1..5 {
             let mut s = MembershipSample::new();
-            s.insert(nid(2), record(&["10.0.0.2:8888"], 1, hb));
+            s.push(record(nid(2), &["10.0.0.2:8888"], 1, hb));
             m.merge_sample(s, base + Duration::from_secs(hb));
         }
         // Well past dead_grace with no further heartbeats.
@@ -842,13 +884,15 @@ mod tests {
     }
 
     #[test]
-    fn exponential_backoff_grows_and_caps() {
-        let base = Duration::from_secs(1);
-        let max = Duration::from_secs(60);
-        assert_eq!(exponential_backoff(base, max, 0), Duration::ZERO);
-        assert_eq!(exponential_backoff(base, max, 1), Duration::from_secs(1));
-        assert_eq!(exponential_backoff(base, max, 2), Duration::from_secs(2));
-        assert_eq!(exponential_backoff(base, max, 3), Duration::from_secs(4));
-        assert_eq!(exponential_backoff(base, max, 30), max, "must cap at max");
+    fn default_config_is_internally_consistent() {
+        let config = MembershipConfig::default();
+        assert!(
+            config.backoff_max < config.member_expiry,
+            "a backed-off address must be retried before its member could expire"
+        );
+        assert!(
+            config.working_window >= config.phi_prior,
+            "an address must not be demoted within a single expected heartbeat interval"
+        );
     }
 }

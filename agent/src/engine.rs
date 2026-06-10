@@ -60,22 +60,15 @@ impl Engine {
             let config = self.state.get_config();
             let members = self.state.members();
 
-            // Determine the address we advertise to peers for discovery: the configured
-            // `advertised_address`, otherwise the listen address when it is concrete (non-wildcard).
-            // A wildcard listener with no advertised address self-advertises nothing — peers still
-            // learn us from the source address of our packets, but we are not discovered transitively.
-            let advertised = config.cluster.advertised_address.clone().or_else(|| {
-                match config.cluster.listen.parse::<std::net::SocketAddr>() {
-                    Ok(addr) if !addr.ip().is_unspecified() => Some(config.cluster.listen.clone()),
-                    _ => None,
-                }
-            });
-            match advertised {
-                Some(addr) => members.set_self_addresses(vec![addr]),
-                None => warn!(
+            // The advertised addresses are computed from the configuration when the membership
+            // registry is constructed (see `State::new`). Without one, transitive discovery still
+            // works as long as the source addresses other nodes observe for this node are reachable
+            // cluster-wide; it only breaks down across network boundaries.
+            if config.cluster.advertised_addresses().is_empty() {
+                warn!(
                     name: "cluster.advertise",
-                    "No advertised_address is configured and the listen address is a wildcard; this node will not advertise an address for transitive discovery. Set cluster.advertised_address to a routable host:port to enable it."
-                ),
+                    "No advertised_address is configured and the listen address is a wildcard; peers will discover this node from the source address of its gossip messages. If the cluster spans multiple networks (e.g. a LAN and a WAN), set cluster.advertised_address to an address that is reachable from all of them."
+                );
             }
 
             let cluster_transport = cluster::UdpGossipTransport::new(

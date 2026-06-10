@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::str::FromStr;
@@ -8,37 +7,6 @@ use tracing::instrument;
 use tracing_batteries::prelude::*;
 
 use super::*;
-
-/// Randomly selects up to `count` items from `items` without replacement.
-///
-/// Uses a partial Fisher–Yates shuffle so it touches only `count` elements regardless of the
-/// input size. Returns all items when `count` exceeds their number.
-fn sample_peers<A>(mut items: Vec<A>, count: usize) -> Vec<A> {
-    use rand::RngExt;
-
-    let take = count.min(items.len());
-    let mut rng = rand::rng();
-    for i in 0..take {
-        let j = i + rng.random_range(0..(items.len() - i));
-        items.swap(i, j);
-    }
-    items.truncate(take);
-    items
-}
-
-/// Removes duplicate targets that share an address, keeping the first occurrence. Used so a seed
-/// that is also a discovered peer (or two candidates resolving to the same address) is only gossiped
-/// to once per round.
-fn unique_by_address<I, A: Clone + Eq + Hash>(items: Vec<(I, A)>) -> Vec<(I, A)> {
-    let mut seen = HashSet::new();
-    let mut result = Vec::with_capacity(items.len());
-    for (id, addr) in items {
-        if seen.insert(addr.clone()) {
-            result.push((id, addr));
-        }
-    }
-    result
-}
 
 pub struct GossipClient<S, T>
 where
@@ -385,56 +353,11 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::net::SocketAddr;
     use std::time::Duration;
 
     use super::*;
-
-    #[test]
-    fn unique_by_address_keeps_first_occurrence_per_address() {
-        // A seed (address "a") that is also a discovered peer, and a duplicate seed ("b"), must each
-        // be gossiped to only once per round even though they are not adjacent.
-        let input = vec![
-            (Some(1), "a"),
-            (None, "b"),
-            (Some(2), "a"),
-            (None, "c"),
-            (None, "b"),
-        ];
-        assert_eq!(
-            unique_by_address(input),
-            vec![(Some(1), "a"), (None, "b"), (None, "c")]
-        );
-    }
-
-    #[test]
-    fn sample_peers_limits_to_count_and_returns_distinct_subset() {
-        let all: Vec<u32> = (0..10).collect();
-        for _ in 0..100 {
-            let sampled = sample_peers(all.clone(), 3);
-            assert_eq!(sampled.len(), 3, "should sample exactly gossip_factor peers");
-            assert!(sampled.iter().all(|x| all.contains(x)), "samples must come from the input");
-            let distinct: HashSet<_> = sampled.iter().collect();
-            assert_eq!(distinct.len(), sampled.len(), "samples must be without replacement");
-        }
-    }
-
-    #[test]
-    fn sample_peers_caps_at_available() {
-        assert_eq!(sample_peers(vec![1, 2], 5).len(), 2);
-        assert!(sample_peers(Vec::<u32>::new(), 5).is_empty());
-    }
-
-    #[test]
-    fn sample_peers_eventually_covers_all_candidates() {
-        // Sampling must rotate across rounds so anti-entropy reaches every peer over time.
-        let all: Vec<u32> = (0..5).collect();
-        let mut seen: HashSet<u32> = HashSet::new();
-        for _ in 0..1000 {
-            seen.extend(sample_peers(all.clone(), 1));
-        }
-        assert_eq!(seen.len(), all.len(), "every candidate should be reachable across rounds");
-    }
 
     fn test_membership_config() -> MembershipConfig {
         // Generous windows so nothing expires or backs off during a short test; the detector never
@@ -453,7 +376,7 @@ mod tests {
     }
 
     fn test_membership(id: NodeID) -> Arc<Membership<NodeID, NodeID>> {
-        Arc::new(Membership::new(id, 1, test_membership_config()))
+        Arc::new(Membership::new(id, 1, Vec::new(), test_membership_config()))
     }
 
     #[tokio::test]
@@ -562,9 +485,12 @@ mod tests {
     }
 
     fn socket_membership(id: NodeID, addr: SocketAddr) -> Arc<Membership<NodeID, SocketAddr>> {
-        let m = Arc::new(Membership::new(id, 1, test_membership_config()));
-        m.set_self_addresses(vec![addr.to_string()]);
-        m
+        Arc::new(Membership::new(
+            id,
+            1,
+            vec![addr.to_string()],
+            test_membership_config(),
+        ))
     }
 
     fn mock_client(
@@ -623,10 +549,10 @@ mod tests {
     }
 
     /// B can reach A but A cannot reach B (a one-way link). A keeps receiving B's gossip (so B is
-    /// observably alive) yet none of A's messages to B are answered, which A must classify as a
-    /// unidirectional link (#615) rather than a healthy peer.
+    /// observably online) yet none of A's messages to B are answered, which A must classify as
+    /// unreachable (#615) rather than a healthy peer.
     #[tokio::test]
-    async fn detects_unidirectional_link() {
+    async fn detects_unreachable_peer() {
         let a: SocketAddr = "127.0.0.1:22001".parse().unwrap();
         let b: SocketAddr = "127.0.0.1:22002".parse().unwrap();
         let (na, nb) = (NodeID::new(), NodeID::new());
@@ -649,8 +575,8 @@ mod tests {
 
         assert_eq!(
             ma.liveness_of(&nb, Instant::now()),
-            Some(Liveness::Unidirectional),
-            "A should detect that its link to B is one-way"
+            Some(Liveness::Unreachable),
+            "A should detect that B is online but not responding to its messages"
         );
     }
 }

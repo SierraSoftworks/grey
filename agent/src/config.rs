@@ -174,6 +174,23 @@ pub struct ClusterConfig {
     pub gc_peer_expiry: std::time::Duration,
 }
 
+impl ClusterConfig {
+    /// The addresses this node advertises about itself through membership gossip: the configured
+    /// `advertised_address`, falling back to `listen` when that is a concrete (non-wildcard)
+    /// address. Empty when neither yields a routable address, in which case the node is still
+    /// discovered via the source address of its gossip messages.
+    pub fn advertised_addresses(&self) -> Vec<String> {
+        self.advertised_address
+            .clone()
+            .or_else(|| match self.listen.parse::<std::net::SocketAddr>() {
+                Ok(addr) if !addr.ip().is_unspecified() => Some(self.listen.clone()),
+                _ => None,
+            })
+            .into_iter()
+            .collect()
+    }
+}
+
 impl Default for ClusterConfig {
     fn default() -> Self {
         Self {

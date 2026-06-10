@@ -107,22 +107,22 @@ cluster:
 ```
 
 #### advertised_address
-The address other nodes should use to reach this one. It is propagated through the cluster via
-membership gossip so that peers can discover this node **transitively**, without every node needing it
-configured as a seed (see [Peer Discovery](#peer-discovery-and-health)).
+The address other nodes should use to reach this one, propagated through membership gossip for
+transitive peer discovery (see [Peer Discovery](#peer-discovery-and-health)).
 
-When omitted, Grey falls back to the `listen` address if that is a concrete (non-wildcard) address. If
-`listen` is a wildcard such as `0.0.0.0:8888` and `advertised_address` is not set, this node will **not**
-advertise an address for transitive discovery — it is still learned by the peers it gossips with directly
-(from the source address of its packets), but those peers cannot relay a usable address for it to others.
+Within a single network this is rarely needed: peers learn this node's address from the source
+address of its gossip messages and share that with the rest of the cluster. Setting
+`advertised_address` matters when the cluster **spans different networks** (for example a local LAN
+and the public internet, or multiple regions), where the source address observed by nearby peers is
+not reachable from the other side of the boundary. In that case, set it to an address that is
+reachable from every part of the cluster.
 
-Set this to a routable `ip:port` that the rest of the cluster can reach (a DNS name is not re-resolved
-for membership records, so prefer an IP literal here).
+When omitted, Grey falls back to the `listen` address if that is a concrete (non-wildcard) address.
 
 ```yaml
 cluster:
   listen: 0.0.0.0:8888
-  advertised_address: 10.0.0.5:8888
+  advertised_address: 203.0.113.5:8888
 ```
 
 #### secrets
@@ -327,7 +327,7 @@ in the next garbage collection cycle.
 Each Grey instance persists its node identifier in its state database, so a restart resumes
 the same identity and continues updating its existing probe state rather than appearing as a
 new node. Probe records are still removed once they have not been updated for `gc_probe_expiry`
-— for example when an instance is permanently retired, or when its state database is reset — and
+(for example when an instance is permanently retired, or when its state database is reset) and
 the aggregated probe metrics are adjusted to account for the loss of this data.
 
 ```yaml
@@ -349,35 +349,30 @@ cluster:
 ## Peer Discovery and Health
 
 Alongside the probe-state anti-entropy, each node periodically broadcasts a small, fire-and-forget
-sample of its **memberlist** &mdash; the other nodes it knows about and the addresses it has confirmed
-are working for them. Receivers merge these into their own membership view.
-
-This gives Grey two capabilities:
+sample of its **memberlist**: the other nodes it knows about and the addresses it has confirmed are
+working for them. Receivers merge these into their own membership view, which gives Grey two
+capabilities:
 
 - **Transitive peer discovery.** A node learns the address of a peer it has never directly contacted,
-  relayed through a node they both gossip with. This means you no longer need a full mesh of seeds: as
-  long as the graph of seed relationships is connected, every node eventually discovers every other.
-  A node only advertises addresses it has actually received traffic on (so it never propagates a dead
-  address), which also lets a peer be reached at different addresses from different network segments.
-  Configure [`advertised_address`](#advertised_address) so a node can be discovered behind a wildcard
-  listener.
+  relayed through a node they both gossip with, so a full mesh of seeds is not required: as long as
+  the graph of seed relationships is connected, every node eventually discovers every other. Only
+  addresses a node has actually received traffic on are advertised, so dead addresses are never
+  propagated.
 - **Failure detection.** A [phi-accrual](https://doi.org/10.1109/RELDIS.2004.1353004) detector tracks
-  how regularly each peer's gossip heartbeat advances and flags peers that go silent. Grey also detects
-  **one-way (unidirectional) links** &mdash; where a peer can send to this node but never receives its
-  replies, for example behind an asymmetric NAT or firewall rule &mdash; and emits a `warn`-level
-  `cluster.health.transition` event so operators can diagnose it instead of silently failing to converge.
-  Grey then prefers gossiping over healthy links and backs off unhealthy ones (while still always
-  contacting seeds). Each peer is summarised with an aggregate health &mdash; the best state across
-  all of its addresses &mdash; surfaced in the web UI as a coloured indicator:
-  **Online** (green, a confirmed direct two-way link), **Transitive** (blue, alive in the cluster but
-  reached only indirectly or via a one-way link), **Suspect** (orange, heartbeats slowing), and
-  **Offline** (grey, not heard from for a long time).
+  how regularly each peer's gossip heartbeat advances and flags peers that go silent. Grey also
+  reports peers that are **online but unreachable**: nodes whose heartbeats still advance (learned
+  via other peers) but which never respond to this node's messages, indicating that these two nodes
+  cannot reach one another even though both are healthy. This is emitted as a `warn`-level
+  `cluster.health.transition` event. Gossip prefers healthy links and backs off unhealthy ones, while
+  always contacting seeds.
 
-All of this membership and health state is held **in memory only**; it is never written to the state
-database (so a node on flash storage isn't churned with peer writes) and is rebuilt from the configured
-seed peers within a few rounds after a restart. For the same reason &mdash; and because the web UI has no
-authentication and may be exposed publicly &mdash; **peer addresses are never surfaced through the API or
-UI**; only a node's identifier and last-seen time are.
+Each peer is summarised with an aggregate health, the best state across all of its addresses:
+**Online** (a confirmed two-way link), **Transitive** (alive in the cluster but no confirmed direct
+link), **Suspect** (heartbeats slowing), or **Offline** (not heard from for a long time).
+
+Membership and health state is held in memory only and is rebuilt from the configured seed peers
+within a few rounds after a restart. **Peer addresses are never surfaced through the API or UI**;
+only a node's identifier, last-seen time, and aggregate health are.
 
 ## Partitions and Recovery
 
@@ -388,7 +383,7 @@ This has an important consequence for **network partitions**. If two nodes that 
 other indirectly (neither is a seed of the other) are split apart for longer than
 `gc_peer_expiry`, they will each forget the other. When the partition heals, neither side knows
 the other's address anymore, so they will **only** reconverge through a peer they both still
-gossip with &mdash; in practice, a shared seed.
+gossip with: in practice, a shared seed.
 
 Because every node always gossips with its configured seed peers (they are never forgotten),
 this is exactly what the seeds are for. To make sure your cluster heals after a partition:

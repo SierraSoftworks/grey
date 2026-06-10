@@ -81,6 +81,7 @@ impl State {
         let members = Arc::new(Membership::new(
             node_id,
             generation,
+            config.cluster.advertised_addresses(),
             Self::membership_config(&config),
         ));
 
@@ -150,21 +151,17 @@ impl State {
     /// supersedes the stale one its peers still hold (whose heartbeat may be higher) without relying
     /// on any synchronised clock.
     fn load_and_bump_generation(database: &Database) -> Result<u64, Box<dyn Error>> {
-        let current: u128 = {
-            let read = database.begin_read()?;
-            // `open_table` errors on a read transaction if the table has never been created (the
-            // first-run case), in which case the generation starts at 0.
-            match read.open_table(CLUSTER_IDENTITY_TABLE) {
-                Ok(table) => table.get(GENERATION_KEY)?.map(|v| v.value()).unwrap_or(0),
-                Err(_) => 0,
-            }
-        };
-        let next = current.saturating_add(1);
+        // The read-increment-write is performed within a single write transaction: redb serializes
+        // write transactions, so two concurrent opens cannot read the same value and mint duplicate
+        // generations.
         let write = database.begin_write()?;
-        {
+        let next = {
             let mut table = write.open_table(CLUSTER_IDENTITY_TABLE)?;
+            let current: u128 = table.get(GENERATION_KEY)?.map(|v| v.value()).unwrap_or(0);
+            let next = current.saturating_add(1);
             table.insert(GENERATION_KEY, next)?;
-        }
+            next
+        };
         write.commit()?;
         Ok(next as u64)
     }
