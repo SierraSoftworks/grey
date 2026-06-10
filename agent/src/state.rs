@@ -101,19 +101,14 @@ impl State {
     fn membership_config(config: &Config) -> MembershipConfig {
         let cluster = &config.cluster;
         MembershipConfig {
-            failure_detector_window: cluster.failure_detector_window,
             phi_prior: cluster.gossip_interval,
             phi_threshold: cluster.phi_threshold,
             gossip_factor: cluster.gossip_factor,
-            dead_grace: cluster.dead_node_grace_period,
-            max_addresses: cluster.max_member_addresses,
             // The floor for the "working" window; the registry scales it up with the cluster size
             // and gossip factor (see `Membership::working_window`).
             working_window: cluster.gossip_interval.saturating_mul(3),
             reply_timeout: cluster.reply_timeout,
-            backoff_base: cluster.unhealthy_retry_base,
-            backoff_max: cluster.unhealthy_retry_max,
-            member_expiry: cluster.gc_peer_expiry,
+            peer_expiry: cluster.gc_peer_expiry,
         }
     }
 

@@ -77,12 +77,11 @@ impl Engine {
                 self.state.clone(),
             )
             .await?
-            .with_max_message_size(config.cluster.max_message_size);
+            .with_message_mtu(config.cluster.message_mtu);
             let cluster_client =
                 cluster::GossipClient::new(self.state.clone(), cluster_transport, members)
                     .with_gossip_factor(config.cluster.gossip_factor)
                     .with_gossip_interval(config.cluster.gossip_interval)
-                    .with_membership_sample_size(config.cluster.membership_sample_size)
                     .with_seed_resolve_interval(config.cluster.peer_resolve_interval)
                     .with_seed_peers(config.cluster.peers.clone());
 

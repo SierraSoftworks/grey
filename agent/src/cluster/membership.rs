@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -12,6 +12,19 @@ use serde::{Deserialize, Serialize};
 use super::backoff::{Backoff, ExponentialBackoff};
 use super::health::{Liveness, PhiAccrualDetector};
 use super::helpers::shuffle;
+
+/// Maximum number of addresses retained per member. When more valid addresses are known, each node
+/// keeps a deterministic subset (seeded by its own identity), so the cluster as a whole continues
+/// to circulate every address through transient gossip even though no single node holds them all.
+const MAX_MEMBER_ADDRESSES: usize = 5;
+
+/// Number of heartbeat-arrival intervals the failure detector retains per peer (matching
+/// chitchat's default sampling window): ample history without unbounded growth.
+const FAILURE_DETECTOR_WINDOW: usize = 1000;
+
+/// Upper bound on the per-address retry backoff: an unresponsive address is always retried at
+/// least once per hour.
+const BACKOFF_MAX: Duration = Duration::from_secs(60 * 60);
 
 /// A single node's membership record as it travels on the wire inside a [`MembershipSample`]. It
 /// deliberately carries no `last_seen` — that is a *local* observation ("when did **I** last hear
@@ -144,10 +157,6 @@ impl<Addr: Eq + Hash> Member<Addr> {
 /// Tuning parameters for the membership registry, derived from [`crate::config::ClusterConfig`].
 #[derive(Debug, Clone)]
 pub struct MembershipConfig {
-    /// Number of heartbeat-arrival intervals the failure detector retains per peer when estimating
-    /// its expected gossip cadence; larger windows smooth out jitter at the cost of slower
-    /// adaptation when the cadence changes.
-    pub failure_detector_window: usize,
     /// The interval the failure detector assumes between heartbeats before it has observed enough
     /// real samples, preventing cold-start false positives. Should match the gossip interval.
     pub phi_prior: Duration,
@@ -158,33 +167,22 @@ pub struct MembershipConfig {
     /// determines how often any specific peer is contacted directly, which scales the window
     /// within which direct signals are considered recent (see [`Membership::working_window`]).
     pub gossip_factor: usize,
-    /// How long after the last observed heartbeat a suspected peer is declared dead, and how long a
-    /// dead peer is retained (and still occasionally contacted) before being forgotten entirely.
-    pub dead_grace: Duration,
-    /// Maximum number of addresses retained per member; the least-recently-useful are evicted so
-    /// address churn cannot grow records without bound.
-    pub max_addresses: usize,
     /// How recently an address must have produced traffic (inbound or a confirmed reply) to be
     /// considered "working", i.e. advertised to other peers and preferred as a gossip target.
     pub working_window: Duration,
     /// How long a peer has to answer one of our messages before that send counts as a missed
     /// exchange for the address's health. A reply arrives within a network round trip rather than a
     /// gossip contact gap, so unlike the working window this is **not** scaled with cluster size.
+    /// Also the base delay of the per-address retry backoff.
     pub reply_timeout: Duration,
-    /// Base delay applied to an address after its first unanswered send.
-    pub backoff_base: Duration,
-    /// Upper bound on the per-address retry backoff, so an address is never deferred past the point
-    /// where its member would expire from the registry.
-    pub backoff_max: Duration,
-    /// How long a member is retained after we last had any signal about it before it is forgotten.
-    pub member_expiry: Duration,
+    /// How long after we last had any signal about a peer (or after its heartbeats stopped) the
+    /// peer is considered dead and eventually forgotten. Maps to `gc_peer_expiry`.
+    pub peer_expiry: Duration,
 }
 
 impl Default for MembershipConfig {
     fn default() -> Self {
         Self {
-            // Matches chitchat's default sampling window: ample history without unbounded growth.
-            failure_detector_window: 1000,
             // The default gossip interval; heartbeats advance roughly once per round.
             phi_prior: Duration::from_secs(30),
             // The conventional phi-accrual threshold: low enough to detect failures within a few
@@ -192,23 +190,13 @@ impl Default for MembershipConfig {
             phi_threshold: 8.0,
             // The default cluster gossip fan-out per round.
             gossip_factor: 2,
-            // Long enough for transient outages (restarts, brief partitions) to recover before the
-            // peer is forgotten, short enough that departed nodes don't linger for days.
-            dead_grace: Duration::from_secs(60 * 60),
-            // A node is rarely reachable at more than a few addresses (per network segment).
-            max_addresses: 8,
             // Three default gossip rounds: a single missed round doesn't demote an address.
             working_window: Duration::from_secs(90),
             // UDP replies arrive within a network round trip; five seconds tolerates slow links and
             // processing delays without conflating latency with loss.
             reply_timeout: Duration::from_secs(5),
-            // First retry after one missed gossip round.
-            backoff_base: Duration::from_secs(30),
-            // Capped well below member expiry so a backed-off address is always retried again
-            // before its member could expire.
-            backoff_max: Duration::from_secs(15 * 60),
             // Matches the default `gc_peer_expiry`.
-            member_expiry: Duration::from_secs(30 * 60),
+            peer_expiry: Duration::from_secs(30 * 60),
         }
     }
 }
@@ -285,6 +273,9 @@ pub struct Membership<Id: Eq + Hash, Addr: Eq + Hash> {
     config: MembershipConfig,
     backoff: Box<dyn Backoff + Send + Sync>,
     members: RwLock<HashMap<Id, Member<Addr>>>,
+    /// The currently resolved seed addresses, maintained by the gossip client's resolver loop.
+    /// Seed addresses are always retained when a member's address set is bounded.
+    seeds: RwLock<HashSet<Addr>>,
 }
 
 impl<Id, Addr> Membership<Id, Addr>
@@ -302,7 +293,9 @@ where
         local_addresses: Vec<String>,
         config: MembershipConfig,
     ) -> Self {
-        let backoff = ExponentialBackoff::new(config.backoff_base, config.backoff_max);
+        // The backoff is derived from the reply timeout: the first retry waits one timeout, each
+        // further miss doubles the delay, and an address is always retried at least once per hour.
+        let backoff = ExponentialBackoff::new(config.reply_timeout, BACKOFF_MAX);
         Self {
             local_id,
             local_generation: generation,
@@ -311,7 +304,14 @@ where
             config,
             backoff: Box::new(backoff),
             members: RwLock::new(HashMap::new()),
+            seeds: RwLock::new(HashSet::new()),
         }
+    }
+
+    /// Updates the set of resolved seed addresses; these are always retained when a member's
+    /// address set is bounded, so a seed can never be evicted by transiently gossiped addresses.
+    pub fn set_seed_addresses(&self, addresses: impl IntoIterator<Item = Addr>) {
+        *self.seeds.write().unwrap() = addresses.into_iter().collect();
     }
 
     /// Replaces the retry-backoff strategy applied to unresponsive addresses.
@@ -337,7 +337,7 @@ where
             generation: 0,
             heartbeat: 0,
             addresses: HashMap::new(),
-            detector: PhiAccrualDetector::new(config.failure_detector_window, config.phi_prior),
+            detector: PhiAccrualDetector::new(FAILURE_DETECTOR_WINDOW, config.phi_prior),
             last_seen: now,
             last_seen_wall: chrono::Utc::now(),
             dead_since: None,
@@ -353,7 +353,6 @@ where
             return;
         }
         let mut members = self.members.write().unwrap();
-        let max_addresses = self.config.max_addresses;
         let member = Self::ensure_member(&mut members, &self.config, peer, now);
         member.last_seen = now;
         member.last_seen_wall = chrono::Utc::now();
@@ -362,7 +361,7 @@ where
         health.last_inbound = Some(now);
         health.consecutive_misses = 0;
         health.backoff_until = now;
-        Self::bound_addresses(member, max_addresses);
+        self.bound_addresses(member);
     }
 
     /// Records that we sent a gossip message to `addr` for `peer`.
@@ -408,7 +407,6 @@ where
     /// feed observed heartbeat advances to the failure detector.
     pub fn merge_sample(&self, sample: MembershipSample<Id>, now: Instant) {
         let mut members = self.members.write().unwrap();
-        let max_addresses = self.config.max_addresses;
         for record in sample.into_inner() {
             if record.peer == self.local_id {
                 continue;
@@ -432,26 +430,34 @@ where
                         .or_insert_with(|| AddressHealth::new(now));
                 }
             }
-            Self::bound_addresses(member, max_addresses);
+            self.bound_addresses(member);
         }
     }
 
-    /// Keeps a member's address set within the configured cap, evicting the least-recently-useful
-    /// addresses first (never-confirmed before stale-confirmed).
-    fn bound_addresses(member: &mut Member<Addr>, max: usize) {
-        if member.addresses.len() <= max {
+    /// Keeps a member's address set within [`MAX_MEMBER_ADDRESSES`]. Seed addresses are always
+    /// retained; the remaining slots are filled with a subset chosen deterministically from the
+    /// local node's identity, so each node keeps a *different* (but stable) selection and the
+    /// cluster as a whole continues to circulate every valid address through transient gossip.
+    fn bound_addresses(&self, member: &mut Member<Addr>) {
+        if member.addresses.len() <= MAX_MEMBER_ADDRESSES {
             return;
         }
-        // Rank by most recent good signal. `Option<Instant>` orders `None` (never good) before any
-        // `Some`, so never-confirmed addresses are evicted first, then the stalest confirmed ones.
-        let mut ranked: Vec<(Addr, Option<Instant>)> = member
+        let seeds = self.seeds.read().unwrap();
+        let mut ranked: Vec<Addr> = member
             .addresses
-            .iter()
-            .map(|(a, h)| (a.clone(), h.last_good()))
+            .keys()
+            .filter(|a| !seeds.contains(a))
+            .cloned()
             .collect();
-        ranked.sort_by_key(|(_, score)| *score);
-        let drop_count = member.addresses.len() - max;
-        for (addr, _) in ranked.into_iter().take(drop_count) {
+        ranked.sort_by_key(|a| {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            self.local_id.hash(&mut hasher);
+            a.hash(&mut hasher);
+            hasher.finish()
+        });
+        let seed_count = member.addresses.len() - ranked.len();
+        let keep = MAX_MEMBER_ADDRESSES.saturating_sub(seed_count);
+        for addr in ranked.into_iter().skip(keep) {
             member.addresses.remove(&addr);
         }
     }
@@ -493,7 +499,7 @@ where
             dead: member
                 .detector
                 .last_arrival()
-                .map(|t| now.saturating_duration_since(t) > self.config.dead_grace)
+                .map(|t| now.saturating_duration_since(t) > self.config.peer_expiry)
                 .unwrap_or(false),
         }
     }
@@ -510,9 +516,10 @@ where
         self.signals(member, now, window).into()
     }
 
-    /// Builds a bounded random sample of the memberlist to gossip, including our own record and, for
-    /// each peer, only the addresses we currently believe are working.
-    pub fn sample_for_gossip(&self, max_records: usize, now: Instant) -> MembershipSample<Id> {
+    /// Builds the memberlist sample to gossip: our own record first (so it survives any transport
+    /// truncation), followed by every peer with a working address in shuffled order so that when
+    /// the transport fits the sample to its envelope, no peer is systematically favoured.
+    pub fn sample_for_gossip(&self, now: Instant) -> MembershipSample<Id> {
         let members = self.members.read().unwrap();
         let window = self.working_window(members.len());
         let mut sample = MembershipSample::new();
@@ -527,7 +534,6 @@ where
             });
         }
 
-        // Collect peers that have at least one working address, then take a bounded random subset.
         let mut candidates: Vec<&Id> = members
             .iter()
             .filter(|(_, m)| m.addresses.values().any(|h| h.is_working(now, window)))
@@ -536,9 +542,6 @@ where
         shuffle(&mut candidates);
 
         for id in candidates {
-            if sample.len() >= max_records {
-                break;
-            }
             let member = &members[id];
             let addresses: Vec<String> = member
                 .addresses
@@ -656,10 +659,10 @@ where
             }
 
             let expired_unseen =
-                now.saturating_duration_since(member.last_seen) > self.config.member_expiry;
+                now.saturating_duration_since(member.last_seen) > self.config.peer_expiry;
             let expired_dead = member
                 .dead_since
-                .map(|d| now.saturating_duration_since(d) > self.config.dead_grace)
+                .map(|d| now.saturating_duration_since(d) > self.config.peer_expiry)
                 .unwrap_or(false);
             if expired_unseen || expired_dead {
                 to_remove.push(id.clone());
@@ -724,17 +727,12 @@ mod tests {
 
     fn test_config() -> MembershipConfig {
         MembershipConfig {
-            failure_detector_window: 100,
             phi_prior: Duration::from_secs(1),
             phi_threshold: 8.0,
             gossip_factor: 2,
-            dead_grace: Duration::from_secs(10),
-            max_addresses: 4,
             working_window: Duration::from_secs(3),
             reply_timeout: Duration::from_secs(1),
-            backoff_base: Duration::from_secs(1),
-            backoff_max: Duration::from_secs(60),
-            member_expiry: Duration::from_secs(120),
+            peer_expiry: Duration::from_secs(10),
         }
     }
 
@@ -806,12 +804,45 @@ mod tests {
         let mut s = MembershipSample::new();
         s.push(record(
             nid(2),
-            &["10.0.0.1:1", "10.0.0.2:1", "10.0.0.3:1", "10.0.0.4:1", "10.0.0.5:1", "10.0.0.6:1"],
+            &[
+                "10.0.0.1:1", "10.0.0.2:1", "10.0.0.3:1", "10.0.0.4:1", "10.0.0.5:1", "10.0.0.6:1",
+                "10.0.0.7:1",
+            ],
             1,
             1,
         ));
         m.merge_sample(s, base);
-        assert!(m.known_addresses(&nid(2)).len() <= 4, "address set must respect max_addresses");
+        assert!(
+            m.known_addresses(&nid(2)).len() <= MAX_MEMBER_ADDRESSES,
+            "address set must respect the address cap"
+        );
+    }
+
+    #[test]
+    fn address_bounding_retains_seeds_and_is_deterministic() {
+        let addrs: Vec<String> = (1..=8).map(|n| format!("10.0.0.{n}:1")).collect();
+        let addr_refs: Vec<&str> = addrs.iter().map(|s| s.as_str()).collect();
+        let seed = addr("10.0.0.8:1");
+
+        let subset_of = |m: &Membership<crate::cluster::NodeID, std::net::SocketAddr>| {
+            m.set_seed_addresses([seed]);
+            let mut s = MembershipSample::new();
+            s.push(record(nid(2), &addr_refs, 1, 1));
+            m.merge_sample(s, Instant::now());
+            let mut known = m.known_addresses(&nid(2));
+            known.sort();
+            known
+        };
+
+        let first = subset_of(&membership());
+        let second = subset_of(&membership());
+
+        assert!(first.contains(&seed), "a seed address must never be evicted");
+        assert_eq!(first.len(), MAX_MEMBER_ADDRESSES);
+        assert_eq!(
+            first, second,
+            "the same node must retain the same subset (deterministic, not recency-based)"
+        );
     }
 
     #[test]
@@ -877,7 +908,7 @@ mod tests {
         m.merge_sample(s, base);
 
         m.bump_heartbeat();
-        let sample = m.sample_for_gossip(16, base).into_inner();
+        let sample = m.sample_for_gossip(base).into_inner();
         assert!(
             sample.iter().any(|r| r.peer == nid(1)),
             "our own record must be advertised"
@@ -964,7 +995,7 @@ mod tests {
         m.record_confirmation(&nid(2), later);
 
         let advertised: Vec<String> = m
-            .sample_for_gossip(16, later)
+            .sample_for_gossip(later)
             .into_inner()
             .into_iter()
             .find(|r| r.peer == nid(2))
@@ -984,12 +1015,12 @@ mod tests {
     fn default_config_is_internally_consistent() {
         let config = MembershipConfig::default();
         assert!(
-            config.backoff_max < config.member_expiry,
-            "a backed-off address must be retried before its member could expire"
-        );
-        assert!(
             config.working_window >= config.phi_prior,
             "an address must not be demoted within a single expected heartbeat interval"
+        );
+        assert!(
+            config.reply_timeout < config.working_window,
+            "a missed reply must be detectable while the address is still considered working"
         );
     }
 }

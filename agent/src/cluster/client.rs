@@ -29,8 +29,6 @@ where
 
     gossip_factor: usize,
     gossip_interval: std::time::Duration,
-    /// Number of member records carried in each fire-and-forget membership gossip datagram.
-    membership_sample_size: usize,
 }
 
 impl<S, T> GossipClient<S, T>
@@ -49,17 +47,9 @@ where
 
             gossip_factor: 1,
             gossip_interval: std::time::Duration::from_secs(10),
-            membership_sample_size: 16,
             seed_peers: Vec::new(),
             seed_resolve_interval: std::time::Duration::from_secs(60),
             resolved_seed_peers: tokio::sync::RwLock::new(Vec::new()),
-        }
-    }
-
-    pub fn with_membership_sample_size(self, size: usize) -> Self {
-        Self {
-            membership_sample_size: size,
-            ..self
         }
     }
 
@@ -131,6 +121,9 @@ where
             return;
         }
 
+        // Seed addresses are exempt from address-set bounding in the membership registry, so keep
+        // its view of them in sync with what we resolved.
+        self.membership.set_seed_addresses(resolved.iter().cloned());
         *self.resolved_seed_peers.write().await = resolved;
     }
 
@@ -194,8 +187,10 @@ where
             return Ok(());
         }
 
+        // The full (shuffled) memberlist; the transport fits it to its envelope, truncating the
+        // excess to ride a later round.
         let digest = self.store.digest().await?;
-        let sample = self.membership.sample_for_gossip(self.membership_sample_size, now);
+        let sample = self.membership.sample_for_gossip(now);
 
         for (maybe_id, addr) in targets {
             if let Some(id) = &maybe_id {
@@ -370,17 +365,12 @@ mod tests {
         // Generous windows so nothing expires or backs off during a short test; the detector never
         // accrues samples here (membership self-advertisement is off), so peers stay Healthy.
         MembershipConfig {
-            failure_detector_window: 100,
             phi_prior: Duration::from_millis(50),
             phi_threshold: 8.0,
             gossip_factor: 3,
-            dead_grace: Duration::from_secs(60),
-            max_addresses: 8,
             working_window: Duration::from_secs(60),
             reply_timeout: Duration::from_millis(250),
-            backoff_base: Duration::from_millis(10),
-            backoff_max: Duration::from_secs(1),
-            member_expiry: Duration::from_secs(300),
+            peer_expiry: Duration::from_secs(300),
         }
     }
 

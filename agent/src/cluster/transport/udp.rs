@@ -18,7 +18,7 @@ where
     key_provider: K,
     /// Maximum size, in bytes, of an encrypted datagram this transport will emit. Larger messages
     /// are partitioned across rounds to fit. Lower it below the path MTU to avoid IP fragmentation.
-    max_message_size: usize,
+    message_mtu: usize,
 }
 
 impl<E, K> UdpGossipTransport<E, K>
@@ -38,15 +38,15 @@ where
             socket: Arc::new(socket),
             encryption_provider,
             key_provider,
-            max_message_size: MAX_DATAGRAM_SIZE,
+            message_mtu: MAX_DATAGRAM_SIZE,
         })
     }
 
     /// Sets the maximum size, in bytes, of an encrypted datagram this transport will emit. Defaults
     /// to [`MAX_DATAGRAM_SIZE`] when not called. Lower it below the path MTU to avoid IP
     /// fragmentation; messages larger than this are partitioned across gossip rounds.
-    pub fn with_max_message_size(mut self, msg_size: usize) -> Self {
-        self.max_message_size = msg_size;
+    pub fn with_message_mtu(mut self, mtu: usize) -> Self {
+        self.message_mtu = mtu;
         self
     }
 }
@@ -84,7 +84,7 @@ where
             // Send once the encrypted datagram fits the frame, or once the message has been reduced
             // to its digest and cannot be partitioned further. The latter is best effort: `send_to`
             // surfaces any oversize error (e.g. a digest larger than the frame) to the caller.
-            if encrypted.len() <= self.max_message_size || msg.is_empty() {
+            if encrypted.len() <= self.message_mtu || msg.is_empty() {
                 self.socket.send_to(&encrypted, address).await?;
                 return Ok(());
             }
@@ -95,7 +95,7 @@ where
             // maximum. Re-measuring each pass lets the estimate self-correct for fixed overhead
             // (metadata, digest) so it converges in one or two iterations.
             let items = msg.len();
-            let keep = (items.saturating_mul(self.max_message_size) / encrypted.len()).min(items - 1);
+            let keep = (items.saturating_mul(self.message_mtu) / encrypted.len()).min(items - 1);
             msg = msg.partition(keep);
         }
     }
@@ -145,7 +145,7 @@ mod tests {
         // A deliberately small frame so a modest message must be partitioned to fit.
         let frame = 300usize;
         let sender = UdpGossipTransport::new(&addr1_str, Aes256Gcm, key_provider.clone()).await.unwrap()
-            .with_max_message_size(frame);
+            .with_message_mtu(frame);
         let receiver = UdpGossipTransport::new(&addr2_str, Aes256Gcm, key_provider).await.unwrap();
 
         let peer = TestPeer("p".to_string());

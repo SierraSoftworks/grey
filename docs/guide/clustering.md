@@ -223,7 +223,7 @@ For clusters with N nodes, optimal gossip_factor is typically `log₂(N) + 1`:
 - 5-8 nodes: gossip_factor = 3  
 - 9-16 nodes: gossip_factor = 4
 
-#### max_message_size
+#### message_mtu
 The maximum size, in bytes, of an encrypted gossip datagram this node will emit. Messages larger
 than this (for example a big catch-up after a node has been offline) are automatically split across
 multiple gossip rounds, sending the oldest un-propagated records first.
@@ -235,7 +235,7 @@ datagram fits a single IP packet and isn't dropped by fragmentation-averse middl
 
 ```yaml
 cluster:
-  max_message_size: 8192  # Default (8 KiB)
+  message_mtu: 8192  # Default (8 KiB)
 ```
 
 #### peer_resolve_interval
@@ -251,25 +251,6 @@ cluster:
   peer_resolve_interval: 60s  # Default
 ```
 
-#### membership_sample_size
-The number of member records carried in each fire-and-forget membership gossip datagram. Larger values
-propagate the memberlist faster at the cost of slightly larger datagrams.
-
-```yaml
-cluster:
-  membership_sample_size: 16  # Default
-```
-
-#### max_member_addresses
-The maximum number of known-working addresses retained (and advertised) for each peer. A peer may be
-reachable at different addresses on different network segments; Grey keeps the most-recently-confirmed
-addresses up to this cap.
-
-```yaml
-cluster:
-  max_member_addresses: 8  # Default
-```
-
 #### phi_threshold
 The suspicion threshold for the [phi-accrual](https://doi.org/10.1109/RELDIS.2004.1353004) failure
 detector. A peer whose phi value (roughly, how many mean gossip intervals it has been silent for)
@@ -281,45 +262,18 @@ cluster:
   phi_threshold: 8.0  # Default
 ```
 
-#### failure_detector_window
-The number of recent heartbeat-arrival intervals the failure detector keeps per peer when estimating its
-expected gossip cadence. The default is suitable for almost all clusters.
-
-```yaml
-cluster:
-  failure_detector_window: 1000  # Default
-```
-
-#### dead_node_grace_period
-How long a peer is retained after it has been declared dead before it is forgotten entirely. Grey keeps
-contacting dead peers during this window so that a node which recovers (or whose link is restored) is
-re-admitted promptly.
-
-```yaml
-cluster:
-  dead_node_grace_period: 1h  # Default
-```
-
 #### reply_timeout
 How long a peer has to answer a gossip message before that send counts as a missed exchange for the
-link's health, feeding the per-address retry backoff. Replies arrive within a network round trip, so
-this does not scale with cluster size; raise it on very slow or congested links.
+link's health. Replies arrive within a network round trip, so this does not scale with cluster size;
+raise it on very slow or congested links.
+
+Unresponsive addresses are retried with an exponential backoff derived from this value: the first
+retry waits one `reply_timeout`, each further miss doubles the delay, and every address is retried at
+least once per hour. Seed peers are always contacted regardless.
 
 ```yaml
 cluster:
   reply_timeout: 5s  # Default
-```
-
-#### unhealthy_retry_base / unhealthy_retry_max
-The base and maximum delay for the per-address exponential backoff applied to links that are not
-responding. Grey prefers gossiping over healthy links and retries unhealthy ones progressively less
-often (doubling from `unhealthy_retry_base` up to `unhealthy_retry_max`), while always continuing to
-contact seed peers so recovery is detected.
-
-```yaml
-cluster:
-  unhealthy_retry_base: 30s   # Default
-  unhealthy_retry_max: 15m    # Default
 ```
 
 #### gc_interval
@@ -346,7 +300,9 @@ cluster:
 ```
 
 #### gc_peer_expiry
-How long to keep a peer in the in-memory member list after it was last heard from before forgetting it.
+How long to keep a peer in the in-memory member list after it was last heard from before forgetting
+it. The same threshold governs when a silent peer's heartbeats are considered to have stopped for
+good (i.e. when it is reported as offline).
 
 We recommend you keep this value relatively low to avoid retaining peers that have permanently left,
 however setting it too short can negatively impact cluster stability under load.
