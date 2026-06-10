@@ -15,6 +15,11 @@ use gloo_console as console;
 #[derive(Properties, PartialEq)]
 pub struct HistoryProps {
     pub samples: Vec<ProbeHistoryBucket>,
+
+    /// The probe's cluster-converged streak record, used to render the most recent
+    /// segment (and its tooltip) from the live state rather than the bucket's average.
+    #[prop_or_default]
+    pub streak: grey_api::Streak,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -92,10 +97,20 @@ pub fn history(props: &HistoryProps) -> Html {
     html! {
         <div class="history">
             {for props.samples.iter().enumerate().map(|(index, sample)| {
-                let sample_class = match sample.max_availability() {
-                    sli if sli > 99.9 => "ok",
-                    sli if sli < 90.0 => "error",
-                    _ => "warn",
+                // The most recent segment is rendered from the probe's current state — a
+                // segment that is failing right now is an error regardless of how well it
+                // performed on average, while one that has recovered is at worst degraded.
+                // Older segments only have their averages to go on.
+                let is_current = index + 1 == props.samples.len();
+                let current_streak = (is_current && !props.streak.is_empty()).then_some(&props.streak);
+                let current_passing = current_streak.map(|s| s.passing());
+                let sample_class = match (current_passing, sample.max_availability()) {
+                    (Some(false), _) => "error",
+                    (Some(true), sli) if sli > 99.9 => "ok",
+                    (Some(true), _) => "warn",
+                    (None, sli) if sli > 99.9 => "ok",
+                    (None, sli) if sli < 90.0 => "error",
+                    (None, _) => "warn",
                 };
 
                 // Serialize the entire ProbeResult to JSON
@@ -113,7 +128,7 @@ pub fn history(props: &HistoryProps) -> Html {
                     >
                         if is_tooltip_target {
                             if let Some(probe_result) = &tooltip_data.probe_result {
-                                {render_tooltip(probe_result)}
+                                {render_tooltip(probe_result, current_streak)}
                             } else {
                                 // Fallback for SSR or when probe_result is None
                                 <div class="tooltip visible">
@@ -137,13 +152,15 @@ pub fn history(props: &HistoryProps) -> Html {
     }
 }
 
-fn render_tooltip(probe_result: &ProbeHistoryBucket) -> Html {
-    let status_text = if probe_result.max_availability() == 100.0 {
-        "Passed"
-    } else {
-        "Failed"
+fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::Streak>) -> Html {
+    let (status_text, status_class) = match streak {
+        Some(streak) if streak.passing() => ("Passing", "ok"),
+        Some(_) => ("Failing", "error"),
+        None => (
+            if probe_result.max_availability() == 100.0 { "Passed" } else { "Failed" },
+            if probe_result.pass { "ok" } else { "error" },
+        ),
     };
-    let status_class = if probe_result.pass { "ok" } else { "error" };
 
     // Format the timestamp
     let timestamp = probe_result
@@ -177,6 +194,14 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket) -> Html {
                     <span class="tooltip-label">{"Start:"}</span>
                     <span>{timestamp}</span>
                 </div>
+                if let Some(streak) = streak {
+                    if let Some(since) = streak.since() {
+                        <div class="tooltip-row">
+                            <span class="tooltip-label">{if streak.passing() { "Passing since:" } else { "Failing since:" }}</span>
+                            <span>{since.format("%Y-%m-%d %H:%M:%S UTC").to_string()}</span>
+                        </div>
+                    }
+                }
                 <div class="tooltip-row">
                     <span class="tooltip-label">{"Latency:"}</span>
                     <span>{duration_text}</span>

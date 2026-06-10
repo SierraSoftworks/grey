@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{Mergeable, ProbeHistoryBucket};
+use crate::{Mergeable, ProbeHistoryBucket, Streak};
 use crate::observation::Observation;
 
 /// Raw probe data as returned by the /api/v1/probes endpoint
@@ -21,6 +21,10 @@ pub struct Probe {
     /// Observations collected from this probe, keyed by observer ID
     #[serde(default)]
     pub observations: HashMap<String, Observation>,
+
+    /// The cluster-converged record of this probe's pass/fail streaks
+    #[serde(default)]
+    pub streak: Streak,
 }
 
 impl Probe {
@@ -35,6 +39,16 @@ impl Probe {
     /// Calculate availability percentage based on successful vs total samples
     pub fn availability(&self) -> f64 {
         self.total().success_rate()
+    }
+
+    /// Whether this probe is currently passing, falling back to the latest history
+    /// bucket's result when the streak record carries no observations.
+    pub fn passing(&self) -> bool {
+        if self.streak.is_empty() {
+            self.history.last().map(|h| h.pass).unwrap_or(true)
+        } else {
+            self.streak.passing()
+        }
     }
 
     /// Calculate recent availability percentage based on successful vs total samples
@@ -62,6 +76,7 @@ impl Mergeable for Probe {
 
         self.last_updated = self.last_updated.max(other.last_updated);
         self.observations.extend(other.observations.clone());
+        self.streak.join(&other.streak);
 
         let mut i = 0;
         let mut j = 0;
@@ -121,6 +136,7 @@ mod tests {
                 total_retries: 2,
                 total_latency: std::time::Duration::from_secs(5),
             })].into_iter().collect(),
+            streak: Streak::default(),
         };
 
         let probe2 = Probe {
@@ -134,6 +150,7 @@ mod tests {
                 total_retries: 1,
                 total_latency: std::time::Duration::from_secs(3),
             })].into_iter().collect(),
+            streak: Streak::default(),
         };
 
         probe1.merge(&probe2);
@@ -166,6 +183,7 @@ mod tests {
                     total_latency: std::time::Duration::from_secs(3),
                 }),
             ].into_iter().collect(),
+            streak: Streak::default(),
         };
 
         let total = probe.total();
@@ -196,12 +214,56 @@ mod tests {
                     total_latency: std::time::Duration::from_secs(3),
                 }),
             ].into_iter().collect(),
+            streak: Streak::default(),
         };
 
         let availability = probe.availability();
         assert_eq!(availability, (13.0 / 15.0) * 100.0);
     }
     
+    #[test]
+    fn test_probe_passing() {
+        let now = chrono::Utc::now();
+        let mut probe = Probe {
+            name: "probe".into(),
+            tags: HashMap::new(),
+            last_updated: now,
+            history: vec![],
+            observations: HashMap::new(),
+            streak: Streak::default(),
+        };
+
+        // With an empty streak record (e.g. data from older agents), the probe falls
+        // back to the latest history bucket's result.
+        assert!(probe.streak.is_empty());
+        assert!(probe.passing());
+        probe.history.push(ProbeHistoryBucket {
+            start_time: now,
+            pass: false,
+            message: "Timeout".into(),
+            validations: HashMap::new(),
+            observations: HashMap::new(),
+        });
+        assert!(!probe.passing());
+
+        // A streak record with a long-standing coverage claim reports passing...
+        probe.streak.observe(true, now - chrono::Duration::days(3));
+        assert!(probe.streak.passing_at(now));
+        assert_eq!(probe.streak.since_at(now), Some(now - chrono::Duration::days(3)));
+        assert!(probe.passing());
+
+        // ...until a failure is observed by any node, which wins immediately.
+        probe.streak.observe(false, now - chrono::Duration::minutes(1));
+        assert!(!probe.passing());
+        assert_eq!(probe.streak.since_at(now), Some(now - chrono::Duration::minutes(1)));
+
+        // Once no failures have been seen for the recovery window, the probe reads as
+        // passing again, since the last failing observation.
+        let later = now + Streak::recovery_window();
+        assert!(probe.streak.passing_at(later));
+        assert_eq!(probe.streak.since_at(later), Some(now - chrono::Duration::minutes(1)));
+    }
+
     #[test]
     fn test_msgpack_roundtrip() {
         let probe = Probe {
@@ -215,10 +277,51 @@ mod tests {
                 total_retries: 2,
                 total_latency: std::time::Duration::from_secs(5),
             })].into_iter().collect(),
+            streak: Streak {
+                failing_since: Some(chrono::DateTime::from_timestamp(1_699_999_000, 0).unwrap()),
+                failing_until: Some(chrono::DateTime::from_timestamp(1_699_999_900, 0).unwrap()),
+                covered_since: Some(chrono::DateTime::from_timestamp(1_690_000_000, 0).unwrap()),
+            },
         };
-        
+
         let packed = rmp_serde::to_vec(&probe).unwrap();
         let unpacked: Probe = rmp_serde::from_slice(&packed).unwrap();
         assert_eq!(probe, unpacked);
+    }
+
+    #[test]
+    fn test_decodes_legacy_probes() {
+        // Probe records stored or gossiped by agents which pre-date streak tracking lack
+        // the streak register; they must decode with an empty one in both wire formats.
+        #[derive(Serialize)]
+        struct LegacyProbe {
+            name: String,
+            tags: HashMap<String, String>,
+            #[serde(with = "chrono::serde::ts_seconds")]
+            last_updated: chrono::DateTime<chrono::Utc>,
+            history: Vec<ProbeHistoryBucket>,
+            observations: HashMap<String, Observation>,
+        }
+
+        let legacy = LegacyProbe {
+            name: "probe".into(),
+            tags: HashMap::new(),
+            last_updated: chrono::Utc::now().with_time(NaiveTime::from_hms_opt(1, 2, 3).unwrap()).unwrap(),
+            history: vec![],
+            observations: vec![("observer1".into(), Observation {
+                total_samples: 10,
+                successful_samples: 9,
+                total_retries: 2,
+                total_latency: std::time::Duration::from_secs(5),
+            })].into_iter().collect(),
+        };
+
+        for packed in [rmp_serde::to_vec(&legacy).unwrap(), rmp_serde::to_vec_named(&legacy).unwrap()] {
+            let unpacked: Probe = rmp_serde::from_slice(&packed).unwrap();
+            assert_eq!(unpacked.name, "probe");
+            assert_eq!(unpacked.observations.len(), 1);
+            assert!(unpacked.streak.is_empty());
+            assert!(unpacked.streak.is_empty());
+        }
     }
 }

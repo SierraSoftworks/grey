@@ -53,7 +53,8 @@ impl ProbeResult {
     }
 
     pub fn apply<Id: ToString>(&self, node_id: Id, probe: &mut grey_api::Probe) {
-        probe.last_updated = self.start_time + self.duration;
+        let sample_time = self.start_time + self.duration;
+        probe.last_updated = sample_time;
 
         let start_time = self.start_time.align(std::time::Duration::from_secs(3600));
 
@@ -98,6 +99,8 @@ impl ProbeResult {
         let observation = probe.observations.entry(node_id.to_string())
             .or_insert_with(Default::default);
         observation.add_sample(self.pass, self.retries as u64, std::time::Duration::from_millis(self.duration.num_milliseconds() as u64));
+
+        probe.streak.observe(self.pass, sample_time);
     }
 }
 
@@ -111,5 +114,65 @@ impl Elide for ValidationResult {
             }
         }
         vr
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn result_at(start_time: DateTime<Utc>, pass: bool) -> ProbeResult {
+        ProbeResult {
+            start_time,
+            duration: Duration::zero(),
+            retries: 0,
+            pass,
+            message: String::new(),
+            validations: HashMap::new(),
+        }
+    }
+
+    fn empty_probe() -> grey_api::Probe {
+        grey_api::Probe {
+            name: "probe".into(),
+            tags: HashMap::new(),
+            last_updated: chrono::DateTime::UNIX_EPOCH,
+            history: Vec::new(),
+            observations: HashMap::new(),
+            streak: grey_api::Streak::default(),
+        }
+    }
+
+    /// The streak must span history bucket boundaries: hours of uninterrupted passing
+    /// samples report a single coverage claim at the start of the run.
+    #[test]
+    fn apply_maintains_streak_across_buckets() {
+        let mut probe = empty_probe();
+        let start = Utc.with_ymd_and_hms(2026, 6, 7, 12, 0, 0).unwrap();
+
+        for i in 0..180 {
+            result_at(start + Duration::minutes(i), true).apply("node", &mut probe);
+        }
+
+        assert!(probe.history.len() >= 3, "three hours of samples should span multiple buckets");
+        let sampled_until = start + Duration::minutes(179);
+        assert!(probe.streak.passing_at(sampled_until));
+        assert_eq!(probe.streak.since_at(sampled_until), Some(start));
+
+        // A failure starts an episode immediately, and further failing samples refresh
+        // it without moving the onset...
+        let failed_at = start + Duration::minutes(180);
+        result_at(failed_at, false).apply("node", &mut probe);
+        result_at(failed_at + Duration::minutes(1), false).apply("node", &mut probe);
+        assert!(probe.streak.failing_at(failed_at + Duration::minutes(1)));
+        assert_eq!(probe.streak.since_at(failed_at + Duration::minutes(1)), Some(failed_at));
+
+        // ...and once no failures have been observed for the recovery window, the probe
+        // reads as passing since the last failing observation.
+        let recovered = failed_at + Duration::minutes(1) + grey_api::Streak::recovery_window() + Duration::seconds(1);
+        result_at(recovered, true).apply("node", &mut probe);
+        assert!(probe.streak.passing_at(recovered));
+        assert_eq!(probe.streak.since_at(recovered), Some(failed_at + Duration::minutes(1)));
     }
 }

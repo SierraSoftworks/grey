@@ -199,8 +199,7 @@ fn app_content(props: &AppContentProps) -> Html {
     let healthy_probes = probes_ctx
         .probes
         .iter()
-        .filter_map(|probe| probe.history.last())
-        .filter(|entry| entry.pass)
+        .filter(|probe| probe.passing())
         .count();
 
     let banner_kind = match healthy_probes {
