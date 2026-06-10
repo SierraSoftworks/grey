@@ -15,6 +15,7 @@
     --color-status-warn: #e67e22;
     --color-status-error: #e74c3c;
     --color-status-unknown: #3498db;
+    --color-status-offline: #95a5a6;
 
     /* Tooltip theme */
     --tooltip-background: #111; /* near-black for readability */
@@ -35,6 +36,7 @@ $color-status-ok: var(--color-status-ok);
 $color-status-warn: var(--color-status-warn);
 $color-status-error: var(--color-status-error);
 $color-status-unknown: var(--color-status-unknown);
+$color-status-offline: var(--color-status-offline);
 
 // Tooltip theme variables
 $color-tooltip-background: var(--tooltip-background);

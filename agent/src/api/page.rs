@@ -11,6 +11,9 @@ pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
     let mut probes: Vec<grey_api::Probe> = probe_histories.into_values().collect();
     probes.sort_by_key(|p| p.name.clone());
 
+    let mut peers = data.state.get_peers().await.unwrap_or_default();
+    peers.sort_by(|a, b| a.id.cmp(&b.id));
+
     // Read the embedded HTML template
     let html_template = ASSETS_DIR
         .get_file("index.html")
@@ -28,6 +31,7 @@ pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
         config: (&config.ui).into(),
         notices: config.ui.notices.clone(),
         probes,
+        peers,
     };
     let renderer = ServerRenderer::<App>::with_props(move || app_props).hydratable(true);
     let ssr_content = renderer.render().await;

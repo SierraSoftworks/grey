@@ -1,4 +1,8 @@
+pub mod backoff;
 mod client;
+mod health;
+mod helpers;
+mod membership;
 mod message;
 mod node;
 mod versioned;
@@ -8,6 +12,9 @@ mod encryption;
 
 pub use client::*;
 pub use encryption::*;
+pub use health::*;
+pub use helpers::*;
+pub use membership::*;
 pub use message::*;
 pub use node::*;
 pub use versioned::*;

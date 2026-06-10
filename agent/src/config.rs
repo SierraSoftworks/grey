@@ -112,6 +112,13 @@ pub struct ClusterConfig {
     pub enabled: bool,
     #[serde(default = "default::cluster::listen")]
     pub listen: String,
+    /// The address other nodes should use to reach this one, advertised through the membership
+    /// gossip so peers can be discovered transitively. When unset it falls back to `listen` if that
+    /// is a concrete (non-wildcard) address; a wildcard `listen` with no `advertised_address` means
+    /// this node self-advertises nothing (it is still discovered via the source address of its
+    /// packets).
+    #[serde(default)]
+    pub advertised_address: Option<String>,
     pub peers: Vec<String>,
     pub secret: String,
     #[serde(default)]
@@ -123,8 +130,20 @@ pub struct ClusterConfig {
     #[serde(default = "default::cluster::gossip_factor")]
     pub gossip_factor: usize,
 
-    #[serde(default = "default::cluster::default_message_size")]
-    pub max_message_size: usize,
+    /// The maximum size, in bytes, of a gossip datagram this node will emit; larger messages are
+    /// partitioned across rounds. Accepts the former `max_message_size` name for compatibility.
+    #[serde(default = "default::cluster::message_mtu")]
+    #[serde(alias = "max_message_size")]
+    pub message_mtu: usize,
+
+    /// Phi-accrual suspicion threshold; a peer whose phi exceeds this is considered suspect/dead.
+    #[serde(default = "default::cluster::phi_threshold")]
+    pub phi_threshold: f64,
+    /// How long a peer has to answer a gossip message before that send counts as a missed exchange
+    /// for the link's health (driving the per-address retry backoff).
+    #[serde(default = "default::cluster::reply_timeout")]
+    #[serde(with = "humantime_serde")]
+    pub reply_timeout: std::time::Duration,
 
     #[serde(default = "default::cluster::peer_resolve_interval")]
     #[serde(with = "humantime_serde")]
@@ -141,17 +160,37 @@ pub struct ClusterConfig {
     pub gc_peer_expiry: std::time::Duration,
 }
 
+impl ClusterConfig {
+    /// The addresses this node advertises about itself through membership gossip: the configured
+    /// `advertised_address`, falling back to `listen` when that is a concrete (non-wildcard)
+    /// address. Empty when neither yields a routable address, in which case the node is still
+    /// discovered via the source address of its gossip messages.
+    pub fn advertised_addresses(&self) -> Vec<String> {
+        self.advertised_address
+            .clone()
+            .or_else(|| match self.listen.parse::<std::net::SocketAddr>() {
+                Ok(addr) if !addr.ip().is_unspecified() => Some(self.listen.clone()),
+                _ => None,
+            })
+            .into_iter()
+            .collect()
+    }
+}
+
 impl Default for ClusterConfig {
     fn default() -> Self {
         Self {
             enabled: false,
             listen: default::cluster::listen(),
+            advertised_address: None,
             peers: vec![],
             secret: "".into(),
             secrets: vec![],
             gossip_interval: default::cluster::gossip_interval(),
             gossip_factor: default::cluster::gossip_factor(),
-            max_message_size: default::cluster::default_message_size(),
+            message_mtu: default::cluster::message_mtu(),
+            phi_threshold: default::cluster::phi_threshold(),
+            reply_timeout: default::cluster::reply_timeout(),
             peer_resolve_interval: default::cluster::peer_resolve_interval(),
             gc_interval: default::cluster::gc_interval(),
             gc_probe_expiry: default::cluster::gc_probe_expiry(),
@@ -198,7 +237,7 @@ mod default {
             2
         }
 
-        pub fn default_message_size() -> usize {
+        pub fn message_mtu() -> usize {
             // A conservative default: small enough that a lost datagram costs little and large
             // enough to carry plenty per round. Raise it (up to ~65507) for fewer rounds on
             // reliable links, or lower it below the path MTU to avoid IP fragmentation. Over-large
@@ -208,6 +247,16 @@ mod default {
 
         pub fn peer_resolve_interval() -> std::time::Duration {
             std::time::Duration::from_secs(60)
+        }
+
+        pub fn phi_threshold() -> f64 {
+            8.0
+        }
+
+        pub fn reply_timeout() -> std::time::Duration {
+            // UDP replies arrive within a network round trip; five seconds tolerates slow links
+            // and processing delays without conflating latency with loss.
+            std::time::Duration::from_secs(5)
         }
 
         pub fn gc_interval() -> std::time::Duration {

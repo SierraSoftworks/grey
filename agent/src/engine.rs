@@ -57,18 +57,33 @@ impl Engine {
         }
 
         if self.state.get_config().cluster.enabled {
+            let config = self.state.get_config();
+            let members = self.state.members();
+
+            // The advertised addresses are computed from the configuration when the membership
+            // registry is constructed (see `State::new`). Without one, transitive discovery still
+            // works as long as the source addresses other nodes observe for this node are reachable
+            // cluster-wide; it only breaks down across network boundaries.
+            if config.cluster.advertised_addresses().is_empty() {
+                warn!(
+                    name: "cluster.advertise",
+                    "No advertised_address is configured and the listen address is a wildcard; peers will discover this node from the source address of its gossip messages. If the cluster spans multiple networks (e.g. a LAN and a WAN), set cluster.advertised_address to an address that is reachable from all of them."
+                );
+            }
+
             let cluster_transport = cluster::UdpGossipTransport::new(
-                &self.state.get_config().cluster.listen,
+                &config.cluster.listen,
                 cluster::Aes256Gcm,
                 self.state.clone(),
             )
             .await?
-            .with_max_message_size(self.state.get_config().cluster.max_message_size);
-            let cluster_client = cluster::GossipClient::new(self.state.clone(), cluster_transport)
-                .with_gossip_factor(self.state.get_config().cluster.gossip_factor)
-                .with_gossip_interval(self.state.get_config().cluster.gossip_interval)
-                .with_seed_resolve_interval(self.state.get_config().cluster.peer_resolve_interval)
-                .with_seed_peers(self.state.get_config().cluster.peers.clone());
+            .with_message_mtu(config.cluster.message_mtu);
+            let cluster_client =
+                cluster::GossipClient::new(self.state.clone(), cluster_transport, members)
+                    .with_gossip_factor(config.cluster.gossip_factor)
+                    .with_gossip_interval(config.cluster.gossip_interval)
+                    .with_seed_resolve_interval(config.cluster.peer_resolve_interval)
+                    .with_seed_peers(config.cluster.peers.clone());
 
             tokio::task::spawn_local(async move {
                 cluster_client.run().await;

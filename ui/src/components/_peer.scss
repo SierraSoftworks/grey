@@ -1,0 +1,90 @@
+@use '../styles/variables' as *;
+
+.peer-list {
+    .peer {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.5rem 0.75rem;
+        border-top: 1px solid $color-separator;
+
+        &:first-of-type {
+            border-top: none;
+        }
+    }
+
+    .peer-identity {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .peer-id {
+        font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+        font-size: 0.85rem;
+        color: $color-text;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .peer-health {
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+
+        &.online {
+            color: $color-status-ok;
+        }
+
+        &.transitive {
+            color: $color-status-unknown;
+        }
+
+        &.suspect {
+            color: $color-status-warn;
+        }
+
+        &.offline {
+            color: $color-status-offline;
+        }
+    }
+
+    .peer-last-seen {
+        color: $color-text-muted;
+        font-size: 0.8rem;
+        white-space: nowrap;
+        min-width: 4.5rem;
+        text-align: right;
+    }
+}
+
+// Coloured peer health indicator: green = online, blue = transitive, orange = suspect, grey = offline.
+.peer-status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+
+    &.online {
+        background-color: $color-status-ok;
+        animation: pulse 2s infinite;
+    }
+
+    &.transitive {
+        background-color: $color-status-unknown;
+        animation: pulse 2s infinite;
+    }
+
+    &.suspect {
+        background-color: $color-status-warn;
+        animation: pulse 2s infinite;
+    }
+
+    &.offline {
+        background-color: $color-status-offline;
+    }
+}

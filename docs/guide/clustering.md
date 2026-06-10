@@ -106,6 +106,25 @@ cluster:
     - my-node.tailnet-1234.ts.net:8888
 ```
 
+#### advertised_address
+The address other nodes should use to reach this one, propagated through membership gossip for
+transitive peer discovery (see [Peer Discovery](#peer-discovery-and-health)).
+
+Within a single network this is rarely needed: peers learn this node's address from the source
+address of its gossip messages and share that with the rest of the cluster. Setting
+`advertised_address` matters when the cluster **spans different networks** (for example a local LAN
+and the public internet, or multiple regions), where the source address observed by nearby peers is
+not reachable from the other side of the boundary. In that case, set it to an address that is
+reachable from every part of the cluster.
+
+When omitted, Grey falls back to the `listen` address if that is a concrete (non-wildcard) address.
+
+```yaml
+cluster:
+  listen: 0.0.0.0:8888
+  advertised_address: 203.0.113.5:8888
+```
+
 #### secrets
 Base64-encoded 32-byte encryption keys used by the cluster to encrypt gossip messages.
 
@@ -204,7 +223,7 @@ For clusters with N nodes, optimal gossip_factor is typically `log₂(N) + 1`:
 - 5-8 nodes: gossip_factor = 3  
 - 9-16 nodes: gossip_factor = 4
 
-#### max_message_size
+#### message_mtu
 The maximum size, in bytes, of an encrypted gossip datagram this node will emit. Messages larger
 than this (for example a big catch-up after a node has been offline) are automatically split across
 multiple gossip rounds, sending the oldest un-propagated records first.
@@ -216,7 +235,7 @@ datagram fits a single IP packet and isn't dropped by fragmentation-averse middl
 
 ```yaml
 cluster:
-  max_message_size: 8192  # Default (8 KiB)
+  message_mtu: 8192  # Default (8 KiB)
 ```
 
 #### peer_resolve_interval
@@ -230,6 +249,31 @@ of slightly more frequent DNS lookups. IP-literal peers are unaffected by this s
 ```yaml
 cluster:
   peer_resolve_interval: 60s  # Default
+```
+
+#### phi_threshold
+The suspicion threshold for the [phi-accrual](https://doi.org/10.1109/RELDIS.2004.1353004) failure
+detector. A peer whose phi value (roughly, how many mean gossip intervals it has been silent for)
+exceeds this is considered to have failed. Lower it for faster detection at the risk of more false
+positives on a lossy network; raise it to be more tolerant.
+
+```yaml
+cluster:
+  phi_threshold: 8.0  # Default
+```
+
+#### reply_timeout
+How long a peer has to answer a gossip message before that send counts as a missed exchange for the
+link's health. Replies arrive within a network round trip, so this does not scale with cluster size;
+raise it on very slow or congested links.
+
+Unresponsive addresses are retried with an exponential backoff derived from this value: the first
+retry waits one `reply_timeout`, each further miss doubles the delay, and every address is retried at
+least once per hour. Seed peers are always contacted regardless.
+
+```yaml
+cluster:
+  reply_timeout: 5s  # Default
 ```
 
 #### gc_interval
@@ -247,7 +291,7 @@ in the next garbage collection cycle.
 Each Grey instance persists its node identifier in its state database, so a restart resumes
 the same identity and continues updating its existing probe state rather than appearing as a
 new node. Probe records are still removed once they have not been updated for `gc_probe_expiry`
-— for example when an instance is permanently retired, or when its state database is reset — and
+(for example when an instance is permanently retired, or when its state database is reset) and
 the aggregated probe metrics are adjusted to account for the loss of this data.
 
 ```yaml
@@ -256,29 +300,56 @@ cluster:
 ```
 
 #### gc_peer_expiry
-How long to attempt to contact a known peer after it was last seen before considering
-it to be offline and removing it from the local member list.
+How long to keep a peer in the in-memory member list after it was last heard from before forgetting
+it. The same threshold governs when a silent peer's heartbeats are considered to have stopped for
+good (i.e. when it is reported as offline).
 
-We recommend you keep this value relatively low to avoid sending unnecessary broadcasts
-to inactive peers, however having it set too short can result negatively impact cluster stability
-under load.
+We recommend you keep this value relatively low to avoid retaining peers that have permanently left,
+however setting it too short can negatively impact cluster stability under load.
 
 ```yaml
 cluster:
   gc_peer_expiry: 30m  # Default (30 minutes)
 ```
 
+## Peer Discovery and Health
+
+Alongside the probe-state anti-entropy, each node periodically broadcasts a small, fire-and-forget
+sample of its **memberlist**: the other nodes it knows about and the addresses it has confirmed are
+working for them. Receivers merge these into their own membership view, which gives Grey two
+capabilities:
+
+- **Transitive peer discovery.** A node learns the address of a peer it has never directly contacted,
+  relayed through a node they both gossip with, so a full mesh of seeds is not required: as long as
+  the graph of seed relationships is connected, every node eventually discovers every other. Only
+  addresses a node has actually received traffic on are advertised, so dead addresses are never
+  propagated.
+- **Failure detection.** A [phi-accrual](https://doi.org/10.1109/RELDIS.2004.1353004) detector tracks
+  how regularly each peer's gossip heartbeat advances and flags peers that go silent. Grey also
+  reports peers that are **online but unreachable**: nodes whose heartbeats still advance (learned
+  via other peers) but which never respond to this node's messages, indicating that these two nodes
+  cannot reach one another even though both are healthy. This is emitted as a `warn`-level
+  `cluster.health.transition` event. Gossip prefers healthy links and backs off unhealthy ones, while
+  always contacting seeds.
+
+Each peer is summarised with an aggregate health, the best state across all of its addresses:
+**Online** (a confirmed two-way link), **Transitive** (alive in the cluster but no confirmed direct
+link), **Suspect** (heartbeats slowing), or **Offline** (not heard from for a long time).
+
+Membership and health state is held in memory only and is rebuilt from the configured seed peers
+within a few rounds after a restart. **Peer addresses are never surfaced through the API or UI**;
+only a node's identifier, last-seen time, and aggregate health are.
+
 ## Partitions and Recovery
 
-Grey discovers peers transitively: once a node has gossiped with a seed, it learns about the
-rest of the cluster and contacts those nodes directly. To keep its member list current, each
-node forgets any peer it has not heard from within `gc_peer_expiry` (30 minutes by default).
+Grey discovers peers transitively, but to keep its member list current each node forgets any peer it has
+not heard from within `gc_peer_expiry` (30 minutes by default).
 
 This has an important consequence for **network partitions**. If two nodes that discovered each
 other indirectly (neither is a seed of the other) are split apart for longer than
 `gc_peer_expiry`, they will each forget the other. When the partition heals, neither side knows
 the other's address anymore, so they will **only** reconverge through a peer they both still
-gossip with &mdash; in practice, a shared seed.
+gossip with: in practice, a shared seed.
 
 Because every node always gossips with its configured seed peers (they are never forgotten),
 this is exactly what the seeds are for. To make sure your cluster heals after a partition:
