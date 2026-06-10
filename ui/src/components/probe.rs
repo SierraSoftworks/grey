@@ -54,10 +54,7 @@ pub fn probe(props: &ProbeProps) -> Html {
                         </div>
                     }
                 </div>
-                <div class="probe-observers" tooltip="The number of agents which have contributed to this status report.">
-                    <span class="icon-eye"></span>
-                    {format!("{}", active_observers)}
-                </div>
+                
                 if let Some(streak_text) = streak_text {
                     <div class="probe-streak">{streak_text}</div>
                 }
