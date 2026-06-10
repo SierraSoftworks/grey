@@ -86,7 +86,7 @@ jobs:
           components: llvm-tools-preview
 
       - name: install protoc
-        uses: arduino/setup-protoc@v3
+        uses: SierraSoftworks/setup-protoc@v3.0.1
         with:
           version: ${{ env.PROTOC_VERSION }}
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -180,7 +180,7 @@ jobs:
 
     steps:
       - name: install protoc
-        uses: arduino/setup-protoc@v3
+        uses: SierraSoftworks/setup-protoc@v3.0.1
         if: ${{ !matrix.cross }}
         with:
           version: ${{ env.PROTOC_VERSION }}
