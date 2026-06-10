@@ -205,11 +205,18 @@ where
             let span = info_span!("gossip.peer", otel.kind = "client", node.id = %self_id, peer.addr=%addr);
             let syn_meta = span.in_scope(|| MessageMetadata::new(self_id.clone()).with_trace_context());
 
-            // Probe-state anti-entropy (the established Syn/SynAck/Ack handshake).
-            self.transport
+            // Probe-state anti-entropy (the established Syn/SynAck/Ack handshake). Best effort per
+            // target: a failure to reach one peer must not prevent the remaining targets (including
+            // the seeds) from being gossiped this round.
+            if let Err(err) = self
+                .transport
                 .send(addr.clone(), Message::Syn(syn_meta, digest.clone()))
                 .instrument(span.clone())
-                .await?;
+                .await
+            {
+                warn!(name: "gossip.send", { peer.addr = %addr, exception = %err }, "Failed to send gossip syn to {addr}: {err:?}");
+                continue;
+            }
 
             // Fire-and-forget membership dissemination. A failure here must not abort the probe
             // gossip round (an old peer, for example, simply drops the unknown message), so errors
@@ -366,6 +373,7 @@ mod tests {
             failure_detector_window: 100,
             phi_prior: Duration::from_millis(50),
             phi_threshold: 8.0,
+            gossip_factor: 3,
             dead_grace: Duration::from_secs(60),
             max_addresses: 8,
             working_window: Duration::from_secs(60),

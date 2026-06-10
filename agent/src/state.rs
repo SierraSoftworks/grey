@@ -104,9 +104,11 @@ impl State {
             failure_detector_window: cluster.failure_detector_window,
             phi_prior: cluster.gossip_interval,
             phi_threshold: cluster.phi_threshold,
+            gossip_factor: cluster.gossip_factor,
             dead_grace: cluster.dead_node_grace_period,
             max_addresses: cluster.max_member_addresses,
-            // An address counts as "working" if we have seen it within a few gossip rounds.
+            // The floor for the "working" window; the registry scales it up with the cluster size
+            // and gossip factor (see `Membership::working_window`).
             working_window: cluster.gossip_interval.saturating_mul(3),
             backoff_base: cluster.unhealthy_retry_base,
             backoff_max: cluster.unhealthy_retry_max,

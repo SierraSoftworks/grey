@@ -154,6 +154,10 @@ pub struct MembershipConfig {
     /// The phi value above which a peer is suspected of having failed; higher values tolerate more
     /// missed heartbeats before raising suspicion.
     pub phi_threshold: f64,
+    /// The number of peers contacted per gossip round. Together with the cluster size this
+    /// determines how often any specific peer is contacted directly, which scales the window
+    /// within which direct signals are considered recent (see [`Membership::working_window`]).
+    pub gossip_factor: usize,
     /// How long after the last observed heartbeat a suspected peer is declared dead, and how long a
     /// dead peer is retained (and still occasionally contacted) before being forgotten entirely.
     pub dead_grace: Duration,
@@ -182,6 +186,8 @@ impl Default for MembershipConfig {
             // The conventional phi-accrual threshold: low enough to detect failures within a few
             // missed heartbeats, high enough that one dropped datagram raises no alarm.
             phi_threshold: 8.0,
+            // The default cluster gossip fan-out per round.
+            gossip_factor: 2,
             // Long enough for transient outages (restarts, brief partitions) to recover before the
             // peer is forgotten, short enough that departed nodes don't linger for days.
             dead_grace: Duration::from_secs(60 * 60),
@@ -366,15 +372,22 @@ where
     }
 
     /// Records that a reply from `peer` arrived after we sent it a `Syn` — proof that at least one of
-    /// the addresses we recently sent to is reachable. We confirm the most-recently-sent addresses.
+    /// the addresses we *recently* sent to is reachable. Only addresses sent to within the working
+    /// window are confirmed: an address last tried long ago cannot have prompted this reply, and
+    /// confirming it would resurrect a potentially dead address into the advertised working set.
     pub fn record_confirmation(&self, peer: &Id, now: Instant) {
         if peer == &self.local_id {
             return;
         }
         let mut members = self.members.write().unwrap();
+        let window = self.working_window(members.len());
         if let Some(member) = members.get_mut(peer) {
             for health in member.addresses.values_mut() {
-                if health.last_send.is_some() {
+                let recently_sent = health
+                    .last_send
+                    .map(|sent| now.saturating_duration_since(sent) <= window)
+                    .unwrap_or(false);
+                if recently_sent {
                     health.last_confirmed = Some(now);
                     health.consecutive_misses = 0;
                     health.backoff_until = now;
@@ -436,9 +449,28 @@ where
         }
     }
 
+    /// The window within which a *direct* signal (an inbound datagram, a send, a confirmed reply)
+    /// is considered recent, scaled to how often we can expect to exchange messages with any
+    /// specific peer.
+    ///
+    /// Each round contacts `gossip_factor` random peers, so a given peer is contacted directly
+    /// roughly every `cluster_size / gossip_factor` rounds. The window covers three such gaps so a
+    /// couple of missed exchanges don't flap a peer's health or its advertised addresses, with the
+    /// configured `working_window` as the floor for small clusters (where the gap is a single
+    /// round, this reduces to the configured three-round window).
+    fn working_window(&self, cluster_size: usize) -> Duration {
+        let contact_gap_rounds = cluster_size
+            .max(1)
+            .div_ceil(self.config.gossip_factor.max(1)) as u32;
+        self.config
+            .working_window
+            .max(self.config.phi_prior.saturating_mul(3 * contact_gap_rounds))
+    }
+
     /// The raw per-peer signals the [`Liveness`] and [`PeerHealth`] classifications derive from.
-    fn signals(&self, member: &Member<Addr>, now: Instant) -> Signals {
-        let window = self.config.working_window;
+    /// `window` is the [`Self::working_window`] for the current cluster size, computed once by the
+    /// caller for the whole member map.
+    fn signals(&self, member: &Member<Addr>, now: Instant, window: Duration) -> Signals {
         let recent = |t: Option<Instant>| {
             t.map(|t| now.saturating_duration_since(t) <= window).unwrap_or(false)
         };
@@ -460,21 +492,22 @@ where
     }
 
     /// The fine-grained liveness used for operator-facing health reporting.
-    fn classify(&self, member: &Member<Addr>, now: Instant) -> Liveness {
-        self.signals(member, now).into()
+    fn classify(&self, member: &Member<Addr>, now: Instant, window: Duration) -> Liveness {
+        self.signals(member, now, window).into()
     }
 
     /// The coarse, API/UI-facing aggregate health for a peer — the best state across all of its
     /// addresses. `Online` requires a confirmed direct two-way link; `Transitive` means the peer is
     /// alive (its heartbeat advances) but we have no confirmed direct link to it.
-    fn aggregate_health(&self, member: &Member<Addr>, now: Instant) -> PeerHealth {
-        self.signals(member, now).into()
+    fn aggregate_health(&self, member: &Member<Addr>, now: Instant, window: Duration) -> PeerHealth {
+        self.signals(member, now, window).into()
     }
 
     /// Builds a bounded random sample of the memberlist to gossip, including our own record and, for
     /// each peer, only the addresses we currently believe are working.
     pub fn sample_for_gossip(&self, max_records: usize, now: Instant) -> MembershipSample<Id> {
         let members = self.members.read().unwrap();
+        let window = self.working_window(members.len());
         let mut sample = MembershipSample::new();
 
         // Always advertise ourselves (if we have an address to advertise).
@@ -490,11 +523,7 @@ where
         // Collect peers that have at least one working address, then take a bounded random subset.
         let mut candidates: Vec<&Id> = members
             .iter()
-            .filter(|(_, m)| {
-                m.addresses
-                    .values()
-                    .any(|h| h.is_working(now, self.config.working_window))
-            })
+            .filter(|(_, m)| m.addresses.values().any(|h| h.is_working(now, window)))
             .map(|(id, _)| id)
             .collect();
         shuffle(&mut candidates);
@@ -507,7 +536,7 @@ where
             let addresses: Vec<String> = member
                 .addresses
                 .iter()
-                .filter(|(_, h)| h.is_working(now, self.config.working_window))
+                .filter(|(_, h)| h.is_working(now, window))
                 .map(|(a, _)| a.to_string())
                 .collect();
             if addresses.is_empty() {
@@ -528,6 +557,7 @@ where
     /// annotated with liveness and whether the address is out of backoff.
     pub fn gossip_candidates(&self, now: Instant) -> Vec<GossipCandidate<Id, Addr>> {
         let members = self.members.read().unwrap();
+        let window = self.working_window(members.len());
         let mut out = Vec::new();
         for (id, member) in members.iter() {
             // Pick the best address: prefer working ones, ranked by the most recent good signal.
@@ -539,7 +569,7 @@ where
                 out.push(GossipCandidate {
                     id: id.clone(),
                     address: addr.clone(),
-                    liveness: self.classify(member, now),
+                    liveness: self.classify(member, now, window),
                     due: now >= health.backoff_until,
                 });
             }
@@ -552,7 +582,7 @@ where
     /// the grace period or unseen beyond the member-expiry window.
     pub fn sweep(&self, now: Instant) {
         let mut members = self.members.write().unwrap();
-        let config = self.config.clone();
+        let window = self.working_window(members.len());
 
         let mut to_remove: Vec<Id> = Vec::new();
         for (id, member) in members.iter_mut() {
@@ -570,7 +600,7 @@ where
                         .unwrap_or(false);
                     if !confirmed_after_send
                         && !inbound_after_send
-                        && now.saturating_duration_since(sent) > config.working_window
+                        && now.saturating_duration_since(sent) > window
                         && now >= health.backoff_until
                     {
                         health.consecutive_misses = health.consecutive_misses.saturating_add(1);
@@ -579,7 +609,7 @@ where
                 }
             }
 
-            let liveness = self.classify(member, now);
+            let liveness = self.classify(member, now, window);
 
             // Track dead_since for grace-period expiry independently of reporting.
             if liveness == Liveness::Dead {
@@ -617,10 +647,10 @@ where
             }
 
             let expired_unseen =
-                now.saturating_duration_since(member.last_seen) > config.member_expiry;
+                now.saturating_duration_since(member.last_seen) > self.config.member_expiry;
             let expired_dead = member
                 .dead_since
-                .map(|d| now.saturating_duration_since(d) > config.dead_grace)
+                .map(|d| now.saturating_duration_since(d) > self.config.dead_grace)
                 .unwrap_or(false);
             if expired_unseen || expired_dead {
                 to_remove.push(id.clone());
@@ -640,24 +670,27 @@ where
     pub fn redacted_peers(&self) -> Vec<(String, chrono::DateTime<chrono::Utc>, PeerHealth)> {
         let now = Instant::now();
         let members = self.members.read().unwrap();
+        let window = self.working_window(members.len());
         members
             .iter()
-            .map(|(id, m)| (id.to_string(), m.last_seen_wall, self.aggregate_health(m, now)))
+            .map(|(id, m)| (id.to_string(), m.last_seen_wall, self.aggregate_health(m, now, window)))
             .collect()
     }
 
     #[cfg(test)]
     pub fn liveness_of(&self, peer: &Id, now: Instant) -> Option<Liveness> {
         let members = self.members.read().unwrap();
-        members.get(peer).map(|m| self.classify(m, now))
+        let window = self.working_window(members.len());
+        members.get(peer).map(|m| self.classify(m, now, window))
     }
 
     #[cfg(test)]
     pub fn health_of(&self, peer: &Id, now: Instant) -> PeerHealth {
         let members = self.members.read().unwrap();
+        let window = self.working_window(members.len());
         members
             .get(peer)
-            .map(|m| self.aggregate_health(m, now))
+            .map(|m| self.aggregate_health(m, now, window))
             .unwrap_or_default()
     }
 
@@ -685,6 +718,7 @@ mod tests {
             failure_detector_window: 100,
             phi_prior: Duration::from_secs(1),
             phi_threshold: 8.0,
+            gossip_factor: 2,
             dead_grace: Duration::from_secs(10),
             max_addresses: 4,
             working_window: Duration::from_secs(3),
@@ -881,6 +915,59 @@ mod tests {
         // Well past dead_grace with no further heartbeats.
         let now = base + Duration::from_secs(4 + 30);
         assert_eq!(m.health_of(&nid(2), now), PeerHealth::Offline);
+    }
+
+    #[test]
+    fn working_window_scales_with_cluster_size_and_gossip_factor() {
+        // test_config: working_window = 3s (floor), phi_prior = 1s, gossip_factor = 2.
+        let m = membership();
+
+        // Small clusters (contact gap of one round) stay at the configured floor.
+        assert_eq!(m.working_window(0), Duration::from_secs(3));
+        assert_eq!(m.working_window(2), Duration::from_secs(3));
+
+        // A 20-peer cluster at factor 2 is contacted every ~10 rounds: the window must cover three
+        // such gaps (3 × 10 × phi_prior) rather than flapping on the three-round floor.
+        assert_eq!(m.working_window(20), Duration::from_secs(30));
+
+        // Odd divisions round the contact gap up.
+        assert_eq!(m.working_window(5), Duration::from_secs(9));
+    }
+
+    #[test]
+    fn confirmation_only_applies_to_recently_sent_addresses() {
+        let m = membership();
+        let base = Instant::now();
+        let stale = addr("10.0.0.2:8888");
+        let fresh = addr("10.1.0.2:8888");
+
+        let mut s = MembershipSample::new();
+        s.push(record(nid(2), &["10.0.0.2:8888", "10.1.0.2:8888"], 1, 1));
+        m.merge_sample(s, base);
+
+        // We tried `stale` long ago (beyond the working window) and `fresh` just now; the reply we
+        // then receive can only have been prompted by `fresh`, so `stale` must not be resurrected
+        // into the working (advertised) set.
+        m.record_send(&nid(2), &stale, base);
+        let later = base + Duration::from_secs(10);
+        m.record_send(&nid(2), &fresh, later);
+        m.record_confirmation(&nid(2), later);
+
+        let advertised: Vec<String> = m
+            .sample_for_gossip(16, later)
+            .into_inner()
+            .into_iter()
+            .find(|r| r.peer == nid(2))
+            .map(|r| r.addresses)
+            .unwrap_or_default();
+        assert!(
+            advertised.contains(&fresh.to_string()),
+            "the recently-confirmed address must be advertised"
+        );
+        assert!(
+            !advertised.contains(&stale.to_string()),
+            "an address sent to long ago must not be confirmed by an unrelated reply"
+        );
     }
 
     #[test]
