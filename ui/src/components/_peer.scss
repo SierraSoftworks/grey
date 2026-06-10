@@ -1,11 +1,60 @@
 @use '../styles/variables' as *;
 
-.peer-list {
+// The "Cluster" header entry: a status chip which reveals a popover listing every cluster
+// member on hover. The popover hangs below the chip and expands to the left.
+.cluster-status {
+    position: relative;
+    cursor: default;
+
+    &:hover .cluster-popover,
+    &:focus-within .cluster-popover {
+        opacity: 1;
+        visibility: visible;
+    }
+}
+
+.cluster-popover {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    // A transparent strip bridges the gap to the chip so the popover stays open while the
+    // pointer crosses it.
+    padding-top: 8px;
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s, visibility 0.2s;
+}
+
+.cluster-popover-content {
+    position: relative;
+    background-color: $background-box;
+    color: $color-text;
+    border: 1px solid $color-separator;
+    border-radius: $border-radius-medium;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    padding: 0.5rem 0.75rem;
+    // Size to the member rows so node ids aren't truncated, within a sane cap.
+    width: max-content;
+    min-width: 20rem;
+    max-width: min(40rem, 90vw);
+    font-size: 0.85rem;
+    font-weight: 400;
+
+    &::after {
+        content: '';
+        position: absolute;
+        bottom: 100%;
+        right: 1.25rem;
+        border: 6px solid transparent;
+        border-bottom-color: $background-box;
+    }
+
     .peer {
         display: flex;
         align-items: center;
         gap: 0.75rem;
-        padding: 0.5rem 0.75rem;
+        padding: 0.5rem 0;
         border-top: 1px solid $color-separator;
 
         &:first-of-type {
@@ -28,6 +77,19 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+
+    .peer-current-tag {
+        flex: 0 0 auto;
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: $color-text-muted;
+        background-color: $background-base;
+        border: 1px solid $color-separator;
+        border-radius: $border-radius-small;
+        padding: 0.1rem 0.3rem;
     }
 
     .peer-health {
@@ -59,6 +121,23 @@
         white-space: nowrap;
         min-width: 4.5rem;
         text-align: right;
+    }
+}
+
+.cluster-popover-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    font-weight: 600;
+    padding: 0.25rem 0 0.5rem;
+    border-bottom: 1px solid $color-separator;
+
+    .cluster-popover-summary {
+        font-weight: 400;
+        font-size: 0.8rem;
+        color: $color-text-muted;
+        white-space: nowrap;
     }
 }
 

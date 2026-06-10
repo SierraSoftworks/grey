@@ -111,6 +111,15 @@
     clear: both;
 }
 
+// How long the probe has held its current state, shown to the left of the availability %.
+.probe-streak {
+    align-self: center;
+    font-size: 0.8rem;
+    color: $color-text-muted;
+    margin-right: 0.75rem;
+    white-space: nowrap;
+}
+
 // Probe tags
 .probe-tags {
     display: inline-flex;

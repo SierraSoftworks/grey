@@ -294,12 +294,28 @@ impl State {
     /// and last-seen timestamp are exposed — peer **addresses are never returned**, since the API has
     /// no access control and may be reachable on the public internet.
     pub async fn get_peers(&self) -> Result<Vec<grey_api::Peer>, Box<dyn Error>> {
-        Ok(self
+        let mut peers: Vec<grey_api::Peer> = self
             .members
             .redacted_peers()
             .into_iter()
-            .map(|(id, last_seen, health)| grey_api::Peer { id, last_seen, health })
-            .collect())
+            .map(|(id, last_seen, health)| grey_api::Peer {
+                id,
+                last_seen,
+                health,
+                current: false,
+            })
+            .collect();
+
+        // The registry only tracks remote peers, so add the serving node itself — the UI
+        // renders the full member set, tagging this record as the current node.
+        peers.push(grey_api::Peer {
+            id: self.node_id.to_string(),
+            last_seen: chrono::Utc::now(),
+            health: grey_api::PeerHealth::Online,
+            current: true,
+        });
+
+        Ok(peers)
     }
 
     #[instrument(name="state.gc", skip(self), fields(otel.kind = "internal", node.id=%self.node_id), err(Debug))]

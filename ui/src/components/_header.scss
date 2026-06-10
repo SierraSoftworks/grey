@@ -126,6 +126,7 @@ header {
     flex-direction: row;
     align-items: center;
     gap: 1rem;
+    padding: 0 1rem;
 
     @media only screen and (max-width: $mobile) {
         gap: 0.5rem;
