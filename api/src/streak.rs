@@ -63,10 +63,8 @@ impl Streak {
     pub fn since_at(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
         if self.failing_at(now) {
             self.failing_since
-        } else if self.failing_until.is_some() {
-            self.failing_until
         } else {
-            self.covered_since
+            self.failing_until.or(self.covered_since)
         }
     }
 
