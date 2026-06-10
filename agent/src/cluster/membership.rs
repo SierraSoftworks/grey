@@ -167,6 +167,10 @@ pub struct MembershipConfig {
     /// How recently an address must have produced traffic (inbound or a confirmed reply) to be
     /// considered "working", i.e. advertised to other peers and preferred as a gossip target.
     pub working_window: Duration,
+    /// How long a peer has to answer one of our messages before that send counts as a missed
+    /// exchange for the address's health. A reply arrives within a network round trip rather than a
+    /// gossip contact gap, so unlike the working window this is **not** scaled with cluster size.
+    pub reply_timeout: Duration,
     /// Base delay applied to an address after its first unanswered send.
     pub backoff_base: Duration,
     /// Upper bound on the per-address retry backoff, so an address is never deferred past the point
@@ -195,6 +199,9 @@ impl Default for MembershipConfig {
             max_addresses: 8,
             // Three default gossip rounds: a single missed round doesn't demote an address.
             working_window: Duration::from_secs(90),
+            // UDP replies arrive within a network round trip; five seconds tolerates slow links and
+            // processing delays without conflating latency with loss.
+            reply_timeout: Duration::from_secs(5),
             // First retry after one missed gossip round.
             backoff_base: Duration::from_secs(30),
             // Capped well below member expiry so a backed-off address is always retried again
@@ -586,8 +593,10 @@ where
 
         let mut to_remove: Vec<Id> = Vec::new();
         for (id, member) in members.iter_mut() {
-            // Per-address backoff: a send that was never confirmed (and is older than one working
-            // window) counts as a miss and defers the address per the backoff strategy.
+            // Per-address backoff: a send that was not answered within the reply timeout counts as
+            // a miss and defers the address per the backoff strategy. A reply arrives within a
+            // round trip, so this deliberately uses the fixed timeout rather than the scaled
+            // working window.
             for health in member.addresses.values_mut() {
                 if let Some(sent) = health.last_send {
                     let confirmed_after_send = health
@@ -600,7 +609,7 @@ where
                         .unwrap_or(false);
                     if !confirmed_after_send
                         && !inbound_after_send
-                        && now.saturating_duration_since(sent) > window
+                        && now.saturating_duration_since(sent) > self.config.reply_timeout
                         && now >= health.backoff_until
                     {
                         health.consecutive_misses = health.consecutive_misses.saturating_add(1);
@@ -722,6 +731,7 @@ mod tests {
             dead_grace: Duration::from_secs(10),
             max_addresses: 4,
             working_window: Duration::from_secs(3),
+            reply_timeout: Duration::from_secs(1),
             backoff_base: Duration::from_secs(1),
             backoff_max: Duration::from_secs(60),
             member_expiry: Duration::from_secs(120),

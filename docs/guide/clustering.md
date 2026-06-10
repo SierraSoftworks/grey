@@ -300,6 +300,16 @@ cluster:
   dead_node_grace_period: 1h  # Default
 ```
 
+#### reply_timeout
+How long a peer has to answer a gossip message before that send counts as a missed exchange for the
+link's health, feeding the per-address retry backoff. Replies arrive within a network round trip, so
+this does not scale with cluster size; raise it on very slow or congested links.
+
+```yaml
+cluster:
+  reply_timeout: 5s  # Default
+```
+
 #### unhealthy_retry_base / unhealthy_retry_max
 The base and maximum delay for the per-address exponential backoff applied to links that are not
 responding. Grey prefers gossiping over healthy links and retries unhealthy ones progressively less

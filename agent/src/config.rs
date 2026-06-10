@@ -150,6 +150,11 @@ pub struct ClusterConfig {
     #[serde(default = "default::cluster::dead_node_grace_period")]
     #[serde(with = "humantime_serde")]
     pub dead_node_grace_period: std::time::Duration,
+    /// How long a peer has to answer a gossip message before that send counts as a missed exchange
+    /// for the link's health (driving the per-address retry backoff).
+    #[serde(default = "default::cluster::reply_timeout")]
+    #[serde(with = "humantime_serde")]
+    pub reply_timeout: std::time::Duration,
     /// Base delay for the per-address exponential backoff applied to unhealthy links.
     #[serde(default = "default::cluster::unhealthy_retry_base")]
     #[serde(with = "humantime_serde")]
@@ -208,6 +213,7 @@ impl Default for ClusterConfig {
             phi_threshold: default::cluster::phi_threshold(),
             failure_detector_window: default::cluster::failure_detector_window(),
             dead_node_grace_period: default::cluster::dead_node_grace_period(),
+            reply_timeout: default::cluster::reply_timeout(),
             unhealthy_retry_base: default::cluster::unhealthy_retry_base(),
             unhealthy_retry_max: default::cluster::unhealthy_retry_max(),
             peer_resolve_interval: default::cluster::peer_resolve_interval(),
@@ -286,6 +292,12 @@ mod default {
 
         pub fn dead_node_grace_period() -> std::time::Duration {
             std::time::Duration::from_secs(60 * 60)
+        }
+
+        pub fn reply_timeout() -> std::time::Duration {
+            // UDP replies arrive within a network round trip; five seconds tolerates slow links
+            // and processing delays without conflating latency with loss.
+            std::time::Duration::from_secs(5)
         }
 
         pub fn unhealthy_retry_base() -> std::time::Duration {

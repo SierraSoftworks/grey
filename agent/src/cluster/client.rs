@@ -377,6 +377,7 @@ mod tests {
             dead_grace: Duration::from_secs(60),
             max_addresses: 8,
             working_window: Duration::from_secs(60),
+            reply_timeout: Duration::from_millis(250),
             backoff_base: Duration::from_millis(10),
             backoff_max: Duration::from_secs(1),
             member_expiry: Duration::from_secs(300),

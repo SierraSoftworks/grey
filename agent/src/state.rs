@@ -110,6 +110,7 @@ impl State {
             // The floor for the "working" window; the registry scales it up with the cluster size
             // and gossip factor (see `Membership::working_window`).
             working_window: cluster.gossip_interval.saturating_mul(3),
+            reply_timeout: cluster.reply_timeout,
             backoff_base: cluster.unhealthy_retry_base,
             backoff_max: cluster.unhealthy_retry_max,
             member_expiry: cluster.gc_peer_expiry,
