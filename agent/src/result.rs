@@ -53,7 +53,8 @@ impl ProbeResult {
     }
 
     pub fn apply<Id: ToString>(&self, node_id: Id, probe: &mut grey_api::Probe) {
-        probe.last_updated = self.start_time + self.duration;
+        let sample_time = self.start_time + self.duration;
+        probe.last_updated = sample_time;
 
         let start_time = self.start_time.align(std::time::Duration::from_secs(3600));
 
@@ -72,7 +73,7 @@ impl ProbeResult {
                 let observation = last.observations.entry(node_id.to_string())
                     .or_insert_with(Default::default);
 
-                observation.add_sample(self.pass, self.retries as u64, std::time::Duration::from_millis(self.duration.num_milliseconds() as u64));
+                observation.add_sample(self.pass, self.retries as u64, std::time::Duration::from_millis(self.duration.num_milliseconds() as u64), sample_time);
             }
             _ => {
                 probe.history.push(grey_api::ProbeHistoryBucket {
@@ -89,7 +90,8 @@ impl ProbeResult {
                         grey_api::Observation::from_sample(
                             self.pass,
                             self.retries as u64,
-                            std::time::Duration::from_millis(self.duration.num_milliseconds() as u64)))]
+                            std::time::Duration::from_millis(self.duration.num_milliseconds() as u64),
+                            sample_time))]
                         .into_iter().collect(),
                 });
             }
@@ -97,7 +99,7 @@ impl ProbeResult {
 
         let observation = probe.observations.entry(node_id.to_string())
             .or_insert_with(Default::default);
-        observation.add_sample(self.pass, self.retries as u64, std::time::Duration::from_millis(self.duration.num_milliseconds() as u64));
+        observation.add_sample(self.pass, self.retries as u64, std::time::Duration::from_millis(self.duration.num_milliseconds() as u64), sample_time);
     }
 }
 

@@ -37,6 +37,18 @@ impl Probe {
         self.total().success_rate()
     }
 
+    /// The most recent pass/fail state reported by any observer of this probe, falling
+    /// back to the latest history bucket's result when no observer reports a state
+    /// (data recorded by older agents).
+    pub fn passing(&self) -> bool {
+        let total = self.total();
+        if total.has_state() {
+            total.passing
+        } else {
+            self.history.last().map(|h| h.passing()).unwrap_or(true)
+        }
+    }
+
     /// Calculate recent availability percentage based on successful vs total samples
     pub fn recent(&self, max_hours: usize) -> Observation {
         self
@@ -120,6 +132,7 @@ mod tests {
                 successful_samples: 9,
                 total_retries: 2,
                 total_latency: std::time::Duration::from_secs(5),
+                ..Default::default()
             })].into_iter().collect(),
         };
 
@@ -133,6 +146,7 @@ mod tests {
                 successful_samples: 4,
                 total_retries: 1,
                 total_latency: std::time::Duration::from_secs(3),
+                ..Default::default()
             })].into_iter().collect(),
         };
 
@@ -158,12 +172,14 @@ mod tests {
                     successful_samples: 9,
                     total_retries: 2,
                     total_latency: std::time::Duration::from_secs(5),
+                    ..Default::default()
                 }),
                 ("observer2".into(), Observation {
                     total_samples: 5,
                     successful_samples: 4,
                     total_retries: 1,
                     total_latency: std::time::Duration::from_secs(3),
+                    ..Default::default()
                 }),
             ].into_iter().collect(),
         };
@@ -188,12 +204,14 @@ mod tests {
                     successful_samples: 9,
                     total_retries: 2,
                     total_latency: std::time::Duration::from_secs(5),
+                    ..Default::default()
                 }),
                 ("observer2".into(), Observation {
                     total_samples: 5,
                     successful_samples: 4,
                     total_retries: 1,
                     total_latency: std::time::Duration::from_secs(3),
+                    ..Default::default()
                 }),
             ].into_iter().collect(),
         };
@@ -202,6 +220,53 @@ mod tests {
         assert_eq!(availability, (13.0 / 15.0) * 100.0);
     }
     
+    #[test]
+    fn test_probe_passing() {
+        let mut probe = Probe {
+            name: "probe".into(),
+            tags: HashMap::new(),
+            last_updated: chrono::Utc::now(),
+            history: vec![],
+            observations: HashMap::new(),
+        };
+
+        // With no observations or history, a probe is assumed to be passing.
+        assert!(probe.passing());
+
+        // Stateless observations (from older agents) fall back to the latest history bucket.
+        probe.observations.insert("observer1".into(), Observation {
+            total_samples: 10,
+            successful_samples: 10,
+            ..Default::default()
+        });
+        probe.history.push(ProbeHistoryBucket {
+            start_time: chrono::Utc::now(),
+            pass: false,
+            message: "Timeout".into(),
+            validations: HashMap::new(),
+            observations: HashMap::new(),
+        });
+        assert!(!probe.passing());
+
+        // The most recently transitioned state across observers wins, even when the
+        // average performance disagrees with it.
+        probe.observations.insert("observer2".into(), Observation {
+            total_samples: 100,
+            successful_samples: 1,
+            passing: true,
+            since: chrono::DateTime::from_timestamp(200, 0).unwrap(),
+            ..Default::default()
+        });
+        probe.observations.insert("observer3".into(), Observation {
+            total_samples: 100,
+            successful_samples: 99,
+            passing: false,
+            since: chrono::DateTime::from_timestamp(100, 0).unwrap(),
+            ..Default::default()
+        });
+        assert!(probe.passing());
+    }
+
     #[test]
     fn test_msgpack_roundtrip() {
         let probe = Probe {
@@ -214,6 +279,7 @@ mod tests {
                 successful_samples: 9,
                 total_retries: 2,
                 total_latency: std::time::Duration::from_secs(5),
+                ..Default::default()
             })].into_iter().collect(),
         };
         

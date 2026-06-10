@@ -1978,6 +1978,7 @@ dependencies = [
  "humantime-serde",
  "rmp-serde",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

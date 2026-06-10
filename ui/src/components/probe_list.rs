@@ -71,11 +71,9 @@ fn calculate_service_health_and_availability(probes: &[&grey_api::Probe]) -> (St
         total_availability += probe.availability();
         total_probes += 1;
 
-        // Check if the probe is currently healthy based on recent history
-        if let Some(recent_result) = probe.history.last() {
-            if recent_result.pass {
-                healthy_probes += 1;
-            }
+        // Check if the probe is currently healthy based on its most recent observed state
+        if probe.passing() {
+            healthy_probes += 1;
         }
     }
 
