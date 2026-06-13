@@ -33,10 +33,18 @@ probes:
       retries: 3
     target: !Http
       url: https://google.com?q=grey+healthcheck+system
-    validators:
-      http.status: !OneOf [200]
-      http.header.content-type: !Contains "text/html"
+    checks:
+      - http.status == 200
+      - http.header.content-type contains "text/html"
 ```
+
+::: tip
+`checks` are validation expressions written in the
+[`filt-rs`](https://docs.rs/filt-rs/latest/filt_rs/) language and are the recommended way to
+assert that a target is healthy. The older per-field [validators](../validators/README.md)
+are deprecated but still supported. See the [Checks](../checks/README.md) guide for the full
+expression language.
+:::
 
 ## Step #3: Telemetry
 Grey is designed to record the health of your services through the use of OpenTelemetry tracing

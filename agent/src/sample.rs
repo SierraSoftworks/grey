@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{borrow::Cow, collections::HashMap, fmt::Display};
 
 use serde::{Deserialize, Serialize, de::Visitor};
 
@@ -99,6 +99,34 @@ impl Display for SampleValue {
             SampleValue::Int(value) => write!(f, "{}", value),
             SampleValue::Bool(value) => write!(f, "{}", value),
             SampleValue::List(value) => write!(f, "[{}]", value.iter().map(SampleValue::to_string).collect::<Vec<_>>().join(", ")),
+        }
+    }
+}
+
+impl filt_rs::Filterable for Sample {
+    /// Exposes the sample's collected fields to the `filt-rs` expression
+    /// language so probes can be validated with `checks` alongside the classic
+    /// per-field `validators`. Unknown keys resolve to `null`, matching both
+    /// `Sample::get` and `filt-rs`'s own convention.
+    fn get(&self, key: &str) -> filt_rs::FilterValue<'_> {
+        self.metadata
+            .get(key)
+            .map(filt_rs::FilterValue::from)
+            .unwrap_or(filt_rs::FilterValue::Null)
+    }
+}
+
+impl<'a> From<&'a SampleValue> for filt_rs::FilterValue<'a> {
+    fn from(value: &'a SampleValue) -> Self {
+        match value {
+            SampleValue::None => filt_rs::FilterValue::Null,
+            SampleValue::String(value) => filt_rs::FilterValue::String(Cow::Borrowed(value)),
+            SampleValue::Double(value) => filt_rs::FilterValue::Number(*value),
+            SampleValue::Int(value) => filt_rs::FilterValue::Number(*value as f64),
+            SampleValue::Bool(value) => filt_rs::FilterValue::Bool(*value),
+            SampleValue::List(value) => {
+                filt_rs::FilterValue::Tuple(value.iter().map(filt_rs::FilterValue::from).collect())
+            }
         }
     }
 }
@@ -307,5 +335,65 @@ mod tests {
         let serialized = serde_json::to_string(value).unwrap();
         println!("Serialized: {serialized} (from {value})");
         serde_json::from_str(&serialized).unwrap()
+    }
+
+    #[test]
+    fn test_sample_value_into_filter_value() {
+        use filt_rs::FilterValue;
+
+        assert_eq!(FilterValue::from(&SampleValue::None), FilterValue::Null);
+        assert_eq!(
+            FilterValue::from(&SampleValue::Bool(true)),
+            FilterValue::Bool(true)
+        );
+        assert_eq!(
+            FilterValue::from(&SampleValue::Int(42)),
+            FilterValue::Number(42.0)
+        );
+        assert_eq!(
+            FilterValue::from(&SampleValue::Double(3.5)),
+            FilterValue::Number(3.5)
+        );
+        assert_eq!(
+            FilterValue::from(&SampleValue::String("hello".into())),
+            FilterValue::String("hello".into())
+        );
+        assert_eq!(
+            FilterValue::from(&SampleValue::List(vec![
+                SampleValue::Int(1),
+                SampleValue::String("a".into()),
+            ])),
+            FilterValue::Tuple(vec![FilterValue::Number(1.0), FilterValue::String("a".into())])
+        );
+    }
+
+    #[test]
+    fn test_sample_is_filterable() {
+        use filt_rs::{Filter, FilterValue, Filterable};
+
+        let sample = Sample::default()
+            .with("http.status", 200)
+            .with("http.header.content-type", "text/html");
+
+        // Present keys resolve to their values; missing keys resolve to null.
+        // (Call the trait method explicitly, since the inherent `Sample::get`
+        // shadows it for direct `sample.get(..)` calls.)
+        assert_eq!(
+            Filterable::get(&sample, "http.status"),
+            FilterValue::Number(200.0)
+        );
+        assert_eq!(
+            Filterable::get(&sample, "missing.key"),
+            FilterValue::Null
+        );
+
+        // Hyphenated and dotted property names are usable directly in expressions.
+        let filter =
+            Filter::new(r#"http.status >= 200 && http.status < 300 && http.header.content-type contains "html""#)
+                .expect("parse filter");
+        assert!(filter.matches(&sample).expect("evaluate filter"));
+
+        let failing = Filter::new("http.status == 500").expect("parse filter");
+        assert!(!failing.matches(&sample).expect("evaluate filter"));
     }
 }

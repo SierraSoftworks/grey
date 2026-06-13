@@ -25,9 +25,9 @@ probes:
       retries: 3
     target: !Http
       url: https://google.com?q=grey+healthcheck+system
-    validators:
-      http.status: !OneOf [200]
-      http.header.content-type: !Equals "text/html; charset=ISO-8859-1"
+    checks:
+      - http.status == 200
+      - http.header.content-type == "text/html; charset=ISO-8859-1"
     tags:
       service: Google
 
@@ -105,8 +105,28 @@ It exposes the following fields for validation:
 - `script.exit_code`: The exit code of the script execution (0 for success).
 - Custom fields set via `output[key] = value` in the script code.
 
-## Validators
-Validation is performed using one of the provided validation functions.
+## Checks
+Validation is performed using `checks`: expressions written in the
+[`filt-rs`](https://docs.rs/filt-rs/latest/filt_rs/) filter language and evaluated against
+the probe's result. Each expression references the sample's fields and supports comparisons
+(`==`, `!=`, `<`, `>`, …), membership (`in`, `contains`), pattern matching (`like`,
+`matches`), and boolean composition (`&&`, `||`, `!`). A probe fails as soon as any of its
+checks does not match.
+
+```yaml
+    checks:
+      - http.status == 200
+      - http.status in [200, 204]
+      - http.header.content-type contains "text/html"
+```
+
+## Validators (deprecated)
+> [!WARNING]
+> Validators are deprecated in favour of [checks](#checks). They still work, but new probes
+> should use checks and existing probes should migrate when convenient — each validator maps
+> directly to a check (`!Equals` → `==`, `!OneOf` → `in`, `!Contains` → `contains`).
+
+The older per-field validators are configured under a `validators` block:
 
 ### `!Equals`
 The `!Equals` validator asserts that the value of the field is equal to the

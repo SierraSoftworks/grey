@@ -3,6 +3,15 @@ Grey exposes a standard set of validators which can be used to assert that a ser
 matches your expectations. These validators are designed to be straightforward to use and broadly
 applicable, keeping the configuration simple and easy to understand.
 
+::: warning Deprecated
+Validators are **deprecated** in favour of [checks](../checks/README.md), which validate a
+probe using the more expressive `filt-rs` expression language. Validators still work, so
+existing configurations keep running, but new probes should use checks and existing probes
+should migrate when convenient. See
+[Migrating from validators](../checks/README.md#migrating-from-validators) for a
+field-by-field guide.
+:::
+
 ::: tip
 For a quick introduction to using Grey to probe a service, take a look at the
 [Usage Guide](../guide/README.md).

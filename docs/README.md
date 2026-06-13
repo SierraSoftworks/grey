@@ -49,9 +49,9 @@ probes:
       retries: 3
     target: !Http
       url: https://google.com?q=grey+healthcheck+system
-    validators:
-      http.status: !OneOf [200]
-      http.header.content-type: !Equals "text/html; charset=ISO-8859-1"
+    checks:
+      - http.status == 200
+      - http.header.content-type == "text/html; charset=ISO-8859-1"
     tags:
       service: Google
 

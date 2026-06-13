@@ -1,0 +1,43 @@
+---
+# This example demonstrates `checks`: validation expressions written in the filt-rs
+# language (https://docs.rs/filt-rs) and evaluated against the whole probe sample.
+# Checks live happily alongside the classic per-field `validators`, so you can adopt
+# them gradually.
+ui:
+  enabled: true
+  listen: 127.0.0.1:3002
+
+probes:
+  # A probe validated entirely with checks.
+  - name: example.checks
+    policy:
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    target: !Http
+      url: https://example.com
+    checks:
+      # A status-code range, instead of enumerating every acceptable value.
+      - http.status >= 200 && http.status < 300
+      # A case-insensitive substring test against a hyphenated header field.
+      - http.header.content-type contains "html"
+    tags:
+      domain: example.com
+      service: Example
+
+  # The same probe can mix classic validators with checks.
+  - name: github.repo
+    policy:
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    target: !Http
+      url: https://github.com/SierraSoftworks/grey
+    validators:
+      http.status: !OneOf [200]
+    checks:
+      # A regular-expression match (requires the filt-rs `regex` feature, enabled by Grey).
+      - http.header.content-type matches r"^text/html"
+    tags:
+      domain: github.com
+      service: Coding

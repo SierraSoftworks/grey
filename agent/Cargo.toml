@@ -31,6 +31,7 @@ actix-web.workspace = true
 async-trait.workspace = true
 clap.workspace = true
 ctrlc.workspace = true
+filt-rs.workspace = true
 boa_engine = { workspace = true, optional = true }
 boa_gc = { workspace = true, optional = true }
 boa_runtime = { workspace = true, features = ["reqwest-blocking"], optional = true }
