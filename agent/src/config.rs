@@ -199,6 +199,44 @@ impl Default for ClusterConfig {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The shipped `checks` example must parse through the real configuration
+    /// loader, exercising `filt-rs` deserialization end-to-end and guarding the
+    /// example against drift.
+    #[tokio::test]
+    async fn loads_checks_example() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../example/checks.yml");
+        let config = Config::load_from_path(&path)
+            .await
+            .expect("example/checks.yml should load");
+
+        let probe = config
+            .probes
+            .iter()
+            .find(|p| p.name == "example.checks")
+            .expect("example.checks probe should be present");
+        assert_eq!(probe.checks.len(), 2);
+
+        // The probe that mixes a classic validator with a check round-trips both.
+        let mixed = config
+            .probes
+            .iter()
+            .find(|p| p.name == "github.repo")
+            .expect("github.repo probe should be present");
+        assert_eq!(mixed.validators.len(), 1);
+        assert_eq!(mixed.checks.len(), 1);
+
+        // A check renders as its raw expression, which is what gets reported.
+        assert_eq!(
+            mixed.checks[0].to_string(),
+            r#"http.header.content-type matches r"^text/html""#
+        );
+    }
+}
+
 mod default {
     use super::*;
 

@@ -13,6 +13,12 @@ pub struct Probe {
     pub tags: HashMap<String, String>,
     #[serde(default)]
     pub validators: HashMap<String, ValidatorType>,
+    /// `filt-rs` expression checks evaluated against the whole sample, offered
+    /// alongside the per-field `validators` as a more expressive way to assert
+    /// on a probe's result. Each expression is parsed at config-load time and
+    /// reported as its own validation.
+    #[serde(default)]
+    pub checks: Vec<filt_rs::Filter>,
 }
 
 impl Probe {
@@ -24,11 +30,52 @@ impl Probe {
             target: crate::targets::TargetType::test(),
             tags: HashMap::new(),
             validators: vec![("output.test".into(), crate::validators::ValidatorType::test())].into_iter().collect(),
+            checks: vec![filt_rs::Filter::new("output.test == true").unwrap()],
         }
     }
 
     pub fn next_start_time(&self) -> Instant {
         Instant::now() + random_start_offset(self.policy.interval)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BASE: &str = r#"
+name: example
+policy:
+  interval: 5s
+  timeout: 2s
+  retries: 3
+target: !Http
+  url: https://example.com
+"#;
+
+    #[test]
+    fn checks_default_to_empty() {
+        let probe: Probe = serde_yaml::from_str(BASE).expect("deserialize probe");
+        assert!(probe.checks.is_empty());
+    }
+
+    #[test]
+    fn deserializes_checks_into_filters() {
+        let yaml = format!(
+            "{BASE}checks:\n  - http.status >= 200 && http.status < 300\n  - http.header.content-type contains \"html\"\n"
+        );
+        let probe: Probe = serde_yaml::from_str(&yaml).expect("deserialize probe");
+        assert_eq!(probe.checks.len(), 2);
+        assert_eq!(
+            probe.checks[0].raw(),
+            "http.status >= 200 && http.status < 300"
+        );
+    }
+
+    #[test]
+    fn invalid_check_expression_fails_to_deserialize() {
+        let yaml = format!("{BASE}checks:\n  - \"http.status >\"\n");
+        assert!(serde_yaml::from_str::<Probe>(&yaml).is_err());
     }
 }
 

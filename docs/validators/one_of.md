@@ -7,6 +7,11 @@ The `!OneOf` validator accepts a list of values as its argument. The values cont
 its list must match the type of of the field being validated. For example, if the field is a string,
 the values in the list must also be strings.
 
+::: warning Deprecated
+Validators are deprecated in favour of [checks](../checks/README.md). Replace `!OneOf` with
+the `in` operator — see [Migrating to a check](#migrating-to-a-check) below.
+:::
+
 ## Example
 
 ```yaml{10-11}
@@ -21,4 +26,18 @@ probes:
     validators:
       # This validates that the status code of the response is either 200 or 204
       http.status: !OneOf [200, 204]
+```
+
+## Migrating to a check
+
+Use the `in` operator with the same list of accepted values:
+
+```yaml
+# Before:
+    validators:
+      http.status: !OneOf [200, 204]
+
+# After:
+    checks:
+      - http.status in [200, 204]
 ```

@@ -71,6 +71,10 @@ export default defineUserConfig({
         ]
       },
       {
+        text: "Checks",
+        link: "/checks/",
+      },
+      {
         text: "User Interface",
         link: "/ui/",
         children: [
@@ -125,6 +129,14 @@ export default defineUserConfig({
             '/validators/contains.md',
             '/validators/equals.md',
             '/validators/one_of.md',
+          ]
+        }
+      ],
+      '/checks/': [
+        {
+          text: "Checks",
+          children: [
+            '/checks/README.md',
           ]
         }
       ],

@@ -240,6 +240,44 @@ impl ProbeRunner {
             }
         }
 
+        for check in &probe.checks {
+            let name = format!("check {}", check);
+            let span = info_span!(
+                "probe.validate",
+                otel.name=name,
+                field=%check,
+                validator=%check,
+                otel.status_code=?OpenTelemetryStatus::Unset,
+                otel.status_message=EmptyField
+            )
+            .entered();
+
+            let outcome = match check.matches(&sample) {
+                Ok(true) => Ok(()),
+                Ok(false) => Err(format!("The check '{}' did not pass.", check)),
+                Err(e) => Err(format!("The check '{}' could not be evaluated: {}", check, e)),
+            };
+
+            match outcome {
+                Ok(_) => {
+                    span.record("otel.status_code", "Ok");
+                    result
+                        .validations
+                        .insert(check.to_string(), ValidationResult::pass(check));
+                }
+                Err(message) => {
+                    let err: Box<dyn std::error::Error> = message.into();
+                    span.record("otel.status_code", "Error")
+                        .record("otel.status_message", err.to_string());
+                    error!(error = err, "{}", err);
+                    result
+                        .validations
+                        .insert(check.to_string(), ValidationResult::fail(check, &err));
+                    return Err(err);
+                }
+            }
+        }
+
         Ok(())
     }
 }

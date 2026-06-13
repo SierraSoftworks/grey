@@ -21,7 +21,7 @@ automatically if it doesn't exist.
 
 ## Probes
 Probes are the core of Grey's configuration. Each probe defines a single target and a set
-of validators that will be used to assert that the target is healthy. In addition to these
+of checks that will be used to assert that the target is healthy. In addition to these
 properties, a probe has a `name`, and a policy governing how frequently it is executed and
 how timeouts and retries should be handled.
 
@@ -34,9 +34,9 @@ probes:
         retries: 3
       target: !Http
         url: https://example.com
-      validators:
-        http.status: !OneOf [200]
-        http.header.content-type: !Contains "text/html"
+      checks:
+        - http.status == 200
+        - http.header.content-type contains "text/html"
 ```
 
 ### Name
@@ -76,10 +76,28 @@ the URL that will be probed.
 You can read more about the various target types in the [Targets](../targets/README.md) section
 of the documentation.
 
+### Checks
+The `checks` property defines a list of expressions, written in the
+[`filt-rs`](https://docs.rs/filt-rs/latest/filt_rs/) filter language, that are evaluated
+against the probe's result to assert that the target is healthy. Each expression references
+the sample's fields (such as `http.status`) and can combine conditions, compare ranges,
+match patterns, and relate one field to another. A probe fails as soon as any of its checks
+does not match.
+
+You can read more about the expression language and the available operators in the
+[Checks](../checks/README.md) section of the documentation.
+
 ### Validators
-The `validators` property defines the set of validators that will be used to assert that
-the target is healthy. Each validator targets a specific field and accepts a distinct set
-of configuration options which are documented on their respective pages.
+
+::: warning Deprecated
+The `validators` property is deprecated in favour of [checks](#checks). It continues to work,
+but new probes should use checks and existing probes should migrate when convenient — see
+[Migrating from validators](../checks/README.md#migrating-from-validators).
+:::
+
+The `validators` property defines a set of per-field validators that will be used to assert
+that the target is healthy. Each validator targets a specific field and accepts a distinct
+set of configuration options which are documented on their respective pages.
 
 You can read more about the various validators in the [Validators](../validators/README.md)
 section of the documentation.
