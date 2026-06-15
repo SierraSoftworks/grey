@@ -1,14 +1,25 @@
 use crate::components::incidents_timeline::{incident_status_class, incident_status_label};
 use crate::components::markdown::render_markdown;
-use crate::contexts::use_incidents;
+use crate::contexts::{use_auth, use_incidents};
 use chrono::{DateTime, Utc};
 use grey_api::{Incident, IncidentUpdate};
 use yew::prelude::*;
 
-/// The full incident list, reached via the "Incidents" navigation entry.
+/// The full incident list. Signed-in administrators get the management view (including hidden
+/// incidents and editing controls); everyone else sees the read-only public list.
 #[function_component(IncidentsPage)]
 pub fn incidents_page() -> Html {
+    let auth = use_auth();
     let incidents_ctx = use_incidents();
+
+    #[cfg(feature = "wasm")]
+    if auth.is_authenticated() {
+        if let Some(token) = auth.token.clone() {
+            return html! { <crate::components::incidents_admin::AdminIncidents token={token} /> };
+        }
+    }
+    #[cfg(not(feature = "wasm"))]
+    let _ = &auth;
 
     html! {
         <div class="content incidents-page">
@@ -25,12 +36,15 @@ pub fn incidents_page() -> Html {
 }
 
 #[derive(Properties, PartialEq)]
-struct IncidentCardProps {
-    incident: Incident,
+pub struct IncidentCardProps {
+    pub incident: Incident,
+    /// Optional admin controls rendered at the foot of the card.
+    #[prop_or_default]
+    pub controls: Html,
 }
 
 #[function_component(IncidentCard)]
-fn incident_card(props: &IncidentCardProps) -> Html {
+pub fn incident_card(props: &IncidentCardProps) -> Html {
     let incident = &props.incident;
     let status = incident.current_status();
     let status_class = incident_status_class(status);
@@ -71,6 +85,8 @@ fn incident_card(props: &IncidentCardProps) -> Html {
                     }) }
                 </ol>
             }
+
+            { props.controls.clone() }
         </article>
     }
 }

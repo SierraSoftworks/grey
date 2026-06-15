@@ -5,7 +5,8 @@ use yew::prelude::*;
 
 use crate::components::status::StatusLevel;
 use crate::contexts::{
-    IncidentsProvider, NoticesProvider, PeersProvider, ProbesProvider, UiConfigProvider, use_probes,
+    AuthProvider, IncidentsProvider, NoticesProvider, PeersProvider, ProbesProvider,
+    UiConfigProvider, use_probes,
 };
 use crate::routes::Route;
 
@@ -207,15 +208,17 @@ impl Component for App {
                 data-incidents={incidents_json}
             >
                 <UiConfigProvider config={ctx.props().config.clone()}>
-                    <NoticesProvider notices={self.notices.clone()}>
-                        <ProbesProvider probes={self.probes.clone()}>
-                            <PeersProvider peers={self.peers.clone()}>
-                                <IncidentsProvider incidents={self.incidents.clone()}>
-                                    { self.render_router(ctx) }
-                                </IncidentsProvider>
-                            </PeersProvider>
-                        </ProbesProvider>
-                    </NoticesProvider>
+                    <AuthProvider>
+                        <NoticesProvider notices={self.notices.clone()}>
+                            <ProbesProvider probes={self.probes.clone()}>
+                                <PeersProvider peers={self.peers.clone()}>
+                                    <IncidentsProvider incidents={self.incidents.clone()}>
+                                        { self.render_router(ctx) }
+                                    </IncidentsProvider>
+                                </PeersProvider>
+                            </ProbesProvider>
+                        </NoticesProvider>
+                    </AuthProvider>
                 </UiConfigProvider>
             </div>
         }

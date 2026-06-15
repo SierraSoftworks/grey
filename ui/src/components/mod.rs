@@ -2,6 +2,9 @@ pub mod banner;
 pub mod cluster_status;
 pub mod header;
 pub mod history;
+// The admin UI reads DOM inputs and performs authenticated mutations, so it is browser-only.
+#[cfg(feature = "wasm")]
+pub mod incidents_admin;
 pub mod incidents_page;
 pub mod incidents_timeline;
 pub mod markdown;

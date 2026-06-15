@@ -162,6 +162,153 @@
     }
 }
 
+// Header sign-in / sign-out controls.
+.admin-user {
+    font-size: 0.85rem;
+    color: $color-text-muted;
+    white-space: nowrap;
+}
+
+.auth-button,
+.primary-button {
+    cursor: pointer;
+    border: 1px solid $color-separator;
+    background-color: $background-box;
+    color: $color-text;
+    border-radius: $border-radius-small;
+    padding: 0.4rem 0.9rem;
+    font-size: 0.85rem;
+
+    &:hover {
+        background-color: $color-separator;
+    }
+}
+
+.primary-button {
+    background-color: $color-status-unknown;
+    color: $color-status-text;
+    border-color: $color-status-unknown;
+
+    &:hover {
+        opacity: 0.9;
+        background-color: $color-status-unknown;
+    }
+
+    &:disabled {
+        opacity: 0.6;
+        cursor: default;
+    }
+}
+
+// Admin incidents page.
+.incidents-admin {
+    .incidents-admin-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+}
+
+.incidents-error {
+    color: $color-status-error;
+}
+
+.incident-admin-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid $color-separator;
+
+    button {
+        cursor: pointer;
+        border: 1px solid $color-separator;
+        background-color: $background-base;
+        color: $color-text;
+        border-radius: $border-radius-small;
+        padding: 0.35rem 0.75rem;
+        font-size: 0.8rem;
+
+        &:hover {
+            background-color: $color-separator;
+        }
+
+        &.danger {
+            color: $color-status-error;
+            border-color: $color-status-error;
+        }
+    }
+}
+
+// Create / edit / update forms.
+.incident-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    background-color: $background-box;
+    border: 1px solid $color-separator;
+    border-radius: $border-radius-medium;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+
+    h3,
+    h4 {
+        margin: 0;
+        font-weight: 400;
+    }
+
+    label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        font-size: 0.85rem;
+        color: $color-text-muted;
+
+        &.checkbox {
+            flex-direction: row;
+            align-items: center;
+            gap: 0.5rem;
+        }
+    }
+
+    input[type="text"],
+    input[type="datetime-local"],
+    textarea,
+    select {
+        font: inherit;
+        padding: 0.5rem;
+        border: 1px solid $color-separator;
+        border-radius: $border-radius-small;
+        background-color: $background-base;
+        color: $color-text;
+    }
+
+    .incident-form-times {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.75rem;
+
+        @media screen and (max-width: $mobile) {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .incident-form-actions {
+        display: flex;
+        gap: 0.5rem;
+
+        button:not(.primary-button) {
+            cursor: pointer;
+            border: 1px solid $color-separator;
+            background-color: $background-base;
+            color: $color-text;
+            border-radius: $border-radius-small;
+            padding: 0.4rem 0.9rem;
+        }
+    }
+}
+
 // Tighten markdown output so it sits naturally inside cards.
 .markdown {
     line-height: 1.5;

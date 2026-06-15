@@ -7,6 +7,20 @@ ui:
   enabled: true
   listen: 127.0.0.1:3002
 
+  # Optionally enable UI-driven incident management. When configured, an
+  # administrator can sign in (browser-side OIDC + PKCE) to create and manage
+  # incidents. The OIDC client must be a public/SPA client (PKCE, no secret)
+  # with the status page origin registered as a redirect URI and CORS allowed
+  # on its token endpoint. See docs/ui/incidents.md for details.
+  #
+  # admin:
+  #   # filt-rs expression over the signed-in user's claims; defaults to deny-all.
+  #   acl: 'claims.email == "you@example.com"'
+  #   oidc:
+  #     endpoint: https://auth.example.com
+  #     client_id: grey-status-page
+  #     scopes: [profile, email]
+
 probes:
   # A probe validated entirely with checks.
   - name: example.checks

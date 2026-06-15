@@ -81,6 +81,7 @@ export default defineUserConfig({
           '/ui/README.md',
           '/ui/links.md',
           '/ui/notices.md',
+          '/ui/incidents.md',
         ]
       },
       {
@@ -147,6 +148,7 @@ export default defineUserConfig({
             '/ui/README.md',
             '/ui/links.md',
             '/ui/notices.md',
+            '/ui/incidents.md',
           ]
         }
       ]

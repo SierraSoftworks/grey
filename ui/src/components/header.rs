@@ -1,6 +1,6 @@
 use super::cluster_status::ClusterStatus;
 use super::status::{Status, StatusLevel};
-use crate::contexts::use_ui_config;
+use crate::contexts::{use_auth, use_ui_config};
 use crate::routes::Route;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -14,6 +14,7 @@ pub struct HeaderProps {
 #[function_component(Header)]
 pub fn header(props: &HeaderProps) -> Html {
     let config_ctx = use_ui_config();
+    let auth = use_auth();
     let menu_open = use_state(|| false);
 
     let toggle_menu = {
@@ -46,6 +47,15 @@ pub fn header(props: &HeaderProps) -> Html {
             <div class="header-controls">
                 <ClusterStatus />
                 <Status status={props.status} text={props.status_text.clone()} />
+
+                if auth.is_authenticated() {
+                    <span class="admin-user">
+                        { auth.user.as_ref().and_then(|u| u.email.clone().or_else(|| u.name.clone())).unwrap_or_else(|| "Admin".to_string()) }
+                    </span>
+                    <button class="auth-button" onclick={auth.logout.reform(|_| ())}>{"Sign out"}</button>
+                } else if auth.configured {
+                    <button class="auth-button" onclick={auth.login.reform(|_| ())}>{"Sign in"}</button>
+                }
 
                 <button class="menu-toggle" onclick={toggle_menu}>
                     <div class="hamburger">

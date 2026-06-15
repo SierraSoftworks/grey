@@ -1,3 +1,5 @@
+mod api;
+mod auth;
 mod client;
 mod components;
 mod contexts;
