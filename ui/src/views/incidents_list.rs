@@ -52,7 +52,10 @@ struct AdminIncidentsListProps {
 #[cfg(feature = "wasm")]
 #[function_component(AdminIncidentsList)]
 fn admin_incidents_list(props: &AdminIncidentsListProps) -> Html {
-    let incidents = use_state(Vec::<Incident>::new);
+    // Seed from the shared in-memory list so the page shows immediately (reflecting any just-made
+    // create/edit/delete), then fetch the full admin list in the background to include hidden drafts.
+    let ctx = use_incidents();
+    let incidents = use_state(|| ctx.incidents.clone());
     let error = use_state(|| Option::<String>::None);
 
     {

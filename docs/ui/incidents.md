@@ -21,9 +21,10 @@ shown on the page is the worst impact among the active incidents. Posting a
 
 Incidents appear beneath the probes on the status page — the page's top-line
 status turns amber or red while any incident is active — and in full on the
-dedicated **Incidents** page. Each incident is shown as a vertical timeline of
-its updates, every update a card coloured by its impact, with the connecting line
-keeping each update's colour until the next one.
+dedicated **Incidents** page (most recently updated first). Each incident is
+shown as a vertical timeline of its updates — most recent at the top — every
+update a card coloured by its impact, with the connecting line keeping each
+update's colour down to the next one.
 
 ::: tip
 Incidents are stored locally in Grey's state database (`state.redb`) as JSON.

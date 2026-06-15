@@ -19,7 +19,29 @@ pub enum ClientMsg {
     UpdateProbes(Vec<grey_api::Probe>),
     UpdatePeers(Vec<grey_api::Peer>),
     UpdateIncidents(Vec<grey_api::Incident>),
+    /// Optimistically insert/replace a single incident (after an admin create or edit), without
+    /// waiting for the next poll.
+    UpsertIncident(grey_api::Incident),
+    /// Optimistically remove a single incident (after an admin delete).
+    RemoveIncident(grey_api::Identifier),
     Error(String),
+}
+
+/// Sorts incidents most-recently-updated first (those with no updates sort last), mirroring the
+/// server's ordering so optimistic insertions land in the right place.
+fn sort_incidents(incidents: &mut [grey_api::Incident]) {
+    incidents.sort_by(|a, b| b.last_updated().cmp(&a.last_updated()));
+}
+
+/// Inserts or replaces an incident in the shared (public) list. The list mirrors the unauthenticated
+/// view, so an incident that is now hidden is dropped rather than shown.
+#[cfg(feature = "wasm")]
+fn apply_incident_upsert(incidents: &mut Vec<grey_api::Incident>, incident: grey_api::Incident) {
+    incidents.retain(|i| i.id != incident.id);
+    if incident.is_public() {
+        incidents.push(incident);
+    }
+    sort_incidents(incidents);
 }
 
 // Main App component that provides all contexts
@@ -29,6 +51,9 @@ pub struct App {
     peers: Vec<grey_api::Peer>,
     incidents: Vec<grey_api::Incident>,
     has_error: bool,
+    // Stable callbacks handed to the IncidentsProvider so descendants can mutate the in-memory list.
+    upsert_incident: Callback<grey_api::Incident>,
+    remove_incident: Callback<grey_api::Identifier>,
 }
 
 // SSR-compatible version that just takes props
@@ -123,12 +148,27 @@ impl Component for App {
     type Properties = AppProps;
 
     fn create(ctx: &Context<Self>) -> Self {
+        let mut incidents = ctx.props().incidents.clone();
+        sort_incidents(&mut incidents);
+
+        // Wire the optimistic-update callbacks to messages on the client; SSR gets inert no-ops.
+        #[cfg(feature = "wasm")]
+        let upsert_incident = ctx.link().callback(ClientMsg::UpsertIncident);
+        #[cfg(feature = "wasm")]
+        let remove_incident = ctx.link().callback(ClientMsg::RemoveIncident);
+        #[cfg(not(feature = "wasm"))]
+        let upsert_incident = Callback::<grey_api::Incident>::noop();
+        #[cfg(not(feature = "wasm"))]
+        let remove_incident = Callback::<grey_api::Identifier>::noop();
+
         let app = Self {
             notices: ctx.props().notices.clone(),
             probes: ctx.props().probes.clone(),
             peers: ctx.props().peers.clone(),
-            incidents: ctx.props().incidents.clone(),
+            incidents,
             has_error: false,
+            upsert_incident,
+            remove_incident,
         };
 
         #[cfg(feature = "wasm")]
@@ -178,11 +218,21 @@ impl Component for App {
                 Self::schedule_next_peers_poll(ctx);
                 changed
             }
-            ClientMsg::UpdateIncidents(incidents) => {
+            ClientMsg::UpdateIncidents(mut incidents) => {
+                sort_incidents(&mut incidents);
                 let changed = self.incidents != incidents;
                 self.incidents = incidents;
                 Self::schedule_next_incidents_poll(ctx);
                 changed
+            }
+            ClientMsg::UpsertIncident(incident) => {
+                apply_incident_upsert(&mut self.incidents, incident);
+                true
+            }
+            ClientMsg::RemoveIncident(id) => {
+                let before = self.incidents.len();
+                self.incidents.retain(|incident| incident.id != id);
+                self.incidents.len() != before
             }
             ClientMsg::Error(err) => {
                 gloo::console::error!("{}", err);
@@ -213,7 +263,11 @@ impl Component for App {
                         <NoticesProvider notices={self.notices.clone()}>
                             <ProbesProvider probes={self.probes.clone()}>
                                 <PeersProvider peers={self.peers.clone()}>
-                                    <IncidentsProvider incidents={self.incidents.clone()}>
+                                    <IncidentsProvider
+                                        incidents={self.incidents.clone()}
+                                        upsert={self.upsert_incident.clone()}
+                                        remove={self.remove_incident.clone()}
+                                    >
                                         { self.render_router(ctx) }
                                     </IncidentsProvider>
                                 </PeersProvider>

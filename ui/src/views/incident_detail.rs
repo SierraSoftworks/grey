@@ -73,6 +73,8 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
     // their message as markdown.
     let editing = use_state(|| Option::<usize>::None);
     let navigator = use_navigator();
+    // The shared in-memory list, so saves/deletes are reflected everywhere without a refetch.
+    let incidents = crate::contexts::use_incidents();
 
     // Load the incident (including hidden) once.
     {
@@ -177,6 +179,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
         let error = error.clone();
         let saving = saving.clone();
         let editing = editing.clone();
+        let upsert = incidents.upsert.clone();
         Callback::from(move |_| {
             let edit = IncidentEdit {
                 title: (*title).trim().to_string(),
@@ -190,6 +193,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
             let error = error.clone();
             let saving = saving.clone();
             let editing = editing.clone();
+            let upsert = upsert.clone();
             saving.set(true);
             wasm_bindgen_futures::spawn_local(async move {
                 let result = crate::api::replace_incident(&token, &id, version, &edit).await;
@@ -198,6 +202,8 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                     Ok(incident) => {
                         title.set(incident.title.clone());
                         updates.set(incident.sorted_updates().into_iter().cloned().collect());
+                        // Reflect the saved incident in the shared list immediately.
+                        upsert.emit(incident.clone());
                         loaded.set(Some(incident));
                         error.set(None);
                         editing.set(None);
@@ -211,16 +217,21 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
     let on_delete = {
         let token = props.token.clone();
         let id = current.id.to_string();
+        let id_value = current.id;
         let navigator = navigator.clone();
         let error = error.clone();
+        let remove = incidents.remove.clone();
         Callback::from(move |_| {
             let token = token.clone();
             let id = id.clone();
             let navigator = navigator.clone();
             let error = error.clone();
+            let remove = remove.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 match crate::api::delete_incident(&token, &id).await {
                     Ok(()) => {
+                        // Drop it from the shared list before leaving the page.
+                        remove.emit(id_value);
                         if let Some(nav) = navigator {
                             nav.push(&Route::Incidents);
                         }
@@ -263,7 +274,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                 }
 
                 <ul class="incident-timeline editing">
-                    { for (*updates).iter().enumerate().map(|(i, update)| {
+                    { for (*updates).iter().enumerate().rev().map(|(i, update)| {
                         let class = impact_class(update.impact);
                         // An update is "posted" once it is part of the loaded incident: its impact then
                         // becomes fixed and only its message stays editable. New (unsaved) updates keep
@@ -274,8 +285,10 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                             <li class="timeline-item">
                                 <div class="timeline-rail">
                                     <span class={classes!("timeline-circle", class)}></span>
-                                    if i + 1 != updates.len() {
-                                        <span class={classes!("timeline-tail", class)}></span>
+                                    // Updates render newest-first; the line runs down to the older one
+                                    // below, carrying that older update's colour.
+                                    if i != 0 {
+                                        <span class={classes!("timeline-tail", impact_class((*updates)[i - 1].impact))}></span>
                                     }
                                 </div>
                                 <div class="timeline-body">

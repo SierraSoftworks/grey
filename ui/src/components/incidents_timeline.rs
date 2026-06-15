@@ -221,7 +221,8 @@ pub struct VerticalTimelineProps {
 #[function_component(VerticalTimeline)]
 pub fn vertical_timeline(props: &VerticalTimelineProps) -> Html {
     let mut updates = props.updates.clone();
-    updates.sort_by_key(|u| u.timestamp);
+    // Most recent update first.
+    updates.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
     if updates.is_empty() {
         return html! { <p class="incidents-empty">{"No updates yet."}</p> };
     }
@@ -231,12 +232,15 @@ pub fn vertical_timeline(props: &VerticalTimelineProps) -> Html {
         <ul class="incident-timeline">
             { for updates.iter().enumerate().map(|(i, update)| {
                 let class = impact_class(update.impact);
+                // The line below this update runs down to the older one, so it carries that older
+                // update's colour (the state that held during the interval between them).
+                let tail_class = if i != last { impact_class(updates[i + 1].impact) } else { class };
                 html! {
                     <li class="timeline-item">
                         <div class="timeline-rail">
                             <span class={classes!("timeline-circle", class)}></span>
                             if i != last {
-                                <span class={classes!("timeline-tail", class)}></span>
+                                <span class={classes!("timeline-tail", tail_class)}></span>
                             }
                         </div>
                         <div class="timeline-body">
