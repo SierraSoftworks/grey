@@ -183,7 +183,6 @@ impl ProbeRunner {
         }
         .await;
 
-        sample.duration = chrono::Utc::now() - sample.start_time;
 
         Span::current().record("probe.attempts", sample.retries);
 
@@ -200,7 +199,7 @@ impl ProbeRunner {
         };
 
         self.state
-            .update_probe_state(self.name().as_str(), &sample)
+            .update_probe_state(self.name().as_str(), sample.finish())
             .await?;
         result
     }

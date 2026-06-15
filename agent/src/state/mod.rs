@@ -74,7 +74,7 @@ impl State {
             std::time::Instant::now(),
         );
         this.update_probe_config(test_probe).await.unwrap();
-        this.update_probe_state(&test_probe.name, &ProbeResult::test()).await.unwrap();
+        this.update_probe_state(&test_probe.name, ProbeResult::test()).await.unwrap();
 
         this
     }

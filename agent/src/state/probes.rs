@@ -28,7 +28,7 @@ pub trait ProbeStore {
     async fn update_probe_state(
         &self,
         probe_name: &str,
-        probe_result: &ProbeResult,
+        probe_result: ProbeResult,
     ) -> Result<(), Box<dyn Error>>;
 
     /// Drops probe records that have aged out beyond the configured expiry.
@@ -97,7 +97,7 @@ impl ProbeStore for State {
     async fn update_probe_state(
         &self,
         probe_name: &str,
-        probe_result: &ProbeResult,
+        probe_result: ProbeResult,
     ) -> Result<(), Box<dyn Error>> {
         let txn = self.database.begin_write()?;
 

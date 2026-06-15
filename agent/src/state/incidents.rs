@@ -11,7 +11,7 @@ use tracing_batteries::prelude::*;
 
 use super::State;
 
-const INCIDENTS_TABLE: TableDefinition<u32, &[u8]> = TableDefinition::new("incidents");
+const INCIDENTS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("incidents");
 
 /// The result of a check-and-set [`IncidentStore::replace_incident`].
 pub enum CasOutcome {
@@ -79,7 +79,7 @@ impl IncidentStore for State {
     async fn get_incident(&self, id: Identifier) -> Result<Option<Incident>, Box<dyn Error>> {
         let txn = self.database.begin_read()?;
         if let Ok(table) = txn.open_table(INCIDENTS_TABLE)
-            && let Some(value) = table.get(u32::from(id))?
+            && let Some(value) = table.get(u64::from(id))?
         {
             return Ok(Some(serde_json::from_slice::<Incident>(value.value())?));
         }
@@ -95,10 +95,10 @@ impl IncidentStore for State {
         let incident = {
             let mut table = txn.open_table(INCIDENTS_TABLE)?;
 
-            let mut key = rand::random::<u32>();
+            let mut key = rand::random::<u64>();
             let mut attempts = 0;
             while table.get(key)?.is_some() {
-                key = rand::random::<u32>();
+                key = rand::random::<u64>();
                 attempts += 1;
                 if attempts > 1000 {
                     return Err("could not allocate a unique incident id".into());
@@ -124,7 +124,7 @@ impl IncidentStore for State {
         expected_version: u64,
         edit: IncidentEdit,
     ) -> Result<CasOutcome, Box<dyn Error>> {
-        let key = u32::from(id);
+        let key = u64::from(id);
         let txn = self.database.begin_write()?;
         let outcome = {
             let mut table = txn.open_table(INCIDENTS_TABLE)?;
@@ -158,7 +158,7 @@ impl IncidentStore for State {
         let txn = self.database.begin_write()?;
         let existed = {
             let mut table = txn.open_table(INCIDENTS_TABLE)?;
-            table.remove(u32::from(id))?.is_some()
+            table.remove(u64::from(id))?.is_some()
         };
         txn.commit()?;
         Ok(existed)
@@ -231,7 +231,7 @@ mod tests {
 
         // Unknown id -> not found.
         assert!(matches!(
-            state.replace_incident(Identifier::from(424242u32), 1, IncidentEdit { title: "x".into(), updates: vec![] }).await.unwrap(),
+            state.replace_incident(Identifier::from(424242u64), 1, IncidentEdit { title: "x".into(), updates: vec![] }).await.unwrap(),
             CasOutcome::NotFound
         ));
     }
