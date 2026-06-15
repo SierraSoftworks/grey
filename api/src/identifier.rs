@@ -10,10 +10,10 @@ const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
 /// the human-friendly form used in URLs and the UI; the underlying numeric value is what the store
 /// keys on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-pub struct Identifier(u32);
+pub struct Identifier(u64);
 
 impl Identifier {
-    pub const fn new(value: u32) -> Self {
+    pub const fn new(value: u64) -> Self {
         Self(value)
     }
 
@@ -24,7 +24,7 @@ impl Identifier {
         if cleaned.is_empty() {
             return None;
         }
-        u32::from_str_radix(&cleaned, 36).ok().map(Self)
+        u64::from_str_radix(&cleaned, 36).ok().map(Self)
     }
 }
 
@@ -42,7 +42,7 @@ impl fmt::Display for Identifier {
         chars.reverse();
 
         let grouped = chars
-            .chunks(3)
+            .chunks(4)
             .map(|chunk| std::str::from_utf8(chunk).unwrap_or_default())
             .collect::<Vec<_>>()
             .join("-");
@@ -50,14 +50,14 @@ impl fmt::Display for Identifier {
     }
 }
 
-impl From<u32> for Identifier {
-    fn from(value: u32) -> Self {
+impl From<u64> for Identifier {
+    fn from(value: u64) -> Self {
         Self(value)
     }
 }
 
-impl From<Identifier> for u32 {
-    fn from(id: Identifier) -> u32 {
+impl From<Identifier> for u64 {
+    fn from(id: Identifier) -> u64 {
         id.0
     }
 }
@@ -107,11 +107,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn round_trips_through_string_and_u32() {
-        for value in [0u32, 1, 35, 36, 1_234_567, u32::MAX] {
+    fn round_trips_through_string_and_u64() {
+        for value in [0u64, 1, 35, 36, 1_234_567, u64::MAX] {
             let id = Identifier::from(value);
-            // Into<u32> recovers the value.
-            assert_eq!(u32::from(id), value);
+            // Into<u64> recovers the value.
+            assert_eq!(u64::from(id), value);
             // Display -> parse round-trips.
             assert_eq!(Identifier::parse(&id.to_string()), Some(id));
             // serde round-trips through the grouped-base36 string.
@@ -121,9 +121,9 @@ mod tests {
     }
 
     #[test]
-    fn display_groups_in_threes() {
-        let encoded = Identifier::from(u32::MAX).to_string();
-        assert!(encoded.split('-').all(|g| (1..=3).contains(&g.len())), "bad grouping: {encoded}");
+    fn display_groups_in_fours() {
+        let encoded = Identifier::from(u64::MAX).to_string();
+        assert!(encoded.split('-').all(|g| (1..=4).contains(&g.len())), "bad grouping: {encoded}");
     }
 
     #[test]
@@ -134,12 +134,12 @@ mod tests {
         assert!("".parse::<Identifier>().is_err());
         assert!("!!".parse::<Identifier>().is_err());
         // lenient From<&str> falls back to zero
-        assert_eq!(Identifier::from("!!"), Identifier::from(0u32));
+        assert_eq!(Identifier::from("!!"), Identifier::from(0u64));
     }
 
     #[test]
     fn serializes_as_a_json_string() {
-        assert_eq!(serde_json::to_string(&Identifier::from(0u32)).unwrap(), "\"0\"");
+        assert_eq!(serde_json::to_string(&Identifier::from(0u64)).unwrap(), "\"0\"");
         assert!(serde_json::from_str::<Identifier>("\"!!\"").is_err());
     }
 }
