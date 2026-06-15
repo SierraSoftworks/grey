@@ -108,18 +108,23 @@ with no (or an invalid) token receives `401`.
 Once signed in, the **Incidents** page shows every incident (including hidden
 drafts), and each incident's own page becomes editable:
 
-- **New incident** — opens a dedicated page for a title and the incident's
-  opening update (an impact and a markdown message). Saving creates the incident
-  with that first update and takes you to its page.
-- **Edit** — on an incident's page, click any field (the title, or an update's
-  impact or message) to change it. A **Save** control appears at the top-right as
+- **Declare Incident** — the button on the Incidents page opens a dedicated page
+  for a title and the incident's opening update (an impact and a markdown
+  message). Saving creates the incident with that first update and takes you to
+  its page.
+- **Edit the title or a message** — on an incident's page, click the title to
+  change it, and click an update's edit (pencil) icon to switch its message from
+  the rendered markdown to a textarea. A **Save** icon appears at the top-right as
   soon as there are unsaved changes. Saving is an atomic check-and-set, so an
   edit made against a stale version is rejected rather than overwriting a
   concurrent change.
-- **Add / remove updates** — add a new update, or remove an existing one, from
-  the incident's page, then save. The latest update sets the incident's current
-  impact, so posting a visible update publishes a draft and posting a `none`
-  update resolves the incident.
+- **An update's impact is fixed once posted** — you choose an update's impact
+  when you add it; after it has been saved, only its message can be changed (the
+  impact records what the status was at that point on the timeline). The latest
+  update sets the incident's current impact, so adding a visible update publishes
+  a draft and adding a `none` update resolves the incident.
+- **Add / remove updates** — add a new update (pick its impact and write its
+  message), or remove an unsaved one, then save.
 - **Delete** — remove the incident permanently.
 
 Signing in is via the **Sign in** button in the header; once signed in, hover the
