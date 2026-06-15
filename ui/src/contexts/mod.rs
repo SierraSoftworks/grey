@@ -1,9 +1,9 @@
-pub mod auth;
-pub mod config;
-pub mod incidents;
-pub mod notices;
-pub mod peers;
-pub mod probes;
+mod auth;
+mod config;
+mod incidents;
+mod notices;
+mod peers;
+mod probes;
 
 pub use auth::{AuthContext, AuthProvider, use_auth};
 pub use config::{UiConfigContext, UiConfigProvider, use_ui_config};
