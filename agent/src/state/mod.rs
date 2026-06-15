@@ -12,7 +12,6 @@ use tracing_batteries::prelude::*;
 use crate::{
     Config,
     cluster::{self, ClusterStateDigest, Membership, MembershipConfig, NodeID, Versioned},
-    result::ProbeResult,
 };
 use crate::cluster::GossipStore;
 
@@ -74,7 +73,7 @@ impl State {
             std::time::Instant::now(),
         );
         this.update_probe_config(test_probe).await.unwrap();
-        this.update_probe_state(&test_probe.name, ProbeResult::test()).await.unwrap();
+        this.update_probe_state(&test_probe.name, crate::result::ProbeResult::test()).await.unwrap();
 
         this
     }

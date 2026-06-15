@@ -285,11 +285,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                             <li class="timeline-item">
                                 <div class="timeline-rail">
                                     <span class={classes!("timeline-circle", class)}></span>
-                                    // Updates render newest-first; the line runs down to the older one
-                                    // below, carrying that older update's colour.
-                                    if i != 0 {
-                                        <span class={classes!("timeline-tail", impact_class((*updates)[i - 1].impact))}></span>
-                                    }
+                                    <span class={classes!("timeline-tail", class)}></span>
                                 </div>
                                 <div class="timeline-body">
                                     if posted {

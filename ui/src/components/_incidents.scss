@@ -23,6 +23,7 @@
     color: $color-status-text;
     background-color: $color-status-offline;
     white-space: nowrap;
+    margin: 0 0.5rem;
 }
 
 .incidents-section {
@@ -72,6 +73,7 @@
 .incident-id {
     font-family: monospace;
     font-size: 0.8rem;
+    margin-left: 0.5rem;
     color: $color-text-muted;
 }
 
@@ -428,8 +430,24 @@
         gap: 0.85rem;
         align-items: stretch;
 
-        &:last-child .timeline-body {
-            padding-bottom: 0;
+        &:last-child {
+            .timeline-body {
+                padding-bottom: 0;
+            }
+
+            .timeline-tail {
+                &.ok {
+                    background: linear-gradient( to bottom, $color-status-ok calc(100% - 2rem), $background-base);
+                }
+
+                &.warn {
+                    background: linear-gradient( to bottom, $color-status-warn calc(100% - 2rem), $background-base);
+                }
+
+                &.error {
+                    background: linear-gradient( to bottom, $color-status-error calc(100% - 2rem), $background-base);
+                }
+            }
         }
     }
 
@@ -493,25 +511,7 @@
 
     .timeline-card {
         margin-top: 0.35rem;
-        border: 1px solid $color-separator;
-        border-left: 4px solid $color-status-offline;
-        border-radius: $border-radius-small;
-        background-color: $background-base;
         padding: 0.75rem 1rem;
-
-        &.ok {
-            border-left-color: $color-status-ok;
-        }
-        &.warn {
-            border-left-color: $color-status-warn;
-        }
-        &.error {
-            border-left-color: $color-status-error;
-        }
-
-        .incident-status-pill {
-            margin-bottom: 0.4rem;
-        }
 
         .timeline-card-message {
             font-size: 0.9rem;
@@ -600,10 +600,10 @@
         font: inherit;
         font-size: 1.3rem;
         font-weight: 400;
-        padding: 0.25rem 0.5rem;
+        padding: 0;
         color: $color-text;
         background-color: transparent;
-        border: 1px solid transparent;
+        border: 0px solid transparent;
         border-radius: $border-radius-small;
 
         &:hover {

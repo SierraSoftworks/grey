@@ -2,13 +2,13 @@
 
 // History and tooltip styles
 .history {
-    height: 1.2rem;
+    height: 0.6rem;
     display: flex;
     flex-direction: row;
     justify-content: flex-end;
     align-content: center;
-    margin-top: 1rem;
-    border-radius: 4px;
+    margin-top: 0.4rem;
+    border-radius: 3px;
     box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.5);
 }
 
@@ -28,10 +28,10 @@
         border-bottom-right-radius: $border-radius-small;
     }
 
-    &:hover {
-        border-left: 0.5px solid $color-separator;
-        border-right: 0.5px solid $color-separator;
-    }
+    // &:hover {
+    //     border-left: 0.5px solid $color-separator;
+    //     border-right: 0.5px solid $color-separator;
+    // }
 
     &.ok {
         background-color: $color-status-ok;
@@ -187,6 +187,9 @@
     font-weight: 600;
     color: $color-text;
     font-size: 0.7rem;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
 }
 
 .tooltip-section-entry-message {

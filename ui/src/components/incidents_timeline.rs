@@ -37,7 +37,17 @@ pub fn impact_label(impact: Impact) -> &'static str {
 pub fn incident_status(incident: &Incident) -> (String, &'static str) {
     match incident.current_impact() {
         Impact::Hidden => ("Draft".to_string(), "draft"),
-        Impact::None => ("Resolved".to_string(), "ok"),
+        Impact::None => {
+            let start = incident.started_at();
+            let end = incident.ended_at();
+            match (start, end) {
+                (Some(s), Some(e)) if e > s => {
+                    let duration = compact_duration(e.signed_duration_since(s));
+                    (format!("Resolved after {duration}"), "ok")
+                }
+                _ => ("Resolved".to_string(), "ok"),
+            }
+        },
         impact @ (Impact::Offline | Impact::Degraded) => {
             let since = incident.impact_since().or_else(|| incident.started_at());
             let held = since
@@ -202,7 +212,7 @@ pub fn incident_block(props: &IncidentBlockProps) -> Html {
                             {&incident.title}
                         </Link<Route>>
                     </h3>
-                    <span class="incident-id">{format!("#{}", incident.id)}</span>
+                    <span class="incident-id">{format!("{}", incident.id)}</span>
                 </div>
                 <span class={classes!("incident-streak", status_class)}>{status_text}</span>
             </div>
@@ -226,27 +236,23 @@ pub fn vertical_timeline(props: &VerticalTimelineProps) -> Html {
     if updates.is_empty() {
         return html! { <p class="incidents-empty">{"No updates yet."}</p> };
     }
-    let last = updates.len() - 1;
 
     html! {
         <ul class="incident-timeline">
             { for updates.iter().enumerate().map(|(i, update)| {
                 let class = impact_class(update.impact);
-                // The line below this update runs down to the older one, so it carries that older
-                // update's colour (the state that held during the interval between them).
-                let tail_class = if i != last { impact_class(updates[i + 1].impact) } else { class };
                 html! {
                     <li class="timeline-item">
                         <div class="timeline-rail">
                             <span class={classes!("timeline-circle", class)}></span>
-                            if i != last {
-                                <span class={classes!("timeline-tail", tail_class)}></span>
-                            }
+                            <span class={classes!("timeline-tail", class)}></span>
                         </div>
                         <div class="timeline-body">
-                            <div class="timeline-time">{time_format(update.timestamp)}</div>
-                            <div class={classes!("timeline-card", class)}>
+                            <div class="timeline-time">
                                 <span class={classes!("incident-status-pill", class)}>{impact_label(update.impact)}</span>
+                                {time_format(update.timestamp)}
+                            </div>
+                            <div class={classes!("timeline-card", class)}>
                                 <div class="timeline-card-message markdown">{ render_markdown(&update.message) }</div>
                             </div>
                         </div>
@@ -271,7 +277,7 @@ mod tests {
     }
 
     fn incident(updates: Vec<IncidentUpdate>) -> Incident {
-        Incident { id: Identifier::from(1_234_567u32), title: "DB outage".into(), version: 1, updates }
+        Incident { id: Identifier::from(1_234_567u64), title: "DB outage".into(), version: 1, updates }
     }
 
     async fn render_block(incident: Incident) -> String {

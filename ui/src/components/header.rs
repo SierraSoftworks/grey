@@ -1,18 +1,11 @@
 use super::cluster_status::ClusterStatus;
-use super::status::{Status, StatusLevel};
 use crate::contexts::{use_auth, use_ui_config};
 use crate::routes::Route;
 use yew::prelude::*;
 use yew_router::prelude::*;
 
-#[derive(Properties, PartialEq)]
-pub struct HeaderProps {
-    pub status: StatusLevel,
-    pub status_text: String,
-}
-
 #[function_component(Header)]
-pub fn header(props: &HeaderProps) -> Html {
+pub fn header() -> Html {
     let config_ctx = use_ui_config();
     let auth = use_auth();
     let menu_open = use_state(|| false);
@@ -52,8 +45,9 @@ pub fn header(props: &HeaderProps) -> Html {
             </nav>
 
             <div class="header-controls">
-                <ClusterStatus />
-                <Status status={props.status} text={props.status_text.clone()} />
+                if auth.is_authenticated() {
+                    <ClusterStatus />
+                }
 
                 if auth.is_authenticated() {
                     // One control: shows the user, reveals a "Sign out" overlay on hover, and signs

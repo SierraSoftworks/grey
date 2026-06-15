@@ -28,7 +28,7 @@
 
 // Section styling
 .section {
-    padding: 2rem;
+    padding: 1rem 2rem;
 
     // First and last child rounded corners
     &:first-child {
@@ -75,6 +75,8 @@
 
     // Fill variants with status colors
     &.fill {
+        padding: 2rem;
+
         &.ok {
             color: $color-status-text;
             background-color: $color-status-ok;

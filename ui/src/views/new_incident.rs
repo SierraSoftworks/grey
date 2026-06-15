@@ -131,8 +131,8 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
                         <option value="hidden" selected={*impact == "hidden"}>{"Hidden (draft)"}</option>
                     </select>
                 </label>
-                <label>{"Initial update (markdown)"}
-                    <textarea rows="4" value={(*message).clone()} oninput={on_message} />
+                <label>{"Initial update"}
+                    <textarea rows="4" value={(*message).clone()} oninput={on_message} placeholder="Enter initial update in markdown form..." />
                 </label>
                 <div class="incident-form-actions">
                     <button type="submit" class="primary-button" disabled={*saving}>

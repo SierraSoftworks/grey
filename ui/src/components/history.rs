@@ -1,7 +1,7 @@
 use grey_api::ProbeHistoryBucket;
 use yew::prelude::*;
 
-use crate::formatters::{availability, si_magnitude};
+use crate::formatters::availability;
 
 #[cfg(feature = "wasm")]
 use {
@@ -31,6 +31,7 @@ struct TooltipData {
 
 #[function_component(History)]
 pub fn history(props: &HistoryProps) -> Html {
+    let auth_data = use_context::<crate::contexts::AuthContext>().expect("AuthContext not found");
     let tooltip_data = use_state(TooltipData::default);
 
     #[cfg(feature = "wasm")]
@@ -128,7 +129,7 @@ pub fn history(props: &HistoryProps) -> Html {
                     >
                         if is_tooltip_target {
                             if let Some(probe_result) = &tooltip_data.probe_result {
-                                {render_tooltip(probe_result, current_streak)}
+                                {render_tooltip(probe_result, current_streak, auth_data.is_authenticated())}
                             } else {
                                 // Fallback for SSR or when probe_result is None
                                 <div class="tooltip visible">
@@ -152,7 +153,7 @@ pub fn history(props: &HistoryProps) -> Html {
     }
 }
 
-fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::Streak>) -> Html {
+fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::Streak>, include_observers: bool) -> Html {
     let (status_text, status_class) = match streak {
         Some(streak) if streak.passing() => ("Passing", "ok"),
         Some(_) => ("Failing", "error"),
@@ -176,8 +177,6 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::S
         humantime::format_duration(overall_stats.average_latency())
     );
 
-    let samples = si_magnitude(overall_stats.total_samples as f64, "");
-
     let mut relevant_observations = probe_result.observations.iter().collect::<Vec<_>>();
     relevant_observations.sort_by(|a, b| a.1.success_rate().partial_cmp(&b.1.success_rate()).unwrap_or(std::cmp::Ordering::Equal)); // (|(_, obs)| obs.success_rate());
     relevant_observations.truncate(probe_result.validations.len().max(3));
@@ -190,45 +189,35 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::S
                 {status_text}
             </div>
             <div class="tooltip-details">
+                if !probe_result.message.is_empty() {
+                    <div class="tooltip-row">
+                        <span>{&probe_result.message}</span>
+                    </div>
+                }
                 <div class="tooltip-row">
                     <span class="tooltip-label">{"Bucket:"}</span>
                     <span>{timestamp}</span>
                 </div>
-                if let Some(streak) = streak {
-                    if let Some(since) = streak.since() {
-                        <div class="tooltip-row">
-                            <span class="tooltip-label">{"Since:"}</span>
-                            <span>{since.format("%Y-%m-%d %H:%M:%S UTC").to_string()}</span>
-                        </div>
-                    }
-                }
                 <div class="tooltip-row">
                     <span class="tooltip-label">{"Latency:"}</span>
                     <span>{duration_text}</span>
                 </div>
                 <div class="tooltip-row">
                     <span class="tooltip-label">{"Availability:"}</span>
-                    <span>{availability(overall_stats.success_rate())}</span>
+                    <span>{format!("{} ± {:.1}%", availability(overall_stats.success_rate()), overall_stats.success_rate_error_margin())}</span>
                 </div>
-                <div class="tooltip-row">
-                    <span class="tooltip-label">{"Retry Rate:"}</span>
-                    <span>{format!("{:.1}%", overall_stats.retry_rate())}</span>
-                </div>
-                <div class="tooltip-row">
-                    <span class="tooltip-label">{"Samples:"}</span>
-                    <span>{samples}</span>
-                </div>
-                if !probe_result.message.is_empty() {
+                
+                if overall_stats.total_retries > 0 {
                     <div class="tooltip-row">
-                        <span class="tooltip-label">{"Message:"}</span>
-                        <span>{&probe_result.message}</span>
+                        <span class="tooltip-label">{"Retry Rate:"}</span>
+                        <span>{format!("{:.1}%", overall_stats.retry_rate())}</span>
                     </div>
                 }
             </div>
 
-            if !probe_result.validations.is_empty() || probe_result.observations.len() > 1 {
+            if !probe_result.validations.is_empty() || (probe_result.observations.len() > 1 && include_observers) {
                 <div class="tooltip-context">
-                    if probe_result.observations.len() > 1 {
+                    if include_observers && probe_result.observations.len() > 1 {
                         <div class="tooltip-section">
                             <div class="tooltip-section-title">{"Observers"}</div>
                             {for relevant_observations.iter().map(|(name, observation)| {
@@ -254,7 +243,7 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::S
 
                     if !probe_result.validations.is_empty() {
                         <div class="tooltip-section">
-                            <div class="tooltip-section-title">{"Validations"}</div>
+                            <div class="tooltip-section-title">{"Checks"}</div>
                             {for probe_result.validations.iter().map(|(name, validation)| {
                                 let validation_class = if validation.pass { "ok" } else { "error" };
                                 html! {
@@ -262,7 +251,6 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::S
                                         <div class="tooltip-section-entry-header">
                                             <div class={format!("tooltip-status-dot {}", validation_class)}></div>
                                             <span class="tooltip-section-entry-name">{name}</span>
-                                            <span class="tooltip-section-entry-message">{&validation.condition}</span>
                                         </div>
                                         if let Some(ref msg) = validation.message {
                                             <div class="tooltip-section-entry-details">
@@ -294,7 +282,7 @@ mod tests {
     #[function_component(Harness)]
     fn harness(props: &HarnessProps) -> Html {
         let streak = (!props.streak.is_empty()).then_some(&props.streak);
-        render_tooltip(&props.bucket, streak)
+        render_tooltip(&props.bucket, streak, true)
     }
 
     async fn render(streak: grey_api::Streak) -> String {

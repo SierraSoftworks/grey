@@ -324,10 +324,7 @@ fn app_content(props: &AppContentProps) -> Html {
 
     html! {
         <>
-            <Header
-                status={if props.has_error { StatusLevel::Error } else { StatusLevel::Good }}
-                status_text={if props.has_error { "Error" } else { "OK" }}
-            />
+            <Header/>
 
             <Switch<Route> render={switch} />
 

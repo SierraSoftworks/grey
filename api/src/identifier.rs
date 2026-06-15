@@ -1,9 +1,8 @@
 use std::fmt;
 use std::str::FromStr;
+use base64::prelude::*;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
-
-const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
 
 /// A compact, URL-friendly identifier backed by a `u32`. It is serialized and displayed as lowercase
 /// base36 split into dash-separated groups of at most three characters (e.g. `1up-3mt-g`), which is
@@ -20,33 +19,22 @@ impl Identifier {
     /// Parses a grouped base36 string back into an identifier; dashes are ignored and letters are
     /// case-insensitive. Returns `None` for empty or out-of-range input.
     pub fn parse(text: &str) -> Option<Self> {
-        let cleaned: String = text.chars().filter(|c| *c != '-').collect();
-        if cleaned.is_empty() {
-            return None;
-        }
-        u64::from_str_radix(&cleaned, 36).ok().map(Self)
+        BASE64_URL_SAFE_NO_PAD.decode(text).ok().and_then(|bytes| {
+            if bytes.len() != 8 {
+                return None;
+            }
+            let mut value = 0u64;
+            for &byte in &bytes {
+                value = (value << 8) | byte as u64;
+            }
+            Some(Self(value))
+        })
     }
 }
 
 impl fmt::Display for Identifier {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut chars = Vec::new();
-        let mut n = self.0;
-        if n == 0 {
-            chars.push(b'0');
-        }
-        while n > 0 {
-            chars.push(DIGITS[(n % 36) as usize]);
-            n /= 36;
-        }
-        chars.reverse();
-
-        let grouped = chars
-            .chunks(4)
-            .map(|chunk| std::str::from_utf8(chunk).unwrap_or_default())
-            .collect::<Vec<_>>()
-            .join("-");
-        f.write_str(&grouped)
+        write!(f, "{}", BASE64_URL_SAFE_NO_PAD.encode(self.0.to_be_bytes()))
     }
 }
 
@@ -121,12 +109,6 @@ mod tests {
     }
 
     #[test]
-    fn display_groups_in_fours() {
-        let encoded = Identifier::from(u64::MAX).to_string();
-        assert!(encoded.split('-').all(|g| (1..=4).contains(&g.len())), "bad grouping: {encoded}");
-    }
-
-    #[test]
     fn from_str_is_strict_but_from_str_ref_is_lenient() {
         // dashes ignored, case-insensitive
         assert_eq!("1U-P3MT-G".parse::<Identifier>().ok(), "1up3mtg".parse::<Identifier>().ok());
@@ -139,7 +121,7 @@ mod tests {
 
     #[test]
     fn serializes_as_a_json_string() {
-        assert_eq!(serde_json::to_string(&Identifier::from(0u64)).unwrap(), "\"0\"");
-        assert!(serde_json::from_str::<Identifier>("\"!!\"").is_err());
+        assert_eq!(serde_json::to_string(&Identifier::from(0u64)).unwrap(), "\"AAAAAAAAAAA\"");
+        assert!(serde_json::from_str::<Identifier>("\"//\"").is_err());
     }
 }

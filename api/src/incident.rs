@@ -168,7 +168,7 @@ mod tests {
 
     fn sample(updates: Vec<IncidentUpdate>) -> Incident {
         Incident {
-            id: Identifier::from(1_234_567u32),
+            id: Identifier::from(1_234_567u64),
             title: "Database outage".into(),
             version: 1,
             updates,
