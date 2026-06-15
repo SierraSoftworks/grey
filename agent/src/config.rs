@@ -128,15 +128,19 @@ pub struct AdminConfig {
     pub oidc: OidcConfig,
 }
 
-/// OIDC provider configuration. The agent only needs to *validate* tokens, so no client secret is
-/// required (the browser is a public PKCE client).
+/// OIDC provider configuration. The browser runs the Authorization Code flow but hands the code to
+/// the agent for exchange, so the agent holds the confidential `client_secret`; it never reaches the
+/// browser.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct OidcConfig {
     /// The provider's issuer / base URL, used to discover endpoints and JWKS and as the expected
     /// token issuer.
     pub endpoint: String,
-    /// The public OAuth2 client id, also the expected audience of validated ID tokens.
+    /// The OAuth2 client id, also the expected audience of validated ID tokens. Surfaced to the SPA.
     pub client_id: String,
+    /// The OAuth2 client secret, used by the agent (only) to exchange authorization codes for
+    /// tokens. Never exposed to the browser.
+    pub client_secret: String,
     /// Additional scopes the SPA should request beyond the implicit `openid`.
     #[serde(default)]
     pub scopes: Vec<String>,

@@ -79,6 +79,10 @@ pub fn create_app() -> App<
         .route("/api/v1/notices", web::get().to(api::get_notices))
         .route("/api/v1/incidents", web::get().to(api::get_incidents))
         .route("/api/v1/cluster/peers", web::get().to(api::get_peers))
+        // Public login endpoints: the SPA fetches the provider's authorization endpoint, then hands
+        // the resulting authorization code here for the agent to exchange with its client secret.
+        .route("/api/v1/auth/metadata", web::get().to(auth::metadata))
+        .route("/api/v1/auth/token", web::post().to(auth::exchange_token))
         // Admin API: every route is guarded by OIDC bearer validation + the configured ACL.
         .service(
             web::scope("/api/v1/admin")
@@ -135,7 +139,7 @@ mod tests {
     async fn admin_routes_require_a_token_when_configured() {
         let dir = tempfile::tempdir().unwrap();
         let config = format!(
-            "ui:\n  enabled: true\n  listen: 127.0.0.1:0\n  admin:\n    acl: 'true'\n    oidc:\n      endpoint: https://issuer.example\n      client_id: test-client\nstate: {}\nprobes: []\n",
+            "ui:\n  enabled: true\n  listen: 127.0.0.1:0\n  admin:\n    acl: 'true'\n    oidc:\n      endpoint: https://issuer.example\n      client_id: test-client\n      client_secret: test-secret\nstate: {}\nprobes: []\n",
             dir.path().join("state.redb").display().to_string().replace('\\', "/")
         );
         let config_path = dir.path().join("config.yml");
@@ -146,6 +150,69 @@ mod tests {
         let req = test::TestRequest::get().uri("/api/v1/admin/incidents").to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), actix_web::http::StatusCode::UNAUTHORIZED);
+    }
+
+    /// The login endpoints surface the provider's authorization endpoint and exchange an
+    /// authorization code for a token server-side (using the client secret), against a mocked IdP.
+    #[actix_web::test]
+    async fn auth_metadata_and_code_exchange() {
+        use actix_web::body::MessageBody;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let issuer = server.uri();
+
+        Mock::given(method("GET"))
+            .and(path("/.well-known/openid-configuration"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "issuer": issuer,
+                "jwks_uri": format!("{issuer}/jwks"),
+                "authorization_endpoint": format!("{issuer}/authorize"),
+                "token_endpoint": format!("{issuer}/token"),
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({ "id_token": "header.payload.sig" })),
+            )
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let config = format!(
+            "ui:\n  enabled: true\n  listen: 127.0.0.1:0\n  admin:\n    acl: 'true'\n    oidc:\n      endpoint: {issuer}\n      client_id: test-client\n      client_secret: test-secret\nstate: {}\nprobes: []\n",
+            dir.path().join("state.redb").display().to_string().replace('\\', "/")
+        );
+        let config_path = dir.path().join("config.yml");
+        tokio::fs::write(&config_path, config).await.unwrap();
+        let data = web::Data::new(AppState::new(State::new(&config_path).await.unwrap()));
+
+        // Metadata exposes the provider's authorization endpoint.
+        let resp = auth::metadata(data.clone()).await.unwrap();
+        assert_eq!(resp.status(), actix_web::http::StatusCode::OK);
+        let body: serde_json::Value =
+            serde_json::from_slice(&resp.into_body().try_into_bytes().unwrap()).unwrap();
+        assert_eq!(body["authorization_endpoint"], format!("{issuer}/authorize"));
+
+        // The code is exchanged server-side and the token returned to the caller.
+        let resp = auth::exchange_token(
+            data,
+            web::Json(auth::TokenExchangeRequest {
+                code: "auth-code".into(),
+                redirect_uri: "http://localhost/".into(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp.status(), actix_web::http::StatusCode::OK);
+        let body: serde_json::Value =
+            serde_json::from_slice(&resp.into_body().try_into_bytes().unwrap()).unwrap();
+        assert_eq!(body["token"], "header.payload.sig");
     }
 }
 

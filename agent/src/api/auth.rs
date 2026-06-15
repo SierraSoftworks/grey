@@ -16,7 +16,7 @@ use filt_rs::{FilterValue, Filterable};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, jwk::JwkSet};
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use tracing::info;
+use tracing::{info, warn};
 
 use super::AppState;
 use crate::config::OidcConfig;
@@ -24,11 +24,14 @@ use crate::config::OidcConfig;
 const DISCOVERY_TTL: Duration = Duration::from_secs(60 * 60); // 1 hour
 const JWKS_TTL: Duration = Duration::from_secs(24 * 60 * 60); // 24 hours
 
-/// The subset of the OIDC discovery document the agent needs to validate tokens.
+/// The subset of the OIDC discovery document the agent needs to validate tokens and to drive the
+/// server-side code exchange.
 #[derive(Clone, Deserialize)]
 pub struct OidcDiscovery {
     pub issuer: String,
     pub jwks_uri: String,
+    pub authorization_endpoint: String,
+    pub token_endpoint: String,
 }
 
 /// Validated token claims, made available to handlers via request extensions.
@@ -127,6 +130,69 @@ impl OidcVerifier {
 
         verify_token(&oidc.client_id, &discovery.issuer, &set, token)
     }
+
+    /// The provider's authorization endpoint, which the SPA needs to begin the login redirect.
+    /// Resolved from the (cached) discovery document so the browser never has to call the provider
+    /// cross-origin.
+    pub async fn authorization_endpoint(&self, oidc: &OidcConfig) -> Result<String, Box<dyn Error>> {
+        Ok(self.discovery(&oidc.endpoint).await?.authorization_endpoint)
+    }
+
+    /// Exchanges an authorization code for an ID token using the confidential client credentials.
+    /// The browser sends only the code; the secret stays here.
+    pub async fn exchange_code(
+        &self,
+        oidc: &OidcConfig,
+        code: &str,
+        redirect_uri: &str,
+    ) -> Result<String, Box<dyn Error>> {
+        let discovery = self.discovery(&oidc.endpoint).await?;
+        let body = [
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", redirect_uri),
+            ("client_id", oidc.client_id.as_str()),
+            ("client_secret", oidc.client_secret.as_str()),
+        ]
+        .iter()
+        .map(|(k, v)| format!("{k}={}", form_encode(v)))
+        .collect::<Vec<_>>()
+        .join("&");
+
+        let tokens: Value = self
+            .http
+            .post(&discovery.token_endpoint)
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            )
+            .body(body)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        tokens
+            .get("id_token")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| "the token response did not include an id_token".into())
+    }
+}
+
+/// RFC 3986 percent-encoding for an `application/x-www-form-urlencoded` field value.
+fn form_encode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 /// Whether the token's signing-key id is absent from the cached key set (suggesting key rotation).
@@ -282,6 +348,68 @@ pub async fn require_admin(
 
     req.extensions_mut().insert(Authenticated { claims });
     next.call(req).await
+}
+
+/// `GET /api/v1/auth/metadata` — the provider's authorization endpoint, so the SPA can build its
+/// login redirect without calling the provider cross-origin. Public (it precedes authentication).
+pub async fn metadata(data: web::Data<AppState>) -> actix_web::Result<HttpResponse> {
+    let config = data.state.get_config();
+    let Some(admin) = config.ui.admin.as_ref() else {
+        return Ok(json_error(
+            StatusCode::NOT_FOUND,
+            "Administrative access is not configured.",
+        ));
+    };
+
+    match data.oidc.authorization_endpoint(&admin.oidc).await {
+        Ok(authorization_endpoint) => {
+            Ok(HttpResponse::Ok().json(serde_json::json!({ "authorization_endpoint": authorization_endpoint })))
+        }
+        Err(e) => {
+            warn!("Failed to resolve the OIDC authorization endpoint: {e}");
+            Ok(json_error(
+                StatusCode::BAD_GATEWAY,
+                "We could not reach the configured identity provider.",
+            ))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct TokenExchangeRequest {
+    pub code: String,
+    pub redirect_uri: String,
+}
+
+/// `POST /api/v1/auth/token` — exchanges an authorization code for an ID token using the
+/// server-held client secret, returning the token to the SPA. Public (it is the login step).
+pub async fn exchange_token(
+    data: web::Data<AppState>,
+    body: web::Json<TokenExchangeRequest>,
+) -> actix_web::Result<HttpResponse> {
+    let config = data.state.get_config();
+    let Some(admin) = config.ui.admin.as_ref() else {
+        return Ok(json_error(
+            StatusCode::NOT_FOUND,
+            "Administrative access is not configured.",
+        ));
+    };
+
+    let body = body.into_inner();
+    match data
+        .oidc
+        .exchange_code(&admin.oidc, &body.code, &body.redirect_uri)
+        .await
+    {
+        Ok(token) => Ok(HttpResponse::Ok().json(serde_json::json!({ "token": token }))),
+        Err(e) => {
+            warn!("OIDC code exchange failed: {e}");
+            Ok(json_error(
+                StatusCode::BAD_GATEWAY,
+                "The sign-in could not be completed. Please try again.",
+            ))
+        }
+    }
 }
 
 #[cfg(test)]

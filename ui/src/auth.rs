@@ -1,9 +1,13 @@
-//! Browser-side OIDC Authorization Code + PKCE login.
+//! Browser-side OIDC Authorization Code login (without PKCE).
 //!
-//! The SPA is a public OIDC client: it runs the whole PKCE flow itself, stores the resulting ID
-//! token in `sessionStorage`, and sends it as an `Authorization: Bearer` header on admin requests
-//! (see [`crate::api`]). The agent only *validates* the token. Everything here is browser-only; the
-//! SSR build gets inert stubs so the shared component tree still compiles.
+//! The provider does not support PKCE, and a public browser client must never hold the client
+//! secret, so the agent performs the confidential code exchange on the SPA's behalf: the browser
+//! runs the authorization redirect, then POSTs the resulting `code` to the agent, which exchanges it
+//! (using its server-held secret) and returns the ID token. The SPA stores that token in
+//! `sessionStorage` and sends it as an `Authorization: Bearer` header (see [`crate::api`]).
+//!
+//! Everything the browser calls is same-origin (the agent), so the provider never needs to permit
+//! cross-origin requests. Browser-only; the SSR build gets inert stubs.
 
 use grey_api::UiAuthConfig;
 
@@ -11,11 +15,9 @@ use grey_api::UiAuthConfig;
 mod browser {
     use super::UiAuthConfig;
     use base64::prelude::*;
-    use sha2::{Digest, Sha256};
     use web_sys::window;
 
     const TOKEN_KEY: &str = "grey.admin.token";
-    const VERIFIER_KEY: &str = "grey.oidc.verifier";
     const STATE_KEY: &str = "grey.oidc.state";
     const RETURN_KEY: &str = "grey.oidc.return_to";
     /// The OAuth redirect lands back at the app root; the SPA detects `?code&state` on load.
@@ -63,12 +65,6 @@ mod browser {
         BASE64_URL_SAFE_NO_PAD.encode(&buf)
     }
 
-    fn code_challenge(verifier: &str) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(verifier.as_bytes());
-        BASE64_URL_SAFE_NO_PAD.encode(hasher.finalize())
-    }
-
     fn origin() -> String {
         window()
             .and_then(|w| w.location().origin().ok())
@@ -79,26 +75,24 @@ mod browser {
         format!("{}{CALLBACK_PATH}", origin())
     }
 
-    /// Fetches `(authorization_endpoint, token_endpoint)` from the provider's discovery document.
-    async fn endpoints(issuer: &str) -> Result<(String, String), String> {
-        let url = format!(
-            "{}/.well-known/openid-configuration",
-            issuer.trim_end_matches('/')
-        );
-        let response = gloo::net::http::Request::get(&url)
+    /// Fetches the provider's authorization endpoint from the agent (same-origin), so the browser
+    /// never has to read the provider's discovery document cross-origin.
+    async fn authorization_endpoint() -> Result<String, String> {
+        let response = gloo::net::http::Request::get("/api/v1/auth/metadata")
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        if !response.ok() {
+            return Err(format!(
+                "the agent could not provide the login endpoint (HTTP {})",
+                response.status()
+            ));
+        }
         let doc: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-        let authorize = doc["authorization_endpoint"]
+        doc["authorization_endpoint"]
             .as_str()
-            .ok_or("discovery document is missing authorization_endpoint")?
-            .to_string();
-        let token = doc["token_endpoint"]
-            .as_str()
-            .ok_or("discovery document is missing token_endpoint")?
-            .to_string();
-        Ok((authorize, token))
+            .map(String::from)
+            .ok_or_else(|| "the agent did not return an authorization endpoint".to_string())
     }
 
     fn callback_params() -> Option<(String, String)> {
@@ -111,24 +105,21 @@ mod browser {
         callback_params().is_some()
     }
 
-    /// Begins login: generate PKCE material, stash it, and navigate to the provider.
+    /// Begins login: stash a CSRF `state`, then navigate to the provider's authorization endpoint.
     pub async fn begin_login(config: &UiAuthConfig) {
-        let verifier = random_token(48);
         let state = random_token(24);
-        let challenge = code_challenge(&verifier);
 
         if let Some(storage) = session() {
-            let _ = storage.set_item(VERIFIER_KEY, &verifier);
             let _ = storage.set_item(STATE_KEY, &state);
             if let Some(path) = window().and_then(|w| w.location().pathname().ok()) {
                 let _ = storage.set_item(RETURN_KEY, &path);
             }
         }
 
-        let (authorize, _token) = match endpoints(&config.issuer).await {
-            Ok(endpoints) => endpoints,
+        let authorize = match authorization_endpoint().await {
+            Ok(url) => url,
             Err(err) => {
-                gloo::console::error!(format!("Failed to start OIDC login: {err}"));
+                gloo::console::error!(format!("Failed to start sign-in: {err}"));
                 return;
             }
         };
@@ -138,12 +129,11 @@ mod browser {
         let scope = scopes.join(" ");
 
         let url = format!(
-            "{authorize}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256",
+            "{authorize}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}",
             enc(&config.client_id),
             enc(&redirect_uri()),
             enc(&scope),
             enc(&state),
-            enc(&challenge),
         );
 
         if let Some(w) = window() {
@@ -151,9 +141,9 @@ mod browser {
         }
     }
 
-    /// If the current URL is an OIDC callback, exchange the code for a token and store it. Returns
-    /// the token on success, `None` when there is no callback to process.
-    pub async fn complete_callback(config: &UiAuthConfig) -> Result<Option<String>, String> {
+    /// If the current URL is an OIDC callback, hand the code to the agent to exchange and store the
+    /// returned token. Returns the token on success, `None` when there is no callback to process.
+    pub async fn complete_callback(_config: &UiAuthConfig) -> Result<Option<String>, String> {
         let Some((code, state)) = callback_params() else {
             return Ok(None);
         };
@@ -161,27 +151,16 @@ mod browser {
 
         let expected_state = storage.get_item(STATE_KEY).ok().flatten();
         if expected_state.as_deref() != Some(state.as_str()) {
-            return Err("the login response state did not match (possible CSRF or stale login)".into());
+            return Err(
+                "the login response state did not match (possible CSRF or stale login)".into(),
+            );
         }
-        let verifier = storage
-            .get_item(VERIFIER_KEY)
-            .ok()
-            .flatten()
-            .ok_or("the PKCE verifier is missing; please sign in again")?;
 
-        let (_authorize, token_endpoint) = endpoints(&config.issuer).await?;
-
-        let body = format!(
-            "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}",
-            enc(&code),
-            enc(&redirect_uri()),
-            enc(&config.client_id),
-            enc(&verifier),
-        );
-
-        let response = gloo::net::http::Request::post(&token_endpoint)
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(body)
+        // The agent exchanges the code with its client secret and returns the token.
+        let request = serde_json::json!({ "code": code, "redirect_uri": redirect_uri() }).to_string();
+        let response = gloo::net::http::Request::post("/api/v1/auth/token")
+            .header("Content-Type", "application/json")
+            .body(request)
             .map_err(|e| e.to_string())?
             .send()
             .await
@@ -189,21 +168,20 @@ mod browser {
 
         if !response.ok() {
             return Err(format!(
-                "the identity provider rejected the token exchange (HTTP {})",
+                "the sign-in could not be completed (HTTP {})",
                 response.status()
             ));
         }
 
         let tokens: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-        let id_token = tokens["id_token"]
+        let token = tokens["token"]
             .as_str()
-            .ok_or("the token response did not include an id_token")?
+            .ok_or("the sign-in response did not include a token")?
             .to_string();
 
-        store_token(&id_token);
+        store_token(&token);
 
-        // Clear the one-time PKCE material and scrub the code/state from the address bar.
-        let _ = storage.remove_item(VERIFIER_KEY);
+        // Clear the one-time state and scrub the code/state from the address bar.
         let _ = storage.remove_item(STATE_KEY);
         let return_to = storage
             .get_item(RETURN_KEY)
@@ -217,7 +195,7 @@ mod browser {
                 history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&return_to));
         }
 
-        Ok(Some(id_token))
+        Ok(Some(token))
     }
 }
 
