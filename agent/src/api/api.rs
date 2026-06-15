@@ -9,6 +9,8 @@ impl From<&crate::config::UiConfig> for grey_api::UiConfig {
             logo: config.logo.clone(),
             links: config.links.clone(),
             reload_interval: config.reload_interval,
+            // Populated from the admin OIDC config in a later slice; no auth is exposed yet.
+            auth: None,
         }
     }
 }
@@ -23,6 +25,12 @@ pub async fn get_notices(data: web::Data<AppState>) -> Result<HttpResponse> {
         .map(|notice| notice.clone().into())
         .collect();
     Ok(HttpResponse::Ok().json(api_notices))
+}
+
+pub async fn get_incidents(data: web::Data<AppState>) -> Result<HttpResponse> {
+    // Public endpoint: only incidents marked visible are exposed to unauthenticated viewers.
+    let incidents = data.state.list_incidents(false).await?;
+    Ok(HttpResponse::Ok().json(incidents))
 }
 
 pub async fn get_probes(data: web::Data<AppState>) -> Result<HttpResponse> {
@@ -63,6 +71,56 @@ mod tests {
         let body = String::from_utf8_lossy(&body_bytes);
         let notices: Vec<grey_api::UiNotice> = serde_json::from_str(&body).unwrap();
         assert!(notices.is_empty());
+    }
+
+    #[actix_web::test]
+    async fn test_get_incidents() {
+        let temp_dir = tempdir().unwrap();
+
+        let app_state = AppState::test(temp_dir.path().to_path_buf()).await;
+        let resp = get_incidents(web::Data::new(app_state)).await;
+
+        let resp = resp.expect("Failed to get incidents");
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers().get("content-type").and_then(|v| v.to_str().ok()), Some("application/json"));
+        let body_bytes = resp.into_body().try_into_bytes().unwrap();
+        let body = String::from_utf8_lossy(&body_bytes);
+        let incidents: Vec<grey_api::Incident> = serde_json::from_str(&body).unwrap();
+        assert!(incidents.is_empty());
+    }
+
+    #[actix_web::test]
+    async fn test_get_incidents_exposes_only_visible() {
+        let temp_dir = tempdir().unwrap();
+        let app_state = AppState::test(temp_dir.path().to_path_buf()).await;
+
+        let now = chrono::Utc::now();
+        let mk = |id: &str, visible: bool| grey_api::Incident {
+            id: id.into(),
+            title: format!("Incident {id}"),
+            description: String::new(),
+            start_time: now,
+            end_time: None,
+            detection_time: None,
+            mitigation_time: None,
+            affected_services: vec![],
+            visible,
+            updates: vec![],
+            created_at: now,
+            updated_at: now,
+        };
+        app_state.state.put_incident(&mk("vis", true)).await.unwrap();
+        app_state.state.put_incident(&mk("hid", false)).await.unwrap();
+
+        let resp = get_incidents(web::Data::new(app_state)).await.expect("Failed to get incidents");
+        let body_bytes = resp.into_body().try_into_bytes().unwrap();
+        let incidents: Vec<grey_api::Incident> =
+            serde_json::from_str(&String::from_utf8_lossy(&body_bytes)).unwrap();
+        assert_eq!(
+            incidents.iter().map(|i| i.id.clone()).collect::<Vec<_>>(),
+            vec!["vis"],
+            "the public endpoint must hide incidents that are not marked visible"
+        );
     }
 
     #[actix_web::test]

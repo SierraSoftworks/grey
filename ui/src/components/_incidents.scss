@@ -1,0 +1,176 @@
+@use '../styles/variables' as *;
+
+// Status-driven accents shared by timeline dots, pills and cards.
+@mixin status-color($class, $color) {
+    .timeline-dot.#{$class} {
+        background-color: $color;
+        box-shadow: 0 0 0 1px $color;
+    }
+
+    .incident-status-pill.#{$class} {
+        background-color: $color;
+    }
+
+    .incident-card.#{$class} {
+        border-left-color: $color;
+    }
+}
+
+@include status-color(ok, $color-status-ok);
+@include status-color(warning, $color-status-warn);
+@include status-color(error, $color-status-error);
+@include status-color(unknown, $color-status-unknown);
+
+// The incidents timeline under the probes.
+.incidents-timeline {
+    .incidents-timeline-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        max-width: $tablet;
+        margin: 0 auto 1rem auto;
+
+        h2 {
+            margin: 0;
+            font-weight: 300;
+        }
+
+        .incidents-view-all {
+            color: $color-status-unknown;
+            text-decoration: none;
+            font-size: 0.9rem;
+
+            &:hover {
+                text-decoration: underline;
+            }
+        }
+    }
+
+    .incident-link {
+        color: inherit;
+        text-decoration: none;
+
+        &:hover {
+            text-decoration: underline;
+        }
+    }
+}
+
+// A compact status pill reused on the timeline and the incidents page.
+.incident-status-pill {
+    display: inline-block;
+    padding: 0.1rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: $color-status-text;
+    background-color: $color-status-offline;
+    white-space: nowrap;
+}
+
+// The full incidents page.
+.incidents-page {
+    max-width: $tablet;
+    margin: 2rem auto;
+    padding: 1rem 1rem;
+
+    > h1 {
+        font-weight: 200;
+    }
+
+    .incidents-empty {
+        color: $color-text-muted;
+    }
+}
+
+.incident-card {
+    background-color: $background-box;
+    border: 1px solid $color-separator;
+    border-left: 6px solid $color-status-offline;
+    border-radius: $border-radius-medium;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+
+    @media screen and (max-width: $mobile) {
+        padding: 1rem;
+    }
+
+    .incident-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 1rem;
+
+        h2 {
+            margin: 0;
+            font-weight: 400;
+        }
+    }
+
+    .incident-times {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0.25rem 1rem;
+        margin: 1rem 0;
+        font-size: 0.9rem;
+
+        dt {
+            color: $color-text-muted;
+        }
+
+        dd {
+            margin: 0;
+        }
+    }
+
+    .incident-affected {
+        font-size: 0.9rem;
+        color: $color-text-muted;
+    }
+
+    .incident-description {
+        margin: 1rem 0;
+    }
+}
+
+.incident-updates {
+    list-style: none;
+    margin: 1rem 0 0 0;
+    padding: 0;
+    border-top: 1px solid $color-separator;
+
+    .incident-update {
+        padding: 1rem 0;
+        border-bottom: 1px solid $color-separator;
+
+        &:last-child {
+            border-bottom: none;
+        }
+
+        .incident-update-meta {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .incident-update-time {
+            color: $color-text-muted;
+            font-size: 0.8rem;
+        }
+    }
+}
+
+// Tighten markdown output so it sits naturally inside cards.
+.markdown {
+    line-height: 1.5;
+
+    p:first-child {
+        margin-top: 0;
+    }
+
+    p:last-child {
+        margin-bottom: 0;
+    }
+}

@@ -61,6 +61,9 @@ header {
     align-items: center;
     padding: 1rem;
     margin-right: auto;
+    // The brand is now a router link home; keep it looking like the brand, not a hyperlink.
+    text-decoration: none;
+    color: inherit;
 
     @media only screen and (max-width: $mobile) {
         flex: none;

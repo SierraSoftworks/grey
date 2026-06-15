@@ -66,6 +66,8 @@ tracing-batteries = { git = "https://github.com/sierrasoftworks/tracing-batterie
 ] }
 trust-dns-resolver = { version = "0.23", features = ["tokio-runtime"] }
 yew = { version = "0.23", features = ["ssr"] }
+yew-router = { version = "0.20" }
+pulldown-cmark = { version = "0.13" }
 
 gloo = { version = "0.12" }
 gloo-console = { version = "0.4" }

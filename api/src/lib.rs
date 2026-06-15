@@ -1,3 +1,4 @@
+mod incident;
 mod probe;
 mod probe_history_bucket;
 mod serializers;
@@ -6,6 +7,7 @@ mod ui;
 mod peer;
 mod observation;
 
+pub use incident::*;
 pub use observation::*;
 pub use peer::*;
 pub use probe::*;

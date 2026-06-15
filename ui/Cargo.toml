@@ -18,6 +18,8 @@ humantime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 yew = { workspace = true, features = ["ssr", "hydration"] }
+yew-router = { workspace = true }
+pulldown-cmark = { workspace = true }
 
 gloo = { workspace = true, optional = true }
 gloo-console = { workspace = true, optional = true }

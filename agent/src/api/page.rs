@@ -1,10 +1,10 @@
-use actix_web::{HttpResponse, Result, web};
+use actix_web::{HttpRequest, HttpResponse, Result, web};
 use grey_ui::{App, AppProps};
 use yew::ServerRenderer;
 
 use super::{ASSETS_DIR, AppState};
 
-pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
+pub async fn index(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpResponse> {
     let probe_histories = data.state.get_probe_states().await?;
 
     let config = data.state.get_config();
@@ -13,6 +13,9 @@ pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
 
     let mut peers = data.state.get_peers().await.unwrap_or_default();
     peers.sort_by(|a, b| a.id.cmp(&b.id));
+
+    // Only the publicly visible incidents are server-rendered for unauthenticated viewers.
+    let incidents = data.state.list_incidents(false).await.unwrap_or_default();
 
     // Read the embedded HTML template
     let html_template = ASSETS_DIR
@@ -32,6 +35,8 @@ pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
         notices: config.ui.notices.clone(),
         probes,
         peers,
+        incidents,
+        url: req.uri().path().to_string(),
     };
     let renderer = ServerRenderer::<App>::with_props(move || app_props).hydratable(true);
     let ssr_content = renderer.render().await;
@@ -59,7 +64,8 @@ mod tests {
         let temp_dir = tempdir().unwrap();
 
         let app_state = AppState::test(temp_dir.path().to_path_buf()).await;
-        let resp = index(web::Data::new(app_state)).await;
+        let req = actix_web::test::TestRequest::default().to_http_request();
+        let resp = index(req, web::Data::new(app_state)).await;
 
         let resp = resp.expect("Failed to render index");
         assert_eq!(resp.status(), StatusCode::OK);
@@ -72,5 +78,48 @@ mod tests {
         assert!(body.contains(r#"data-probes="[{&quot;"#), "Failed to find probes data in HTML body");
         assert!(body.contains(r#"data-config="{&quot;"#), "Failed to find config data in HTML body");
         assert!(body.trim().ends_with("</html>"), "Body did not end with the HTML closing tag");
+    }
+
+    /// A deep link to the `/incidents` route must server-render the incidents page (the router is
+    /// seeded from the request path) including any visible incidents.
+    #[actix_web::test]
+    async fn test_index_renders_incidents_route() {
+        let temp_dir = tempdir().unwrap();
+        let app_state = AppState::test(temp_dir.path().to_path_buf()).await;
+
+        let now = chrono::Utc::now();
+        app_state
+            .state
+            .put_incident(&grey_api::Incident {
+                id: "vis".into(),
+                title: "Database outage".into(),
+                description: String::new(),
+                start_time: now,
+                end_time: None,
+                detection_time: None,
+                mitigation_time: None,
+                affected_services: vec![],
+                visible: true,
+                updates: vec![],
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .unwrap();
+
+        let req = actix_web::test::TestRequest::default()
+            .uri("/incidents")
+            .to_http_request();
+        let resp = index(req, web::Data::new(app_state))
+            .await
+            .expect("Failed to render /incidents");
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body_bytes = resp.into_body().try_into_bytes().unwrap();
+        let body = String::from_utf8_lossy(&body_bytes);
+        assert!(
+            body.contains("Database outage"),
+            "the /incidents route should server-render the seeded incident"
+        );
     }
 }

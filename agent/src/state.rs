@@ -27,6 +27,32 @@ const CLUSTER_IDENTITY_TABLE: TableDefinition<&str, u128> =
 const NODE_ID_KEY: &str = "node_id";
 const GENERATION_KEY: &str = "generation";
 
+// Incidents are stored as JSON (keyed by incident id) rather than MessagePack so that future schema
+// changes can be applied as plain `serde_json::Value` transforms by the migration runner.
+const INCIDENTS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("incidents");
+// Holds the single, global schema version for the state database (the migration marker).
+const META_TABLE: TableDefinition<&str, u64> = TableDefinition::new("meta");
+const SCHEMA_VERSION_KEY: &str = "schema_version";
+
+/// A single forward migration of the state database. Each migration runs inside its own write
+/// transaction together with the version bump, so a failure rolls the database back to the prior
+/// version (see [`State::migrate_with`]).
+type Migration = fn(&redb::WriteTransaction) -> Result<(), Box<dyn Error>>;
+
+/// The ordered history of state-database migrations. The stored schema version is simply the number
+/// of these that have been applied; new migrations are **appended** here and never reordered or
+/// removed.
+const MIGRATIONS: &[Migration] = &[
+    m001_create_incidents, // version 0 -> 1
+];
+
+/// Establishes the incidents table. Opening it in a write transaction creates it; this is the
+/// baseline migration that brings a database up to schema version 1.
+fn m001_create_incidents(txn: &redb::WriteTransaction) -> Result<(), Box<dyn Error>> {
+    txn.open_table(INCIDENTS_TABLE)?;
+    Ok(())
+}
+
 type ProbeState = Probe;
 
 #[derive(Clone)]
@@ -76,6 +102,10 @@ impl State {
         let config = Config::load_from_path(&config_path).await?;
 
         let database = Arc::new(Database::create(config.state.clone())?);
+        // Bring the state database schema up to date before anything reads or writes it. The only
+        // way this fails is a migration that genuinely cannot be applied, in which case we refuse to
+        // start rather than run against an unexpected schema.
+        Self::migrate(&database)?;
         let node_id = Self::load_or_create_node_id(&database)?;
         let generation = Self::load_and_bump_generation(&database)?;
         let members = Arc::new(Membership::new(
@@ -162,6 +192,152 @@ impl State {
         };
         write.commit()?;
         Ok(next as u64)
+    }
+
+    /// Runs any pending state-database [`MIGRATIONS`] as part of initialization. Called from
+    /// [`State::new`] immediately after the database is opened.
+    fn migrate(database: &Database) -> Result<(), Box<dyn Error>> {
+        Self::migrate_with(database, MIGRATIONS)
+    }
+
+    /// The migration runner, parameterized over the migration list so tests can exercise failure and
+    /// rollback behaviour. The stored `schema_version` records how many migrations have already been
+    /// applied; only migrations beyond it run, and each is committed together with its version bump
+    /// in a single transaction so a failure leaves the database exactly at the prior version. A
+    /// database already at (or ahead of) the latest version is left untouched and starts normally —
+    /// the only failure path is a migration that cannot be applied.
+    fn migrate_with(database: &Database, migrations: &[Migration]) -> Result<(), Box<dyn Error>> {
+        let current = {
+            let read = database.begin_read()?;
+            // A read transaction errors when the table has never been created — the fresh-database
+            // case — which we treat as version 0 (before every migration).
+            match read.open_table(META_TABLE) {
+                Ok(table) => table.get(SCHEMA_VERSION_KEY)?.map(|v| v.value()).unwrap_or(0),
+                Err(_) => 0,
+            }
+        };
+
+        if current >= migrations.len() as u64 {
+            return Ok(());
+        }
+
+        for (index, migration) in migrations.iter().enumerate().skip(current as usize) {
+            let version = index as u64 + 1;
+            let write = database.begin_write()?;
+
+            if let Err(e) = migration(&write) {
+                // Discard the partial migration so neither its changes nor the version bump persist.
+                let _ = write.abort();
+                return Err(
+                    format!("State database migration to version {version} failed: {e}").into(),
+                );
+            }
+
+            {
+                let mut meta = write.open_table(META_TABLE)?;
+                meta.insert(SCHEMA_VERSION_KEY, version)?;
+            }
+            write.commit()?;
+            info!(name: "state.migrate", { schema.version = version }, "Applied state database migration to version {version}.");
+        }
+
+        Ok(())
+    }
+
+    /// Lists stored incidents, most recent first. When `include_hidden` is false, incidents that are
+    /// not marked visible are omitted — this is the public, unauthenticated view.
+    pub async fn list_incidents(
+        &self,
+        include_hidden: bool,
+    ) -> Result<Vec<grey_api::Incident>, Box<dyn Error>> {
+        let txn = self.database.begin_read()?;
+        let mut incidents = Vec::new();
+        if let Ok(table) = txn.open_table(INCIDENTS_TABLE) {
+            for entry in table.iter()?.filter_map(|r| r.ok()) {
+                let (_key, value) = entry;
+                match serde_json::from_slice::<grey_api::Incident>(value.value()) {
+                    Ok(incident) if include_hidden || incident.visible => incidents.push(incident),
+                    Ok(_) => {}
+                    Err(err) => {
+                        warn!("Skipping an incident record that failed to deserialize: {err:?}")
+                    }
+                }
+            }
+        }
+        incidents.sort_by(|a, b| b.start_time.cmp(&a.start_time));
+        Ok(incidents)
+    }
+
+    /// Fetches a single incident by id.
+    pub async fn get_incident(
+        &self,
+        id: &str,
+    ) -> Result<Option<grey_api::Incident>, Box<dyn Error>> {
+        let txn = self.database.begin_read()?;
+        if let Ok(table) = txn.open_table(INCIDENTS_TABLE)
+            && let Some(value) = table.get(id)?
+        {
+            return Ok(Some(serde_json::from_slice::<grey_api::Incident>(
+                value.value(),
+            )?));
+        }
+        Ok(None)
+    }
+
+    /// Creates or replaces an incident.
+    pub async fn put_incident(&self, incident: &grey_api::Incident) -> Result<(), Box<dyn Error>> {
+        let data = serde_json::to_vec(incident)?;
+        let txn = self.database.begin_write()?;
+        {
+            let mut table = txn.open_table(INCIDENTS_TABLE)?;
+            table.insert(incident.id.as_str(), data.as_slice())?;
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    /// Deletes an incident, returning whether a record was actually removed.
+    pub async fn delete_incident(&self, id: &str) -> Result<bool, Box<dyn Error>> {
+        let txn = self.database.begin_write()?;
+        let existed = {
+            let mut table = txn.open_table(INCIDENTS_TABLE)?;
+            table.remove(id)?.is_some()
+        };
+        txn.commit()?;
+        Ok(existed)
+    }
+
+    /// Appends a status update to an existing incident, keeping updates ordered by timestamp and
+    /// refreshing `updated_at`. Returns whether the target incident exists.
+    pub async fn add_incident_update(
+        &self,
+        id: &str,
+        update: grey_api::IncidentUpdate,
+    ) -> Result<bool, Box<dyn Error>> {
+        let txn = self.database.begin_write()?;
+        let found = {
+            let mut table = txn.open_table(INCIDENTS_TABLE)?;
+            // Read the existing record into an owned value so the read guard is released before we
+            // insert the updated record back into the same table.
+            let existing: Option<grey_api::Incident> = table
+                .get(id)?
+                .map(|value| serde_json::from_slice::<grey_api::Incident>(value.value()))
+                .transpose()?;
+
+            match existing {
+                Some(mut incident) => {
+                    incident.updates.push(update);
+                    incident.updates.sort_by_key(|u| u.timestamp);
+                    incident.updated_at = chrono::Utc::now();
+                    let data = serde_json::to_vec(&incident)?;
+                    table.insert(id, data.as_slice())?;
+                    true
+                }
+                None => false,
+            }
+        };
+        txn.commit()?;
+        Ok(found)
     }
 
     pub async fn reload(&self) -> Result<(), Box<dyn Error>> {
@@ -807,5 +983,158 @@ mod tests {
         };
 
         assert_eq!((g1, g2, g3), (1, 2, 3), "generation must increase on each restart");
+    }
+
+    fn sample_incident(id: &str, visible: bool, start_secs: i64) -> grey_api::Incident {
+        let ts = chrono::DateTime::from_timestamp(start_secs, 0).unwrap();
+        grey_api::Incident {
+            id: id.into(),
+            title: format!("Incident {id}"),
+            description: "details".into(),
+            start_time: ts,
+            end_time: None,
+            detection_time: None,
+            mitigation_time: None,
+            affected_services: vec![],
+            visible,
+            updates: vec![],
+            created_at: ts,
+            updated_at: ts,
+        }
+    }
+
+    fn sample_update(
+        id: &str,
+        status: grey_api::IncidentStatus,
+        secs: i64,
+    ) -> grey_api::IncidentUpdate {
+        grey_api::IncidentUpdate {
+            id: id.into(),
+            status,
+            timestamp: chrono::DateTime::from_timestamp(secs, 0).unwrap(),
+            message: "update".into(),
+        }
+    }
+
+    fn read_schema_version(db: &Database) -> Option<u64> {
+        let read = db.begin_read().unwrap();
+        match read.open_table(META_TABLE) {
+            Ok(table) => table.get(SCHEMA_VERSION_KEY).unwrap().map(|v| v.value()),
+            Err(_) => None,
+        }
+    }
+
+    #[tokio::test]
+    async fn incident_crud_and_visibility_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = State::test(dir.path().to_path_buf()).await;
+
+        state.put_incident(&sample_incident("a", true, 300)).await.unwrap();
+        state.put_incident(&sample_incident("b", false, 200)).await.unwrap();
+        state.put_incident(&sample_incident("c", true, 100)).await.unwrap();
+
+        // The public view hides invisible incidents; the admin view shows everything, newest first.
+        let public = state.list_incidents(false).await.unwrap();
+        assert_eq!(public.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec!["a", "c"]);
+        let all = state.list_incidents(true).await.unwrap();
+        assert_eq!(all.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec!["a", "b", "c"]);
+
+        // Fetch by id round-trips; an unknown id is None.
+        assert_eq!(state.get_incident("b").await.unwrap().unwrap().id, "b");
+        assert!(state.get_incident("missing").await.unwrap().is_none());
+
+        // Deletion is reported and idempotent.
+        assert!(state.delete_incident("b").await.unwrap());
+        assert!(!state.delete_incident("b").await.unwrap());
+        assert!(state.get_incident("b").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn add_incident_update_appends_in_timestamp_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = State::test(dir.path().to_path_buf()).await;
+        state.put_incident(&sample_incident("a", true, 0)).await.unwrap();
+
+        // Add out of order; storage keeps updates sorted by timestamp.
+        assert!(state
+            .add_incident_update("a", sample_update("u2", grey_api::IncidentStatus::Healthy, 200))
+            .await
+            .unwrap());
+        assert!(state
+            .add_incident_update("a", sample_update("u1", grey_api::IncidentStatus::Offline, 100))
+            .await
+            .unwrap());
+
+        let incident = state.get_incident("a").await.unwrap().unwrap();
+        assert_eq!(
+            incident.updates.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(),
+            vec!["u1", "u2"]
+        );
+        assert_eq!(incident.current_status(), grey_api::IncidentStatus::Healthy);
+
+        // Updating a non-existent incident reports false.
+        assert!(!state
+            .add_incident_update("missing", sample_update("x", grey_api::IncidentStatus::Unknown, 1))
+            .await
+            .unwrap());
+    }
+
+    #[test]
+    fn migrate_brings_fresh_db_to_latest_version_and_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::create(dir.path().join("state.redb")).unwrap();
+
+        State::migrate(&db).unwrap();
+        let version = read_schema_version(&db);
+        assert_eq!(version, Some(MIGRATIONS.len() as u64));
+
+        // The incidents table exists after migrating.
+        {
+            let read = db.begin_read().unwrap();
+            assert!(read.open_table(INCIDENTS_TABLE).is_ok());
+        }
+
+        // Re-running is a no-op.
+        State::migrate(&db).unwrap();
+        assert_eq!(read_schema_version(&db), version);
+    }
+
+    #[test]
+    fn migrate_failure_aborts_and_leaves_prior_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::create(dir.path().join("state.redb")).unwrap();
+
+        fn boom(_txn: &redb::WriteTransaction) -> Result<(), Box<dyn Error>> {
+            Err("intentional failure".into())
+        }
+        // The first migration succeeds and commits version 1; the second fails.
+        let migrations: &[Migration] = &[m001_create_incidents, boom];
+
+        let result = State::migrate_with(&db, migrations);
+        assert!(result.is_err(), "a failing migration must abort initialization");
+        assert_eq!(
+            read_schema_version(&db),
+            Some(1),
+            "the failed migration must not advance the version (atomic rollback)"
+        );
+    }
+
+    #[test]
+    fn migrate_does_not_fail_when_db_is_newer_than_binary() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::create(dir.path().join("state.redb")).unwrap();
+
+        // Simulate a database written by a future binary.
+        {
+            let write = db.begin_write().unwrap();
+            {
+                let mut meta = write.open_table(META_TABLE).unwrap();
+                meta.insert(SCHEMA_VERSION_KEY, 999u64).unwrap();
+            }
+            write.commit().unwrap();
+        }
+
+        State::migrate(&db).expect("a database newer than the binary must still start");
+        assert_eq!(read_schema_version(&db), Some(999), "a newer version must be left untouched");
     }
 }

@@ -58,10 +58,39 @@ pub fn create_app() -> App<
 > {
     App::new()
         .route("/", web::get().to(page::index))
+        // Client-routed pages are server-rendered by the same handler; it reads the request path to
+        // seed the router. New top-level SPA routes need a matching entry here.
+        .route("/incidents", web::get().to(page::index))
         .route("/api/v1/probes", web::get().to(api::get_probes))
         .route("/api/v1/notices", web::get().to(api::get_notices))
+        .route("/api/v1/incidents", web::get().to(api::get_incidents))
         .route("/api/v1/cluster/peers", web::get().to(api::get_peers))
         .route("/static/{filename:.*}", web::get().to(serve_static))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::test;
+
+    /// The incident routes must be wired into the application (the handler unit tests call the
+    /// handlers directly and so don't exercise route registration).
+    #[actix_web::test]
+    async fn incident_routes_are_registered() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::test(dir.path().to_path_buf()).await;
+        let app = test::init_service(create_app().app_data(web::Data::new(state))).await;
+
+        // The public incidents API is reachable.
+        let req = test::TestRequest::get().uri("/api/v1/incidents").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success(), "GET /api/v1/incidents should be routed");
+
+        // The /incidents SPA route is server-rendered rather than 404.
+        let req = test::TestRequest::get().uri("/incidents").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success(), "GET /incidents should be server-rendered");
+    }
 }
 
 pub async fn start_server(state: State) -> Result<(), Box<dyn std::error::Error>> {
