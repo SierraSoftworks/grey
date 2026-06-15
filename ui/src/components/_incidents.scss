@@ -25,19 +25,71 @@
     white-space: nowrap;
 }
 
-// The incidents section mirrors the probe layout: a colour-coded header over a stack of blocks.
-.incidents-section {
-    .incidents-empty {
-        color: $color-text-muted;
-        margin: 0;
+// The landing-page incidents section: a colour-coded header over compact summaries.
+.incidents-section .incident-summaries {
+    padding: 1.5rem;
+}
+
+// The full incidents page / per-incident page: lightweight, no inner section chrome.
+.incidents-page {
+    padding: 1.5rem;
+
+    > h1 {
+        font-weight: 200;
+        margin-top: 0;
     }
 }
 
-// Each incident is a status-bordered block, like a probe service group.
+.incidents-empty {
+    color: $color-text-muted;
+    margin: 0;
+}
+
+// A title link reused by summaries and blocks.
+.incident-link {
+    color: inherit;
+    text-decoration: none;
+
+    &:hover {
+        text-decoration: underline;
+    }
+}
+
+.incident-id {
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: $color-text-muted;
+}
+
+// A single incident in full: a self-contained, status-bordered card (no `.section` chrome).
 .incident-block {
+    background-color: $background-box;
+    border: 1px solid $color-separator;
+    border-left: solid 6px $color-status-offline;
+    border-radius: $border-radius-medium;
+    padding: 1.5rem;
+    margin: 0 0 1.5rem 0;
+
+    &:last-child {
+        margin-bottom: 0;
+    }
+
+    &.ok {
+        border-left-color: $color-status-ok;
+    }
+    &.warn {
+        border-left-color: $color-status-warn;
+    }
+    &.error {
+        border-left-color: $color-status-error;
+    }
     &.draft {
         // Drafts are admin-only; mark them distinctly from published incidents.
-        border-left: dashed 8px $color-status-offline;
+        border-left: dashed 6px $color-status-offline;
+    }
+
+    @media screen and (max-width: $mobile) {
+        padding: 1rem;
     }
 
     .incident-block-header {
@@ -45,26 +97,18 @@
         justify-content: space-between;
         align-items: baseline;
         gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .incident-block-heading {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        flex-wrap: wrap;
 
         .incident-block-title {
             margin: 0;
             font-weight: 400;
-        }
-    }
-
-    .incident-times {
-        display: grid;
-        grid-template-columns: auto 1fr;
-        gap: 0.25rem 1rem;
-        margin: 1rem 0;
-        font-size: 0.9rem;
-
-        dt {
-            color: $color-text-muted;
-        }
-
-        dd {
-            margin: 0;
         }
     }
 
@@ -78,30 +122,131 @@
     }
 }
 
-.incident-updates {
-    list-style: none;
-    margin: 1rem 0 0 0;
-    padding: 0;
-    border-top: 1px solid $color-separator;
+// A compact incident summary (landing page): title, description, horizontal timeline.
+.incident-summary {
+    padding: 1rem 0;
+    border-bottom: 1px solid $color-separator;
 
-    .incident-update {
-        padding: 1rem 0;
-        border-bottom: 1px solid $color-separator;
+    &:first-child {
+        padding-top: 0;
+    }
 
-        &:last-child {
-            border-bottom: none;
+    &:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
+    }
+
+    .incident-summary-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 1rem;
+        flex-wrap: wrap;
+
+        .incident-summary-title {
+            margin: 0;
+            font-weight: 400;
         }
+    }
 
-        .incident-update-meta {
+    .incident-summary-description {
+        margin: 0.5rem 0;
+        font-size: 0.9rem;
+        color: $color-text-muted;
+    }
+}
+
+// Horizontal event timeline (summary): impact-coloured dots on a connecting line, each revealing an
+// update popover on hover (like the probe history buckets). The line into a dot carries the
+// preceding dot's colour.
+.incident-hbar {
+    display: flex;
+    align-items: center;
+    margin-top: 0.75rem;
+    padding: 0.25rem 0;
+
+    .hstep {
+        display: flex;
+        align-items: center;
+        flex: 1;
+    }
+
+    .hline {
+        flex: 1;
+        height: 2px;
+        min-width: 1.5rem;
+        background-color: $color-status-offline;
+
+        &.start {
+            background-color: $color-separator;
+        }
+        &.ok {
+            background-color: $color-status-ok;
+        }
+        &.warn {
+            background-color: $color-status-warn;
+        }
+        &.error {
+            background-color: $color-status-error;
+        }
+    }
+
+    .hdot-wrap {
+        position: relative;
+        display: flex;
+        align-items: center;
+    }
+
+    .hdot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background-color: $color-status-offline;
+        box-shadow: 0 0 0 2px $background-box;
+        cursor: pointer;
+
+        &.ok {
+            background-color: $color-status-ok;
+        }
+        &.warn {
+            background-color: $color-status-warn;
+        }
+        &.error {
+            background-color: $color-status-error;
+        }
+    }
+
+    // Popover anchored above the hovered dot.
+    .incident-popover {
+        position: absolute;
+        bottom: calc(100% + 8px);
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 20;
+        width: max-content;
+        max-width: 18rem;
+        background-color: $color-tooltip-background;
+        color: $color-tooltip-text;
+        border: 1px solid $color-tooltip-border;
+        border-radius: $border-radius-small;
+        padding: 0.6rem 0.75rem;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+        text-align: left;
+
+        .incident-popover-head {
             display: flex;
             align-items: center;
-            gap: 0.75rem;
-            margin-bottom: 0.5rem;
+            gap: 0.5rem;
+            margin-bottom: 0.4rem;
         }
 
-        .incident-update-time {
-            color: $color-text-muted;
-            font-size: 0.8rem;
+        .incident-popover-time {
+            font-size: 0.75rem;
+            opacity: 0.8;
+        }
+
+        .incident-popover-body {
+            font-size: 0.85rem;
         }
     }
 }

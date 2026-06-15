@@ -75,6 +75,7 @@ pub fn create_app() -> App<
         // Client-routed pages are server-rendered by the same handler; it reads the request path to
         // seed the router. New top-level SPA routes need a matching entry here.
         .route("/incidents", web::get().to(page::index))
+        .route("/incidents/{id}", web::get().to(page::index))
         .route("/api/v1/probes", web::get().to(api::get_probes))
         .route("/api/v1/notices", web::get().to(api::get_notices))
         .route("/api/v1/incidents", web::get().to(api::get_incidents))

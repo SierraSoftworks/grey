@@ -10,7 +10,9 @@ use crate::contexts::{
 };
 use crate::routes::Route;
 
-use super::components::{Banner, BannerKind, Header, IncidentsPage, IncidentsSection, ProbeList, Timeline};
+use super::components::{
+    Banner, BannerKind, Header, IncidentBlock, IncidentsPage, IncidentsSection, ProbeList, Timeline,
+};
 
 #[cfg(feature = "wasm")]
 pub enum ClientMsg {
@@ -287,7 +289,35 @@ fn switch(route: Route) -> Html {
     match route {
         Route::Home => html! { <HomeView /> },
         Route::Incidents => html! { <IncidentsPage /> },
+        Route::Incident { id } => html! { <IncidentDetail id={id} /> },
         Route::NotFound => html! { <yew_router::prelude::Redirect<Route> to={Route::Home} /> },
+    }
+}
+
+#[derive(Properties, PartialEq)]
+struct IncidentDetailProps {
+    id: String,
+}
+
+/// A single incident's page, found by id in the (public) incidents context.
+#[function_component(IncidentDetail)]
+fn incident_detail(props: &IncidentDetailProps) -> Html {
+    use crate::contexts::use_incidents;
+
+    let incidents_ctx = use_incidents();
+    let incident = incidents_ctx.incidents.iter().find(|i| i.id == props.id).cloned();
+
+    html! {
+        <div class="content incidents-page">
+            if let Some(incident) = incident {
+                <IncidentBlock incident={incident} />
+            } else {
+                <h1>{"Incident not found"}</h1>
+                <p class="incidents-empty">
+                    {"This incident does not exist or is not publicly visible."}
+                </p>
+            }
+        </div>
     }
 }
 

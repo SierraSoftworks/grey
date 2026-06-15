@@ -1,9 +1,9 @@
-use crate::components::incidents_timeline::IncidentsSection;
+use crate::components::IncidentBlock;
 use crate::contexts::{use_auth, use_incidents};
 use yew::prelude::*;
 
-/// The full incident list. Signed-in administrators get the management view; everyone else sees the
-/// read-only public list rendered as status blocks under a colour-coded header.
+/// The full incident list. Signed-in administrators get the management view; everyone else sees a
+/// lightweight list of incident cards (each linking to its own page).
 #[function_component(IncidentsPage)]
 pub fn incidents_page() -> Html {
     let auth = use_auth();
@@ -19,9 +19,15 @@ pub fn incidents_page() -> Html {
     let _ = &auth;
 
     html! {
-        <IncidentsSection
-            incidents={incidents_ctx.incidents.clone()}
-            empty_message={AttrValue::from("No incidents have been reported.")}
-        />
+        <div class="content incidents-page">
+            <h1>{"Incidents"}</h1>
+            if incidents_ctx.incidents.is_empty() {
+                <p class="incidents-empty">{"No incidents have been reported."}</p>
+            } else {
+                { for incidents_ctx.incidents.iter().map(|incident| html! {
+                    <IncidentBlock key={incident.id.clone()} incident={incident.clone()} />
+                }) }
+            }
+        </div>
     }
 }

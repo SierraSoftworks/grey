@@ -33,7 +33,6 @@
     display: grid;
     grid-template-columns: 40px 1fr;
     align-items: flex-start;
-    margin-bottom: 3rem;
 
     &:last-child {
         margin-bottom: 0;
@@ -43,7 +42,6 @@
         grid-template-columns: 40px 1fr;
         gap: 0.5rem;
         padding-right: 1rem;
-        margin-bottom: 2rem;
     }
 }
 

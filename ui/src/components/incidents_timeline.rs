@@ -1,15 +1,20 @@
-//! Shared incident display: impact helpers, the per-incident block, and the incidents section (a
-//! colour-coded header over a stack of blocks) that mirrors the probe layout. Each block carries an
-//! Element-Plus-style timeline of its updates and key dates.
+//! Shared incident display:
+//! - [`IncidentSummary`] — a compact card (title, description, horizontal timeline with hover
+//!   popovers) used on the landing page.
+//! - [`IncidentBlock`] — the full detail (vertical event timeline) used on the incidents page, the
+//!   per-incident page, and the admin view.
+//! - [`IncidentsSection`] — the landing-page section: a colour-coded header over the summaries.
 
 use crate::components::markdown::render_markdown;
 use crate::formatters::compact_duration;
+use crate::routes::Route;
 use chrono::{DateTime, Utc};
 use grey_api::{Impact, Incident, IncidentUpdate};
 use yew::prelude::*;
+use yew_router::prelude::*;
 
-/// The colour class for an impact. Matches the shared `.section.{ok|warn|error}` classes; `hidden`
-/// uses the muted draft treatment.
+/// The colour class for an impact. Matches the shared `.ok`/`.warn`/`.error` classes; `hidden` uses
+/// the muted draft treatment.
 pub fn impact_class(impact: Impact) -> &'static str {
     match impact {
         Impact::Offline => "error",
@@ -28,8 +33,8 @@ pub fn impact_label(impact: Impact) -> &'static str {
     }
 }
 
-/// The header status text shown on the right of an incident block (like a probe's streak): the
-/// current impact and how long it has held, e.g. "Offline for 1h". Returns `(text, class)`.
+/// The header status text shown on the right of an incident (like a probe's streak): the current
+/// impact and how long it has held, e.g. "Offline for 1h". Returns `(text, class)`.
 fn header_status(incident: &Incident) -> (String, &'static str) {
     let impact = incident.current_impact();
     if impact == Impact::Hidden {
@@ -63,27 +68,21 @@ pub fn active_summary(incidents: &[Incident]) -> (&'static str, String) {
     (class, format!("{active} active incident{plural}"))
 }
 
-/// A colour-coded header plus a block per incident, mirroring the probe section. Empty renders
-/// nothing unless an `empty_message` is supplied (the dedicated incidents page).
+fn time_format(time: DateTime<Utc>) -> String {
+    time.format("%Y-%m-%d %H:%M UTC").to_string()
+}
+
+/// The landing-page incidents section: a colour-coded header over compact summaries. Renders nothing
+/// when there are no incidents to show.
 #[derive(Properties, PartialEq)]
 pub struct IncidentsSectionProps {
     pub incidents: Vec<Incident>,
-    #[prop_or_default]
-    pub empty_message: Option<AttrValue>,
 }
 
 #[function_component(IncidentsSection)]
 pub fn incidents_section(props: &IncidentsSectionProps) -> Html {
     if props.incidents.is_empty() {
-        return match &props.empty_message {
-            Some(message) => html! {
-                <div class="content incidents-section">
-                    <div class="section fill ok"><span class="status ok">{"No active incidents"}</span></div>
-                    <div class="section"><p class="incidents-empty">{message.clone()}</p></div>
-                </div>
-            },
-            None => html! {},
-        };
+        return html! {};
     }
 
     let (class, text) = active_summary(&props.incidents);
@@ -93,15 +92,89 @@ pub fn incidents_section(props: &IncidentsSectionProps) -> Html {
             <div class={classes!("section", "fill", class)}>
                 <span class={classes!("status", class)}>{text}</span>
             </div>
-            { for props.incidents.iter().map(|incident| html! {
-                <IncidentBlock key={incident.id.clone()} incident={incident.clone()} />
-            }) }
+            <div class="incident-summaries">
+                { for props.incidents.iter().map(|incident| html! {
+                    <IncidentSummary key={incident.id.clone()} incident={incident.clone()} />
+                }) }
+            </div>
         </div>
     }
 }
 
-/// A single incident rendered as a status-bordered block (a `.section`, like a probe service group),
-/// with its event timeline. `controls` grafts admin buttons onto the foot of the block.
+/// A compact incident card: title, description, and a horizontal timeline of impact-coloured markers
+/// whose details appear in a popover on hover.
+#[derive(Properties, PartialEq)]
+pub struct IncidentSummaryProps {
+    pub incident: Incident,
+}
+
+#[function_component(IncidentSummary)]
+pub fn incident_summary(props: &IncidentSummaryProps) -> Html {
+    let incident = &props.incident;
+    let active = use_state(|| Option::<usize>::None);
+    let (status_text, status_class) = header_status(incident);
+
+    let mut updates = incident.updates.clone();
+    updates.sort_by_key(|u| u.timestamp);
+
+    html! {
+        <div class="incident-summary">
+            <div class="incident-summary-header">
+                <h3 class="incident-summary-title">
+                    <Link<Route> to={Route::Incident { id: incident.id.clone() }} classes="incident-link">
+                        {&incident.title}
+                    </Link<Route>>
+                </h3>
+                <span class={classes!("incident-streak", status_class)}>{status_text}</span>
+            </div>
+
+            if !incident.description.is_empty() {
+                <div class="incident-summary-description markdown">
+                    { render_markdown(&incident.description) }
+                </div>
+            }
+
+            <div class="incident-hbar">
+                { for updates.iter().enumerate().map(|(i, update)| {
+                    // The line leading into a marker carries the preceding marker's colour.
+                    let line_class = if i == 0 { "start" } else { impact_class(updates[i - 1].impact) };
+                    let dot_class = impact_class(update.impact);
+                    let is_open = *active == Some(i);
+                    let on_enter = { let active = active.clone(); Callback::from(move |_| active.set(Some(i))) };
+                    let on_leave = { let active = active.clone(); Callback::from(move |_| active.set(None)) };
+                    html! {
+                        <div class="hstep">
+                            <span class={classes!("hline", line_class)}></span>
+                            <div
+                                class={classes!("hdot-wrap", is_open.then_some("open"))}
+                                onmouseenter={on_enter}
+                                onmouseleave={on_leave}
+                            >
+                                <span class={classes!("hdot", dot_class)}></span>
+                                if is_open {
+                                    <div class="incident-popover">
+                                        <div class="incident-popover-head">
+                                            <span class={classes!("incident-status-pill", dot_class)}>
+                                                {impact_label(update.impact)}
+                                            </span>
+                                            <span class="incident-popover-time">{time_format(update.timestamp)}</span>
+                                        </div>
+                                        <div class="incident-popover-body markdown">
+                                            { render_markdown(&update.message) }
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                }) }
+            </div>
+        </div>
+    }
+}
+
+/// A single incident in full: a status-bordered card with its event timeline. `controls` grafts
+/// admin buttons onto the foot of the card. Lightweight (no `.section` chrome).
 #[derive(Properties, PartialEq)]
 pub struct IncidentBlockProps {
     pub incident: Incident,
@@ -116,9 +189,16 @@ pub fn incident_block(props: &IncidentBlockProps) -> Html {
     let (status_text, status_class) = header_status(incident);
 
     html! {
-        <div class={classes!("section", "incident-block", class)}>
+        <article class={classes!("incident-block", class)}>
             <div class="incident-block-header">
-                <h3 class="incident-block-title">{&incident.title}</h3>
+                <div class="incident-block-heading">
+                    <h3 class="incident-block-title">
+                        <Link<Route> to={Route::Incident { id: incident.id.clone() }} classes="incident-link">
+                            {&incident.title}
+                        </Link<Route>>
+                    </h3>
+                    <span class="incident-id">{format!("#{}", incident.id)}</span>
+                </div>
                 <span class={classes!("incident-streak", status_class)}>{status_text}</span>
             </div>
 
@@ -137,19 +217,17 @@ pub fn incident_block(props: &IncidentBlockProps) -> Html {
             { render_timeline(incident) }
 
             { props.controls.clone() }
-        </div>
+        </article>
     }
 }
 
-/// The incident's event timeline: a "Started" key date, the updates as cards anchored at their time,
-/// and (if resolved) an "Ended" key date. Each circle is coloured by its impact, and the connecting
-/// line keeps the preceding circle's colour until the next one.
+/// The vertical event timeline: a "Started" key date, the updates as cards anchored at their time,
+/// and (if resolved) an "Ended" key date. Each circle is coloured by its impact; the connecting line
+/// keeps the preceding circle's colour until the next one.
 fn render_timeline(incident: &Incident) -> Html {
     let mut updates = incident.updates.clone();
     updates.sort_by_key(|u| u.timestamp);
 
-    // Build (circle class, body) rows in chronological order: a neutral "Started" marker, the
-    // updates, and an "Ended" marker once resolved.
     let mut rows: Vec<(&'static str, Html)> = Vec::new();
     rows.push(("start", key_date_body("Started", incident.start_time)));
     for update in &updates {
@@ -159,8 +237,6 @@ fn render_timeline(incident: &Incident) -> Html {
         rows.push(("end", key_date_body("Ended", end)));
     }
 
-    // The last row draws no connecting line; every other row's line carries its own colour down to
-    // the next circle.
     let last = rows.len() - 1;
 
     html! {
@@ -188,7 +264,7 @@ fn key_date_body(label: &str, time: DateTime<Utc>) -> Html {
     html! {
         <>
             <div class="timeline-keydate">{label}</div>
-            <div class="timeline-time">{time.format("%Y-%m-%d %H:%M UTC").to_string()}</div>
+            <div class="timeline-time">{time_format(time)}</div>
         </>
     }
 }
@@ -197,7 +273,7 @@ fn update_body(update: &IncidentUpdate) -> Html {
     let class = impact_class(update.impact);
     html! {
         <>
-            <div class="timeline-time">{update.timestamp.format("%Y-%m-%d %H:%M UTC").to_string()}</div>
+            <div class="timeline-time">{time_format(update.timestamp)}</div>
             <div class={classes!("timeline-card", class)}>
                 <span class={classes!("incident-status-pill", class)}>{impact_label(update.impact)}</span>
                 <div class="timeline-card-message markdown">{ render_markdown(&update.message) }</div>
@@ -216,7 +292,7 @@ mod tests {
 
     fn incident(end: Option<i64>, updates: Vec<IncidentUpdate>) -> Incident {
         Incident {
-            id: "i".into(),
+            id: "abcd-ef12".into(),
             title: "DB outage".into(),
             description: String::new(),
             start_time: ts(1_700_000_000),
@@ -237,8 +313,19 @@ mod tests {
         }
     }
 
+    /// Renders an `IncidentBlock` inside a router (its title is a `<Link>`), as the app does.
     async fn render(incident: Incident) -> String {
-        yew::ServerRenderer::<IncidentBlock>::with_props(move || IncidentBlockProps {
+        #[function_component(Harness)]
+        fn harness(props: &IncidentBlockProps) -> Html {
+            use yew_router::history::{AnyHistory, MemoryHistory};
+            let history = AnyHistory::from(MemoryHistory::new());
+            html! {
+                <Router history={history}>
+                    <IncidentBlock incident={props.incident.clone()} controls={Html::default()} />
+                </Router>
+            }
+        }
+        yew::ServerRenderer::<Harness>::with_props(move || IncidentBlockProps {
             incident,
             controls: Html::default(),
         })
@@ -257,31 +344,58 @@ mod tests {
         ))
         .await;
 
-        // Key dates appear as text; updates carry impact-coloured circles.
         assert!(html.contains("Started"), "missing Started key date: {html}");
         assert!(html.contains("Ended"), "missing Ended key date");
         assert!(html.contains("timeline-circle error"), "offline update needs an error circle");
         assert!(html.contains("timeline-circle ok"), "the resolving update needs an ok circle");
-        // The line after the offline circle stays error-coloured until the next circle.
         assert!(html.contains("timeline-tail error"), "line after offline must be error-coloured");
-        // Update messages render as cards with status pills.
-        assert!(html.contains("incident-status-pill error"));
+        // The nice id and a link to the detail page are present.
+        assert!(html.contains("#abcd-ef12"), "missing nice id: {html}");
+        assert!(html.contains("/incidents/abcd-ef12"), "missing detail link");
     }
 
     #[tokio::test]
     async fn header_reports_active_duration_resolution_and_draft() {
-        // Ongoing offline -> "Offline for …".
         let active = render(incident(None, vec![update(Impact::Offline, 1_700_000_100)])).await;
         assert!(active.contains("Offline for"), "active offline header: {active}");
 
-        // Ended -> "Resolved".
         let resolved =
             render(incident(Some(1_700_010_000), vec![update(Impact::Offline, 1_700_000_100)])).await;
         assert!(resolved.contains("Resolved"), "resolved header: {resolved}");
 
-        // No updates -> hidden draft.
         let draft = render(incident(None, vec![])).await;
         assert!(draft.contains("Draft"), "draft header: {draft}");
+    }
+
+    #[tokio::test]
+    async fn summary_renders_horizontal_markers_with_preceding_colour() {
+        #[function_component(SummaryHarness)]
+        fn summary_harness(props: &IncidentSummaryProps) -> Html {
+            use yew_router::history::{AnyHistory, MemoryHistory};
+            let history = AnyHistory::from(MemoryHistory::new());
+            html! {
+                <Router history={history}>
+                    <IncidentSummary incident={props.incident.clone()} />
+                </Router>
+            }
+        }
+
+        let inc = incident(
+            None,
+            vec![update(Impact::Offline, 100), update(Impact::Degraded, 200)],
+        );
+        let html = yew::ServerRenderer::<SummaryHarness>::with_props(move || {
+            IncidentSummaryProps { incident: inc }
+        })
+        .render()
+        .await;
+
+        assert!(html.contains("incident-hbar"), "missing horizontal timeline: {html}");
+        assert!(html.contains("hdot error"), "missing offline marker");
+        assert!(html.contains("hdot warn"), "missing degraded marker");
+        // The line leading into the degraded marker carries the preceding (offline) colour.
+        assert!(html.contains("hline error"), "missing preceding-colour line");
+        assert!(html.contains("/incidents/abcd-ef12"), "summary title should link to the detail page");
     }
 
     #[test]
