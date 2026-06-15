@@ -9,8 +9,13 @@ impl From<&crate::config::UiConfig> for grey_api::UiConfig {
             logo: config.logo.clone(),
             links: config.links.clone(),
             reload_interval: config.reload_interval,
-            // Populated from the admin OIDC config in a later slice; no auth is exposed yet.
-            auth: None,
+            // Expose only the public OIDC parameters the SPA needs for browser-side PKCE — never the
+            // client secret (there is none) or the admin ACL.
+            auth: config.admin.as_ref().map(|admin| grey_api::UiAuthConfig {
+                issuer: admin.oidc.endpoint.clone(),
+                client_id: admin.oidc.client_id.clone(),
+                scopes: admin.oidc.scopes.clone(),
+            }),
         }
     }
 }

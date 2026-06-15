@@ -1,9 +1,15 @@
-use actix_web::{App, HttpResponse, HttpServer, Result, http::header::ContentType, web};
+use std::sync::Arc;
+
+use actix_web::{App, HttpResponse, HttpServer, Result, http::header::ContentType, middleware::from_fn, web};
 use include_dir::{Dir, include_dir};
 
 use crate::state::State;
 
+use auth::OidcVerifier;
+
+mod admin;
 mod api;
+mod auth;
 mod page;
 
 // Embed the dist directory at compile time
@@ -12,16 +18,24 @@ static ASSETS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../ui/dist");
 #[derive(Clone)]
 pub struct AppState {
     pub state: State,
+    /// Shared OIDC bearer-token validator (caches discovery + JWKS across requests).
+    pub oidc: Arc<OidcVerifier>,
 }
 
 impl AppState {
     pub fn new(state: State) -> Self {
-        Self { state }
+        Self {
+            state,
+            oidc: Arc::new(OidcVerifier::new()),
+        }
     }
 
     #[cfg(test)]
     pub async fn test(temp_path: std::path::PathBuf) -> Self {
-        Self { state: State::test(temp_path).await }
+        Self {
+            state: State::test(temp_path).await,
+            oidc: Arc::new(OidcVerifier::new()),
+        }
     }
 }
 
@@ -65,6 +79,17 @@ pub fn create_app() -> App<
         .route("/api/v1/notices", web::get().to(api::get_notices))
         .route("/api/v1/incidents", web::get().to(api::get_incidents))
         .route("/api/v1/cluster/peers", web::get().to(api::get_peers))
+        // Admin API: every route is guarded by OIDC bearer validation + the configured ACL.
+        .service(
+            web::scope("/api/v1/admin")
+                .wrap(from_fn(auth::require_admin))
+                .route("/me", web::get().to(admin::me))
+                .route("/incidents", web::get().to(admin::list_incidents))
+                .route("/incidents", web::post().to(admin::create_incident))
+                .route("/incidents/{id}", web::put().to(admin::update_incident))
+                .route("/incidents/{id}", web::delete().to(admin::delete_incident))
+                .route("/incidents/{id}/updates", web::post().to(admin::add_update)),
+        )
         .route("/static/{filename:.*}", web::get().to(serve_static))
 }
 
@@ -90,6 +115,37 @@ mod tests {
         let req = test::TestRequest::get().uri("/incidents").to_request();
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success(), "GET /incidents should be server-rendered");
+    }
+
+    /// With no `admin` configuration, the admin scope is closed entirely (403, not a route 404).
+    #[actix_web::test]
+    async fn admin_routes_are_closed_when_unconfigured() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::test(dir.path().to_path_buf()).await;
+        let app = test::init_service(create_app().app_data(web::Data::new(state))).await;
+
+        let req = test::TestRequest::get().uri("/api/v1/admin/incidents").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::FORBIDDEN);
+    }
+
+    /// With `admin` configured but no bearer token, the admin API responds 401 (authenticate),
+    /// distinct from the 403 returned when admin is disabled entirely.
+    #[actix_web::test]
+    async fn admin_routes_require_a_token_when_configured() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = format!(
+            "ui:\n  enabled: true\n  listen: 127.0.0.1:0\n  admin:\n    acl: 'true'\n    oidc:\n      endpoint: https://issuer.example\n      client_id: test-client\nstate: {}\nprobes: []\n",
+            dir.path().join("state.redb").display().to_string().replace('\\', "/")
+        );
+        let config_path = dir.path().join("config.yml");
+        tokio::fs::write(&config_path, config).await.unwrap();
+        let state = State::new(&config_path).await.unwrap();
+        let app = test::init_service(create_app().app_data(web::Data::new(AppState::new(state)))).await;
+
+        let req = test::TestRequest::get().uri("/api/v1/admin/incidents").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::UNAUTHORIZED);
     }
 }
 

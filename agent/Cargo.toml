@@ -42,6 +42,7 @@ http.workspace = true
 humantime.workspace = true
 humantime-serde.workspace = true
 include_dir.workspace = true
+jsonwebtoken.workspace = true
 lazy_static.workspace = true
 openssl-sys = { workspace = true, optional = true }
 rand.workspace = true

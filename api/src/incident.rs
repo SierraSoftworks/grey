@@ -78,6 +78,53 @@ impl Incident {
     }
 }
 
+/// The editable fields of an incident, supplied by an administrator when creating or replacing one.
+/// The server owns `id`, `created_at`, `updated_at` and the `updates` list, so they are not part of
+/// the input.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct IncidentInput {
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(with = "chrono::serde::ts_seconds")]
+    pub start_time: DateTime<Utc>,
+    #[serde(default, with = "chrono::serde::ts_seconds_option")]
+    pub end_time: Option<DateTime<Utc>>,
+    #[serde(default, with = "chrono::serde::ts_seconds_option")]
+    pub detection_time: Option<DateTime<Utc>>,
+    #[serde(default, with = "chrono::serde::ts_seconds_option")]
+    pub mitigation_time: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub affected_services: Vec<String>,
+    /// Whether the incident is visible to unauthenticated viewers. Defaults to visible on create.
+    #[serde(default = "default_true")]
+    pub visible: bool,
+}
+
+/// A status update posted against an incident. The server assigns the update's `id`, and defaults
+/// the `timestamp` to the current time when omitted.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct NewIncidentUpdate {
+    pub status: IncidentStatus,
+    pub message: String,
+    #[serde(default, with = "chrono::serde::ts_seconds_option")]
+    pub timestamp: Option<DateTime<Utc>>,
+}
+
+/// The signed-in administrator, derived from validated token claims, returned by `/api/v1/admin/me`.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct AdminUser {
+    pub subject: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

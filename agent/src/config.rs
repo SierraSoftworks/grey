@@ -90,6 +90,12 @@ pub struct UiConfig {
     #[serde(default = "default::ui::reload_interval")]
     #[serde(with = "humantime_serde")]
     pub reload_interval: std::time::Duration,
+
+    /// Optional administrative access configuration. When present, the admin API is protected by
+    /// OIDC bearer-token validation plus the configured access-control list. When absent, the admin
+    /// API is closed entirely.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admin: Option<AdminConfig>,
 }
 
 impl Default for UiConfig {
@@ -102,8 +108,44 @@ impl Default for UiConfig {
             notices: vec![],
             links: vec![],
             reload_interval: default::ui::reload_interval(),
+            admin: None,
         }
     }
+}
+
+/// Administrative access configuration for the incident-management API.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct AdminConfig {
+    /// A `filt-rs` expression evaluated against the validated token claims (exposed under the
+    /// `claims.` prefix) plus the request `method`/`path`. It must evaluate to true for a request to
+    /// be authorized. Defaults to denying every request, so the admin area is closed until an ACL is
+    /// explicitly configured.
+    #[serde(default = "default_admin_acl")]
+    pub acl: filt_rs::Filter,
+
+    /// OIDC parameters. The agent validates bearer tokens against this provider; the public subset
+    /// (issuer, client id, scopes) is also surfaced to the SPA so it can run the browser-side login.
+    pub oidc: OidcConfig,
+}
+
+/// OIDC provider configuration. The agent only needs to *validate* tokens, so no client secret is
+/// required (the browser is a public PKCE client).
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct OidcConfig {
+    /// The provider's issuer / base URL, used to discover endpoints and JWKS and as the expected
+    /// token issuer.
+    pub endpoint: String,
+    /// The public OAuth2 client id, also the expected audience of validated ID tokens.
+    pub client_id: String,
+    /// Additional scopes the SPA should request beyond the implicit `openid`.
+    #[serde(default)]
+    pub scopes: Vec<String>,
+}
+
+/// The default admin ACL denies every request, so administrative access is closed until an operator
+/// opts in with an explicit expression.
+fn default_admin_acl() -> filt_rs::Filter {
+    filt_rs::Filter::new("false").expect("the deny-all ACL expression must parse")
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
