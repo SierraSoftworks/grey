@@ -17,6 +17,13 @@ pub fn header(props: &HeaderProps) -> Html {
     let auth = use_auth();
     let menu_open = use_state(|| false);
 
+    // Prefer the user's name, falling back to their email address.
+    let user_display = auth
+        .user
+        .as_ref()
+        .and_then(|u| u.name.clone().or_else(|| u.email.clone()))
+        .unwrap_or_else(|| "Admin".to_string());
+
     let toggle_menu = {
         let menu_open = menu_open.clone();
         Callback::from(move |_| {
@@ -49,10 +56,12 @@ pub fn header(props: &HeaderProps) -> Html {
                 <Status status={props.status} text={props.status_text.clone()} />
 
                 if auth.is_authenticated() {
-                    <span class="admin-user">
-                        { auth.user.as_ref().and_then(|u| u.email.clone().or_else(|| u.name.clone())).unwrap_or_else(|| "Admin".to_string()) }
-                    </span>
-                    <button class="auth-button" onclick={auth.logout.reform(|_| ())}>{"Sign out"}</button>
+                    // One control: shows the user, reveals a "Sign out" overlay on hover, and signs
+                    // out when clicked.
+                    <button class="user-chip" onclick={auth.logout.reform(|_| ())} title="Sign out">
+                        <span class="user-chip__name">{ user_display.clone() }</span>
+                        <span class="user-chip__signout" aria-hidden="true">{"Sign out"}</span>
+                    </button>
                 } else if auth.configured {
                     <button class="auth-button" onclick={auth.login.reform(|_| ())}>{"Sign in"}</button>
                 }

@@ -1,62 +1,19 @@
 @use '../styles/variables' as *;
 
-// Status-driven accents shared by timeline dots, pills and cards.
-@mixin status-color($class, $color) {
-    .timeline-dot.#{$class} {
-        background-color: $color;
-        box-shadow: 0 0 0 1px $color;
-    }
-
+// Status pill colours. Block borders come from the shared `.section.{ok|warn|error|unknown}` rules;
+// drafts get their own muted, dashed treatment below.
+@mixin pill-color($class, $color) {
     .incident-status-pill.#{$class} {
         background-color: $color;
     }
-
-    .incident-card.#{$class} {
-        border-left-color: $color;
-    }
 }
 
-@include status-color(ok, $color-status-ok);
-@include status-color(warning, $color-status-warn);
-@include status-color(error, $color-status-error);
-@include status-color(unknown, $color-status-unknown);
+@include pill-color(ok, $color-status-ok);
+@include pill-color(warn, $color-status-warn);
+@include pill-color(error, $color-status-error);
+@include pill-color(unknown, $color-status-unknown);
 
-// The incidents timeline under the probes.
-.incidents-timeline {
-    .incidents-timeline-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-        max-width: $tablet;
-        margin: 0 auto 1rem auto;
-
-        h2 {
-            margin: 0;
-            font-weight: 300;
-        }
-
-        .incidents-view-all {
-            color: $color-status-unknown;
-            text-decoration: none;
-            font-size: 0.9rem;
-
-            &:hover {
-                text-decoration: underline;
-            }
-        }
-    }
-
-    .incident-link {
-        color: inherit;
-        text-decoration: none;
-
-        &:hover {
-            text-decoration: underline;
-        }
-    }
-}
-
-// A compact status pill reused on the timeline and the incidents page.
+// A compact status pill reused on incident blocks and update entries.
 .incident-status-pill {
     display: inline-block;
     padding: 0.1rem 0.6rem;
@@ -68,41 +25,28 @@
     white-space: nowrap;
 }
 
-// The full incidents page.
-.incidents-page {
-    max-width: $tablet;
-    margin: 2rem auto;
-    padding: 1rem 1rem;
-
-    > h1 {
-        font-weight: 200;
-    }
-
+// The incidents section mirrors the probe layout: a colour-coded header over a stack of blocks.
+.incidents-section {
     .incidents-empty {
         color: $color-text-muted;
+        margin: 0;
     }
 }
 
-.incident-card {
-    background-color: $background-box;
-    border: 1px solid $color-separator;
-    border-left: 6px solid $color-status-offline;
-    border-radius: $border-radius-medium;
-    padding: 1.5rem;
-    margin-bottom: 1.5rem;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-
-    @media screen and (max-width: $mobile) {
-        padding: 1rem;
+// Each incident is a status-bordered block, like a probe service group.
+.incident-block {
+    &.draft {
+        // Drafts are admin-only; mark them distinctly from published incidents.
+        border-left: dashed 8px $color-status-offline;
     }
 
-    .incident-card-header {
+    .incident-block-header {
         display: flex;
         justify-content: space-between;
         align-items: baseline;
         gap: 1rem;
 
-        h2 {
+        .incident-block-title {
             margin: 0;
             font-weight: 400;
         }
@@ -162,11 +106,40 @@
     }
 }
 
-// Header sign-in / sign-out controls.
-.admin-user {
+// Header user chip: shows the signed-in user; hovering reveals a "Sign out" overlay; clicking signs
+// the user out.
+.user-chip {
+    position: relative;
+    cursor: pointer;
+    overflow: hidden;
+    border: 1px solid $color-separator;
+    background-color: $background-box;
+    color: $color-text;
+    border-radius: $border-radius-small;
+    padding: 0.4rem 0.9rem;
+    font: inherit;
     font-size: 0.85rem;
-    color: $color-text-muted;
     white-space: nowrap;
+
+    .user-chip__signout {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: $color-status-error;
+        color: $color-status-text;
+        font-weight: 600;
+        opacity: 0;
+        transform: translateY(100%);
+        transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+
+    &:hover .user-chip__signout,
+    &:focus-visible .user-chip__signout {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .auth-button,
@@ -200,17 +173,28 @@
     }
 }
 
-// Admin incidents page.
+// Admin incidents view: the colour-coded header carries the "New incident" action.
 .incidents-admin {
-    .incidents-admin-header {
+    .section.fill {
         display: flex;
         justify-content: space-between;
         align-items: center;
+
+        .primary-button {
+            background-color: rgba(255, 255, 255, 0.18);
+            border-color: rgba(255, 255, 255, 0.5);
+            color: $color-status-text;
+
+            &:hover {
+                background-color: rgba(255, 255, 255, 0.3);
+            }
+        }
     }
 }
 
 .incidents-error {
     color: $color-status-error;
+    margin: 0;
 }
 
 .incident-admin-controls {
@@ -250,7 +234,9 @@
     border: 1px solid $color-separator;
     border-radius: $border-radius-medium;
     padding: 1.5rem;
-    margin-bottom: 1.5rem;
+    margin: 0 auto 1.5rem auto;
+    max-width: $tablet;
+    width: 100%;
 
     h3,
     h4 {
@@ -264,12 +250,6 @@
         gap: 0.25rem;
         font-size: 0.85rem;
         color: $color-text-muted;
-
-        &.checkbox {
-            flex-direction: row;
-            align-items: center;
-            gap: 0.5rem;
-        }
     }
 
     input[type="text"],
@@ -309,7 +289,84 @@
     }
 }
 
-// Tighten markdown output so it sits naturally inside cards.
+// Affected-services autocomplete: removable chips plus a type-to-filter dropdown.
+.services-autocomplete {
+    .services-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        margin-bottom: 0.4rem;
+
+        .service-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            background-color: $color-separator;
+            border-radius: 999px;
+            padding: 0.15rem 0.3rem 0.15rem 0.6rem;
+            font-size: 0.8rem;
+            color: $color-text;
+
+            .service-chip-remove {
+                border: none;
+                background: none;
+                cursor: pointer;
+                font-size: 1rem;
+                line-height: 1;
+                color: $color-text-muted;
+                padding: 0 0.2rem;
+
+                &:hover {
+                    color: $color-status-error;
+                }
+            }
+        }
+    }
+
+    .services-input-wrap {
+        position: relative;
+
+        input {
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .services-dropdown {
+            position: absolute;
+            z-index: 10;
+            top: 100%;
+            left: 0;
+            right: 0;
+            margin: 0.2rem 0 0 0;
+            padding: 0;
+            list-style: none;
+            background-color: $background-box;
+            border: 1px solid $color-separator;
+            border-radius: $border-radius-small;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+            max-height: 12rem;
+            overflow-y: auto;
+
+            .services-option {
+                display: block;
+                width: 100%;
+                text-align: left;
+                border: none;
+                background: none;
+                cursor: pointer;
+                padding: 0.45rem 0.6rem;
+                font: inherit;
+                color: $color-text;
+
+                &:hover {
+                    background-color: $color-separator;
+                }
+            }
+        }
+    }
+}
+
+// Tighten markdown output so it sits naturally inside blocks.
 .markdown {
     line-height: 1.5;
 

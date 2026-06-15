@@ -10,7 +10,7 @@ use crate::contexts::{
 };
 use crate::routes::Route;
 
-use super::components::{Banner, BannerKind, Header, IncidentsPage, IncidentsTimeline, ProbeList, Timeline};
+use super::components::{Banner, BannerKind, Header, IncidentsPage, IncidentsSection, ProbeList, Timeline};
 
 #[cfg(feature = "wasm")]
 pub enum ClientMsg {
@@ -291,10 +291,13 @@ fn switch(route: Route) -> Html {
     }
 }
 
-// The status page: overall banner, probe list, notices and incident timelines.
+// The status page: overall banner, probe list, notices, and recent/active incidents.
 #[function_component(HomeView)]
 fn home_view() -> Html {
+    use crate::contexts::use_incidents;
+
     let probes_ctx = use_probes();
+    let incidents_ctx = use_incidents();
 
     let healthy_probes = probes_ctx
         .probes
@@ -314,6 +317,19 @@ fn home_view() -> Html {
         BannerKind::Error => "Major outage affecting multiple services",
     };
 
+    // Show incidents that are active or recent, mirroring the probe-history window.
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(14);
+    let recent_incidents: Vec<grey_api::Incident> = incidents_ctx
+        .incidents
+        .iter()
+        .filter(|incident| {
+            incident.is_active()
+                || incident.start_time >= cutoff
+                || incident.end_time.map(|end| end >= cutoff).unwrap_or(true)
+        })
+        .cloned()
+        .collect();
+
     html! {
         <>
             <div class="content">
@@ -322,7 +338,7 @@ fn home_view() -> Html {
             </div>
 
             <Timeline />
-            <IncidentsTimeline />
+            <IncidentsSection incidents={recent_incidents} />
         </>
     }
 }

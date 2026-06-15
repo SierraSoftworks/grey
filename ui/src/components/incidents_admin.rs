@@ -1,11 +1,13 @@
-//! Administrator-only incident management UI: the full (including hidden) incident list with
-//! create / edit / add-update / hide / delete controls. Browser-only — it reads DOM input values
-//! and performs authenticated mutations — so the whole module is gated to the `wasm` build.
+//! Administrator-only incident management UI: the full (including draft) incident list with
+//! create / edit / add-update / delete controls. Browser-only — it reads DOM input values and
+//! performs authenticated mutations — so the whole module is gated to the `wasm` build.
 
 use crate::api;
-use crate::components::incidents_page::IncidentCard;
+use crate::components::incidents_timeline::{IncidentBlock, active_summary};
+use crate::contexts::use_probes;
 use chrono::{DateTime, NaiveDateTime, Utc};
-use grey_api::{Incident, IncidentInput, IncidentStatus, NewIncidentUpdate};
+use grey_api::{Incident, IncidentInput, IncidentState, IncidentStatus, NewIncidentUpdate};
+use std::collections::BTreeSet;
 use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 use yew::prelude::*;
 
@@ -31,16 +33,23 @@ fn status_from_str(value: &str) -> IncidentStatus {
     }
 }
 
-fn input_from_incident(incident: &Incident) -> IncidentInput {
-    IncidentInput {
-        title: incident.title.clone(),
-        description: incident.description.clone(),
-        start_time: incident.start_time,
-        end_time: incident.end_time,
-        detection_time: incident.detection_time,
-        mitigation_time: incident.mitigation_time,
-        affected_services: incident.affected_services.clone(),
-        visible: incident.visible,
+fn state_from_str(value: &str) -> IncidentState {
+    match value {
+        "healthy" => IncidentState::Healthy,
+        "degraded" => IncidentState::Degraded,
+        "offline" => IncidentState::Offline,
+        "unknown" => IncidentState::Unknown,
+        _ => IncidentState::Draft,
+    }
+}
+
+fn state_value(state: IncidentState) -> &'static str {
+    match state {
+        IncidentState::Draft => "draft",
+        IncidentState::Healthy => "healthy",
+        IncidentState::Degraded => "degraded",
+        IncidentState::Offline => "offline",
+        IncidentState::Unknown => "unknown",
     }
 }
 
@@ -70,7 +79,9 @@ pub fn admin_incidents(props: &AdminIncidentsProps) -> Html {
     let token = props.token.clone();
     let incidents = use_state(Vec::<Incident>::new);
     let error = use_state(|| Option::<String>::None);
-    let creating = use_state(|| false);
+    // Which incident (if any) currently has its editor open. Lifting this here lets "New incident"
+    // create a draft and immediately open its editor.
+    let editing = use_state(|| Option::<String>::None);
 
     let refresh = {
         let token = token.clone();
@@ -100,55 +111,74 @@ pub fn admin_incidents(props: &AdminIncidentsProps) -> Html {
         });
     }
 
+    // "New incident" saves a draft (started + detected = now) and opens its editor immediately.
     let on_new = {
-        let creating = creating.clone();
-        Callback::from(move |_| creating.set(true))
-    };
-    let on_cancel_new = {
-        let creating = creating.clone();
-        Callback::from(move |_: ()| creating.set(false))
-    };
-    let on_created = {
-        let creating = creating.clone();
-        let refresh = refresh.clone();
-        Callback::from(move |_: ()| {
-            creating.set(false);
-            refresh.emit(());
+        let token = token.clone();
+        let incidents = incidents.clone();
+        let editing = editing.clone();
+        let error = error.clone();
+        Callback::from(move |_| {
+            let token = token.clone();
+            let incidents = incidents.clone();
+            let editing = editing.clone();
+            let error = error.clone();
+            let now = Utc::now();
+            let draft = IncidentInput {
+                title: "Untitled incident".to_string(),
+                description: String::new(),
+                start_time: now,
+                end_time: None,
+                detection_time: Some(now),
+                mitigation_time: None,
+                affected_services: vec![],
+                state: IncidentState::Draft,
+            };
+            wasm_bindgen_futures::spawn_local(async move {
+                match api::create_incident(&token, &draft).await {
+                    Ok(created) => {
+                        editing.set(Some(created.id.clone()));
+                        match api::list_incidents(&token).await {
+                            Ok(list) => {
+                                incidents.set(list);
+                                error.set(None);
+                            }
+                            Err(e) => error.set(Some(e.to_string())),
+                        }
+                    }
+                    Err(e) => error.set(Some(e.to_string())),
+                }
+            });
         })
     };
 
+    let (header_class, header_text) = active_summary(&incidents);
+
     html! {
-        <div class="content incidents-page incidents-admin">
-            <div class="incidents-admin-header">
-                <h1>{"Incidents"}</h1>
-                if !*creating {
-                    <button class="primary-button" onclick={on_new}>{"New incident"}</button>
-                }
+        <div class="content incidents-section incidents-admin">
+            <div class={classes!("section", "fill", header_class)}>
+                <span class={classes!("status", header_class)}>{header_text}</span>
+                <button class="primary-button" onclick={on_new}>{"New incident"}</button>
             </div>
 
             if let Some(err) = (*error).clone() {
-                <p class="incidents-error">{err}</p>
-            }
-
-            if *creating {
-                <IncidentForm
-                    token={token.clone()}
-                    incident={None::<Incident>}
-                    on_saved={on_created}
-                    on_cancel={on_cancel_new}
-                />
+                <div class="section"><p class="incidents-error">{err}</p></div>
             }
 
             if incidents.is_empty() {
-                <p class="incidents-empty">{"No incidents yet. Create one to get started."}</p>
+                <div class="section"><p class="incidents-empty">{"No incidents yet. Create one to get started."}</p></div>
             } else {
-                { for incidents.iter().map(|incident| html! {
-                    <AdminIncidentCard
-                        key={incident.id.clone()}
-                        token={token.clone()}
-                        incident={incident.clone()}
-                        on_changed={refresh.clone()}
-                    />
+                { for incidents.iter().map(|incident| {
+                    let is_editing = editing.as_ref() == Some(&incident.id);
+                    html! {
+                        <AdminIncidentCard
+                            key={incident.id.clone()}
+                            token={token.clone()}
+                            incident={incident.clone()}
+                            editing={is_editing}
+                            set_editing={editing.setter()}
+                            on_changed={refresh.clone()}
+                        />
+                    }
                 }) }
             }
         </div>
@@ -159,45 +189,32 @@ pub fn admin_incidents(props: &AdminIncidentsProps) -> Html {
 struct AdminIncidentCardProps {
     token: String,
     incident: Incident,
+    editing: bool,
+    set_editing: UseStateSetter<Option<String>>,
     on_changed: Callback<()>,
 }
 
 #[function_component(AdminIncidentCard)]
 fn admin_incident_card(props: &AdminIncidentCardProps) -> Html {
-    let editing = use_state(|| false);
     let adding = use_state(|| false);
 
     let token = props.token.clone();
     let incident = props.incident.clone();
+    let id = incident.id.clone();
 
     let on_delete = {
         let token = token.clone();
-        let id = incident.id.clone();
+        let id = id.clone();
         let on_changed = props.on_changed.clone();
+        let set_editing = props.set_editing.clone();
         Callback::from(move |_| {
             let token = token.clone();
             let id = id.clone();
             let on_changed = on_changed.clone();
+            let set_editing = set_editing.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 if api::delete_incident(&token, &id).await.is_ok() {
-                    on_changed.emit(());
-                }
-            });
-        })
-    };
-
-    let on_toggle_visibility = {
-        let token = token.clone();
-        let incident = incident.clone();
-        let on_changed = props.on_changed.clone();
-        Callback::from(move |_| {
-            let token = token.clone();
-            let id = incident.id.clone();
-            let mut input = input_from_incident(&incident);
-            input.visible = !incident.visible;
-            let on_changed = on_changed.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                if api::update_incident(&token, &id, &input).await.is_ok() {
+                    set_editing.set(None);
                     on_changed.emit(());
                 }
             });
@@ -205,8 +222,12 @@ fn admin_incident_card(props: &AdminIncidentCardProps) -> Html {
     };
 
     let toggle_edit = {
-        let editing = editing.clone();
-        Callback::from(move |_| editing.set(!*editing))
+        let set_editing = props.set_editing.clone();
+        let id = id.clone();
+        let editing = props.editing;
+        Callback::from(move |_| {
+            set_editing.set(if editing { None } else { Some(id.clone()) });
+        })
     };
     let toggle_add = {
         let adding = adding.clone();
@@ -214,10 +235,10 @@ fn admin_incident_card(props: &AdminIncidentCardProps) -> Html {
     };
 
     let on_saved = {
-        let editing = editing.clone();
+        let set_editing = props.set_editing.clone();
         let on_changed = props.on_changed.clone();
         Callback::from(move |_: ()| {
-            editing.set(false);
+            set_editing.set(None);
             on_changed.emit(());
         })
     };
@@ -230,8 +251,8 @@ fn admin_incident_card(props: &AdminIncidentCardProps) -> Html {
         })
     };
     let cancel_edit = {
-        let editing = editing.clone();
-        Callback::from(move |_: ()| editing.set(false))
+        let set_editing = props.set_editing.clone();
+        Callback::from(move |_: ()| set_editing.set(None))
     };
     let cancel_add = {
         let adding = adding.clone();
@@ -240,22 +261,19 @@ fn admin_incident_card(props: &AdminIncidentCardProps) -> Html {
 
     let controls = html! {
         <div class="incident-admin-controls">
-            <button onclick={toggle_edit}>{ if *editing { "Close editor" } else { "Edit" } }</button>
+            <button onclick={toggle_edit}>{ if props.editing { "Close editor" } else { "Edit" } }</button>
             <button onclick={toggle_add}>{ if *adding { "Close update" } else { "Add update" } }</button>
-            <button onclick={on_toggle_visibility}>
-                { if incident.visible { "Hide" } else { "Show" } }
-            </button>
             <button class="danger" onclick={on_delete}>{"Delete"}</button>
         </div>
     };
 
     html! {
         <>
-            <IncidentCard incident={incident.clone()} controls={controls} />
-            if *editing {
+            <IncidentBlock incident={incident.clone()} controls={controls} />
+            if props.editing {
                 <IncidentForm
                     token={token.clone()}
-                    incident={Some(incident.clone())}
+                    incident={incident.clone()}
                     on_saved={on_saved}
                     on_cancel={cancel_edit}
                 />
@@ -263,7 +281,7 @@ fn admin_incident_card(props: &AdminIncidentCardProps) -> Html {
             if *adding {
                 <UpdateForm
                     token={token.clone()}
-                    incident_id={incident.id.clone()}
+                    incident_id={id.clone()}
                     on_saved={on_added}
                     on_cancel={cancel_add}
                 />
@@ -275,48 +293,58 @@ fn admin_incident_card(props: &AdminIncidentCardProps) -> Html {
 #[derive(Properties, PartialEq)]
 struct IncidentFormProps {
     token: String,
-    incident: Option<Incident>,
+    incident: Incident,
     on_saved: Callback<()>,
     on_cancel: Callback<()>,
 }
 
 #[function_component(IncidentForm)]
 fn incident_form(props: &IncidentFormProps) -> Html {
-    let existing = props.incident.clone();
-    let is_edit = existing.is_some();
+    let incident = &props.incident;
 
-    let init_title = existing.as_ref().map(|i| i.title.clone()).unwrap_or_default();
-    let init_description = existing.as_ref().map(|i| i.description.clone()).unwrap_or_default();
-    let init_start = existing.as_ref().map(|i| dt_to_input(i.start_time)).unwrap_or_default();
-    let init_end = existing.as_ref().and_then(|i| i.end_time).map(dt_to_input).unwrap_or_default();
-    let init_detection = existing.as_ref().and_then(|i| i.detection_time).map(dt_to_input).unwrap_or_default();
-    let init_mitigation = existing.as_ref().and_then(|i| i.mitigation_time).map(dt_to_input).unwrap_or_default();
-    let init_services = existing.as_ref().map(|i| i.affected_services.join(", ")).unwrap_or_default();
-    let init_visible = existing.as_ref().map(|i| i.visible).unwrap_or(true);
-
-    let title = use_state(move || init_title);
-    let description = use_state(move || init_description);
-    let start = use_state(move || init_start);
-    let end = use_state(move || init_end);
-    let detection = use_state(move || init_detection);
-    let mitigation = use_state(move || init_mitigation);
-    let services = use_state(move || init_services);
-    let visible = use_state(move || init_visible);
+    let title = use_state(|| incident.title.clone());
+    let description = use_state(|| incident.description.clone());
+    let start = use_state(|| dt_to_input(incident.start_time));
+    let end = use_state(|| incident.end_time.map(dt_to_input).unwrap_or_default());
+    let detection = use_state(|| incident.detection_time.map(dt_to_input).unwrap_or_default());
+    let mitigation = use_state(|| incident.mitigation_time.map(dt_to_input).unwrap_or_default());
+    let services = use_state(|| incident.affected_services.clone());
+    let state = use_state(|| incident.state);
     let error = use_state(|| Option::<String>::None);
     let saving = use_state(|| false);
 
-    let on_visible = {
-        let visible = visible.clone();
+    // Suggest known service tags and probe names for the affected-services autocomplete.
+    let probes_ctx = use_probes();
+    let suggestions: Vec<String> = {
+        let mut set = BTreeSet::new();
+        for probe in &probes_ctx.probes {
+            if let Some(service) = probe.tags.get("service") {
+                if !service.is_empty() {
+                    set.insert(service.clone());
+                }
+            }
+            set.insert(probe.name.clone());
+        }
+        set.into_iter().collect()
+    };
+
+    let on_state = {
+        let state = state.clone();
         Callback::from(move |e: Event| {
-            let el: HtmlInputElement = e.target_unchecked_into();
-            visible.set(el.checked());
+            let el: HtmlSelectElement = e.target_unchecked_into();
+            state.set(state_from_str(&el.value()));
         })
+    };
+
+    let on_services_change = {
+        let services = services.clone();
+        Callback::from(move |next: Vec<String>| services.set(next))
     };
 
     let onsubmit = {
         let token = props.token.clone();
-        let existing_id = existing.as_ref().map(|i| i.id.clone());
-        let (title, description, start, end, detection, mitigation, services, visible) = (
+        let id = incident.id.clone();
+        let (title, description, start, end, detection, mitigation, services, state) = (
             title.clone(),
             description.clone(),
             start.clone(),
@@ -324,7 +352,7 @@ fn incident_form(props: &IncidentFormProps) -> Html {
             detection.clone(),
             mitigation.clone(),
             services.clone(),
-            visible.clone(),
+            state.clone(),
         );
         let error = error.clone();
         let saving = saving.clone();
@@ -345,28 +373,21 @@ fn incident_form(props: &IncidentFormProps) -> Html {
                 end_time: parse_dt(&end),
                 detection_time: parse_dt(&detection),
                 mitigation_time: parse_dt(&mitigation),
-                affected_services: (*services)
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect(),
-                visible: *visible,
+                affected_services: (*services).clone(),
+                state: *state,
             };
 
             let token = token.clone();
-            let existing_id = existing_id.clone();
+            let id = id.clone();
             let error = error.clone();
             let saving = saving.clone();
             let on_saved = on_saved.clone();
             saving.set(true);
             wasm_bindgen_futures::spawn_local(async move {
-                let result = match existing_id {
-                    Some(id) => api::update_incident(&token, &id, &input).await.map(|_| ()),
-                    None => api::create_incident(&token, &input).await.map(|_| ()),
-                };
+                let result = api::update_incident(&token, &id, &input).await;
                 saving.set(false);
                 match result {
-                    Ok(()) => on_saved.emit(()),
+                    Ok(_) => on_saved.emit(()),
                     Err(e) => error.set(Some(e.to_string())),
                 }
             });
@@ -380,12 +401,21 @@ fn incident_form(props: &IncidentFormProps) -> Html {
 
     html! {
         <form class="incident-form" onsubmit={onsubmit}>
-            <h3>{ if is_edit { "Edit incident" } else { "New incident" } }</h3>
+            <h3>{"Edit incident"}</h3>
             if let Some(err) = (*error).clone() {
                 <p class="incidents-error">{err}</p>
             }
             <label>{"Title"}
                 <input type="text" value={(*title).clone()} oninput={bind_input(&title)} />
+            </label>
+            <label>{"State"}
+                <select onchange={on_state}>
+                    <option value="draft" selected={*state == IncidentState::Draft}>{"Draft (hidden from public)"}</option>
+                    <option value="healthy" selected={*state == IncidentState::Healthy}>{"Healthy"}</option>
+                    <option value="degraded" selected={*state == IncidentState::Degraded}>{"Degraded"}</option>
+                    <option value="offline" selected={*state == IncidentState::Offline}>{"Offline"}</option>
+                    <option value="unknown" selected={*state == IncidentState::Unknown}>{"Unknown"}</option>
+                </select>
             </label>
             <label>{"Description (markdown)"}
                 <textarea rows="4" value={(*description).clone()} oninput={bind_textarea(&description)} />
@@ -404,12 +434,12 @@ fn incident_form(props: &IncidentFormProps) -> Html {
                     <input type="datetime-local" value={(*end).clone()} oninput={bind_input(&end)} />
                 </label>
             </div>
-            <label>{"Affected services (comma separated)"}
-                <input type="text" value={(*services).clone()} oninput={bind_input(&services)} />
-            </label>
-            <label class="checkbox">
-                <input type="checkbox" checked={*visible} onchange={on_visible} />
-                {"Visible to unauthenticated visitors"}
+            <label>{"Affected services"}
+                <AffectedServicesInput
+                    selected={(*services).clone()}
+                    suggestions={suggestions}
+                    on_change={on_services_change}
+                />
             </label>
             <div class="incident-form-actions">
                 <button type="submit" class="primary-button" disabled={*saving}>
@@ -418,6 +448,127 @@ fn incident_form(props: &IncidentFormProps) -> Html {
                 <button type="button" onclick={oncancel}>{"Cancel"}</button>
             </div>
         </form>
+    }
+}
+
+#[derive(Properties, PartialEq)]
+struct AffectedServicesInputProps {
+    selected: Vec<String>,
+    suggestions: Vec<String>,
+    on_change: Callback<Vec<String>>,
+}
+
+/// A type-to-filter, click-to-add autocomplete for affected services, modelled on automate's filter
+/// list. Selected services show as removable chips; matching suggestions appear in a dropdown.
+#[function_component(AffectedServicesInput)]
+fn affected_services_input(props: &AffectedServicesInputProps) -> Html {
+    let query = use_state(String::new);
+    let selected = props.selected.clone();
+
+    let needle = query.to_lowercase();
+    let matches: Vec<String> = props
+        .suggestions
+        .iter()
+        .filter(|s| !selected.iter().any(|sel| sel.eq_ignore_ascii_case(s)))
+        .filter(|s| needle.is_empty() || s.to_lowercase().contains(&needle))
+        .take(8)
+        .cloned()
+        .collect();
+
+    let add = {
+        let on_change = props.on_change.clone();
+        let selected = selected.clone();
+        let query = query.clone();
+        Callback::from(move |value: String| {
+            let value = value.trim().to_string();
+            query.set(String::new());
+            if value.is_empty() || selected.iter().any(|s| s.eq_ignore_ascii_case(&value)) {
+                return;
+            }
+            let mut next = selected.clone();
+            next.push(value);
+            on_change.emit(next);
+        })
+    };
+
+    let remove = {
+        let on_change = props.on_change.clone();
+        let selected = selected.clone();
+        Callback::from(move |value: String| {
+            on_change.emit(selected.iter().filter(|s| **s != value).cloned().collect());
+        })
+    };
+
+    let oninput = {
+        let query = query.clone();
+        Callback::from(move |e: InputEvent| {
+            let el: HtmlInputElement = e.target_unchecked_into();
+            query.set(el.value());
+        })
+    };
+
+    let onkeydown = {
+        let add = add.clone();
+        let query = query.clone();
+        Callback::from(move |e: KeyboardEvent| {
+            if e.key() == "Enter" {
+                e.prevent_default();
+                add.emit((*query).clone());
+            }
+        })
+    };
+
+    let show_dropdown = !needle.is_empty() && !matches.is_empty();
+
+    html! {
+        <div class="services-autocomplete">
+            if !selected.is_empty() {
+                <div class="services-chips">
+                    { for selected.iter().map(|service| {
+                        let service = service.clone();
+                        let onclick = {
+                            let remove = remove.clone();
+                            let service = service.clone();
+                            Callback::from(move |_| remove.emit(service.clone()))
+                        };
+                        html! {
+                            <span class="service-chip">
+                                { &service }
+                                <button type="button" class="service-chip-remove" onclick={onclick}>{"×"}</button>
+                            </span>
+                        }
+                    }) }
+                </div>
+            }
+            <div class="services-input-wrap">
+                <input
+                    type="text"
+                    placeholder="Add an affected service…"
+                    value={(*query).clone()}
+                    oninput={oninput}
+                    onkeydown={onkeydown}
+                />
+                if show_dropdown {
+                    <ul class="services-dropdown">
+                        { for matches.iter().map(|suggestion| {
+                            let suggestion = suggestion.clone();
+                            let onclick = {
+                                let add = add.clone();
+                                let suggestion = suggestion.clone();
+                                Callback::from(move |_| add.emit(suggestion.clone()))
+                            };
+                            html! {
+                                <li>
+                                    <button type="button" class="services-option" onclick={onclick}>
+                                        { &suggestion }
+                                    </button>
+                                </li>
+                            }
+                        }) }
+                    </ul>
+                }
+            </div>
+        </div>
     }
 }
 

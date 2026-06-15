@@ -18,7 +18,7 @@ pub use cluster_status::ClusterStatus;
 pub use header::Header;
 pub use history::History;
 pub use incidents_page::IncidentsPage;
-pub use incidents_timeline::IncidentsTimeline;
+pub use incidents_timeline::{IncidentBlock, IncidentsSection};
 pub use probe::Probe;
 pub use probe_list::ProbeList;
 pub use timeline::Timeline;

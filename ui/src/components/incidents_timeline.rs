@@ -1,20 +1,23 @@
-use crate::contexts::use_incidents;
-use crate::routes::Route;
-use grey_api::{Incident, IncidentStatus};
-use yew::prelude::*;
-use yew_router::prelude::*;
+//! Shared incident display: status/state helpers, the per-incident block, and the incidents section
+//! (a colour-coded header over a stack of incident blocks) that mirrors the probe layout. Used by
+//! the home page, the public incidents page, and (via [`IncidentBlock`]) the admin management view.
 
-/// The CSS status class used by timeline dots and status pills for an incident status.
+use crate::components::markdown::render_markdown;
+use chrono::{DateTime, Utc};
+use grey_api::{Incident, IncidentState, IncidentStatus, IncidentUpdate};
+use yew::prelude::*;
+
+/// The status class used for an incident **update** pill. Matches the section/banner colour classes
+/// (`ok`/`warn`/`error`/`unknown`) used elsewhere.
 pub fn incident_status_class(status: IncidentStatus) -> &'static str {
     match status {
         IncidentStatus::Healthy => "ok",
-        IncidentStatus::Degraded => "warning",
+        IncidentStatus::Degraded => "warn",
         IncidentStatus::Offline => "error",
         IncidentStatus::Unknown => "unknown",
     }
 }
 
-/// A human-readable label for an incident status.
 pub fn incident_status_label(status: IncidentStatus) -> &'static str {
     match status {
         IncidentStatus::Healthy => "Healthy",
@@ -24,66 +27,177 @@ pub fn incident_status_label(status: IncidentStatus) -> &'static str {
     }
 }
 
-/// Formats an incident's time span for compact display ("started → resolved", or "→ ongoing").
-pub fn format_range(incident: &Incident) -> String {
-    let start = incident.start_time.format("%Y-%m-%d %H:%M UTC");
-    match incident.end_time {
-        Some(end) => format!("{start} → {}", end.format("%Y-%m-%d %H:%M UTC")),
-        None => format!("{start} → ongoing"),
+/// The colour class for an incident's overall state. `draft` has its own muted styling.
+pub fn incident_state_class(state: IncidentState) -> &'static str {
+    match state {
+        IncidentState::Draft => "draft",
+        IncidentState::Healthy => "ok",
+        IncidentState::Degraded => "warn",
+        IncidentState::Offline => "error",
+        IncidentState::Unknown => "unknown",
     }
 }
 
-/// The incidents timeline shown beneath the probes on the status page. Reuses the notices-timeline
-/// visual language so the two read consistently.
-#[function_component(IncidentsTimeline)]
-pub fn incidents_timeline() -> Html {
-    let incidents_ctx = use_incidents();
+pub fn incident_state_label(state: IncidentState) -> &'static str {
+    match state {
+        IncidentState::Draft => "Draft",
+        IncidentState::Healthy => "Healthy",
+        IncidentState::Degraded => "Degraded",
+        IncidentState::Offline => "Offline",
+        IncidentState::Unknown => "Unknown",
+    }
+}
 
-    if incidents_ctx.incidents.is_empty() {
-        return html! {};
+/// Summarises the section header: a colour class and a label reflecting any active incidents.
+pub fn active_summary(incidents: &[Incident]) -> (&'static str, String) {
+    let active = incidents.iter().filter(|i| i.is_active()).count();
+    if active == 0 {
+        ("ok", "No active incidents".to_string())
+    } else {
+        let any_offline = incidents
+            .iter()
+            .any(|i| i.is_active() && i.state == IncidentState::Offline);
+        let class = if any_offline { "error" } else { "warn" };
+        let plural = if active == 1 { "" } else { "s" };
+        (class, format!("{active} active incident{plural}"))
+    }
+}
+
+/// A colour-coded header plus a block per incident, mirroring the probe section. When the list is
+/// empty it renders nothing unless an `empty_message` is supplied (the dedicated incidents page).
+#[derive(Properties, PartialEq)]
+pub struct IncidentsSectionProps {
+    pub incidents: Vec<Incident>,
+    #[prop_or_default]
+    pub empty_message: Option<AttrValue>,
+}
+
+#[function_component(IncidentsSection)]
+pub fn incidents_section(props: &IncidentsSectionProps) -> Html {
+    if props.incidents.is_empty() {
+        return match &props.empty_message {
+            Some(message) => html! {
+                <div class="content incidents-section">
+                    <div class="section fill ok"><span class="status ok">{"No active incidents"}</span></div>
+                    <div class="section"><p class="incidents-empty">{message.clone()}</p></div>
+                </div>
+            },
+            None => html! {},
+        };
     }
 
+    let (class, text) = active_summary(&props.incidents);
+
     html! {
-        <div class="incidents-timeline notices-timeline">
-            <div class="incidents-timeline-header">
-                <h2>{"Incidents"}</h2>
-                <Link<Route> to={Route::Incidents} classes="incidents-view-all">{"View all"}</Link<Route>>
+        <div class="content incidents-section">
+            <div class={classes!("section", "fill", class)}>
+                <span class={classes!("status", class)}>{text}</span>
             </div>
-            <div class="timeline-line"></div>
-            { for incidents_ctx.incidents.iter().map(|incident| html! {
-                <IncidentTimelineItem key={incident.id.clone()} incident={incident.clone()} />
+            { for props.incidents.iter().map(|incident| html! {
+                <IncidentBlock key={incident.id.clone()} incident={incident.clone()} />
             }) }
         </div>
     }
 }
 
+/// A single incident rendered as a status-bordered block (a `.section`, like a probe service group).
+/// `controls` lets the admin view graft management buttons onto the foot of the block.
 #[derive(Properties, PartialEq)]
-struct IncidentTimelineItemProps {
-    incident: Incident,
+pub struct IncidentBlockProps {
+    pub incident: Incident,
+    #[prop_or_default]
+    pub controls: Html,
 }
 
-#[function_component(IncidentTimelineItem)]
-fn incident_timeline_item(props: &IncidentTimelineItemProps) -> Html {
+#[function_component(IncidentBlock)]
+pub fn incident_block(props: &IncidentBlockProps) -> Html {
     let incident = &props.incident;
-    let status = incident.current_status();
-    let status_class = incident_status_class(status);
+    let class = incident_state_class(incident.state);
 
     html! {
-        <div class={classes!("timeline-item", status_class)}>
-            <div class="timeline-dot-container">
-                <div class={classes!("timeline-dot", status_class)}></div>
+        <div class={classes!("section", "incident-block", class)}>
+            <div class="incident-block-header">
+                <h3 class="incident-block-title">{&incident.title}</h3>
+                <span class={classes!("incident-status-pill", class)}>
+                    {incident_state_label(incident.state)}
+                </span>
             </div>
-            <div class="timeline-content">
-                <div class="notice-header">
-                    <h3>
-                        <Link<Route> to={Route::Incidents} classes="incident-link">{&incident.title}</Link<Route>>
-                    </h3>
-                    <span class={classes!("incident-status-pill", status_class)}>
-                        {incident_status_label(status)}
-                    </span>
+
+            <dl class="incident-times">
+                { time_row("Started", Some(incident.start_time)) }
+                { time_row("Detected", incident.detection_time) }
+                { time_row("Mitigated", incident.mitigation_time) }
+                { time_row("Resolved", incident.end_time) }
+            </dl>
+
+            if !incident.affected_services.is_empty() {
+                <p class="incident-affected">
+                    <strong>{"Affected services: "}</strong>{incident.affected_services.join(", ")}
+                </p>
+            }
+
+            if !incident.description.is_empty() {
+                <div class="incident-description markdown">
+                    { render_markdown(&incident.description) }
                 </div>
-                <span class="notice-timestamp">{format_range(incident)}</span>
-            </div>
+            }
+
+            if !incident.updates.is_empty() {
+                <ol class="incident-updates">
+                    { for sorted_updates(incident).into_iter().map(|update| {
+                        let key = update.id.clone();
+                        html! { <IncidentUpdateItem key={key} update={update} /> }
+                    }) }
+                </ol>
+            }
+
+            { props.controls.clone() }
         </div>
     }
+}
+
+#[derive(Properties, PartialEq)]
+struct IncidentUpdateItemProps {
+    update: IncidentUpdate,
+}
+
+#[function_component(IncidentUpdateItem)]
+fn incident_update_item(props: &IncidentUpdateItemProps) -> Html {
+    let update = &props.update;
+    let class = incident_status_class(update.status);
+
+    html! {
+        <li class={classes!("incident-update", class)}>
+            <div class="incident-update-meta">
+                <span class={classes!("incident-status-pill", class)}>
+                    {incident_status_label(update.status)}
+                </span>
+                <span class="incident-update-time">
+                    {update.timestamp.format("%Y-%m-%d %H:%M UTC").to_string()}
+                </span>
+            </div>
+            <div class="incident-update-message markdown">
+                { render_markdown(&update.message) }
+            </div>
+        </li>
+    }
+}
+
+fn time_row(label: &str, time: Option<DateTime<Utc>>) -> Html {
+    match time {
+        Some(t) => html! {
+            <>
+                <dt>{label}</dt>
+                <dd>{t.format("%Y-%m-%d %H:%M UTC").to_string()}</dd>
+            </>
+        },
+        None => html! {},
+    }
+}
+
+/// Updates newest-first for the detail view.
+fn sorted_updates(incident: &Incident) -> Vec<IncidentUpdate> {
+    let mut updates = incident.updates.clone();
+    updates.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    updates
 }

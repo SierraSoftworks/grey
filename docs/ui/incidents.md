@@ -8,12 +8,18 @@ stored in Grey's state database.
 
 An incident has a title, a description (markdown), a start time, optional
 detection / mitigation / resolution times, an optional list of affected
-services, and a series of **status updates** (each with a status of `healthy`,
-`degraded`, `offline` or `unknown`, a timestamp, and a markdown message).
+services, an overall **state**, and a series of **status updates** (each with a
+status of `healthy`, `degraded`, `offline` or `unknown`, a timestamp, and a
+markdown message).
 
-Incidents appear as a timeline beneath the probes on the status page, and in
-full on the dedicated **Incidents** page. Incidents can be hidden from
-unauthenticated visitors while you prepare them.
+An incident's state is one of `draft`, `healthy`, `degraded`, `offline` or
+`unknown`. A **draft** is visible only to administrators — use it to prepare an
+incident before publishing it by changing its state. `degraded` and `offline`
+incidents that are still ongoing are counted as *active*.
+
+Incidents appear as status-coloured blocks beneath the probes on the status
+page (under a header that turns amber/red when incidents are active), and in
+full on the dedicated **Incidents** page.
 
 ::: tip
 Incidents are stored locally in Grey's state database (`state.redb`) as JSON.
@@ -95,16 +101,19 @@ with no (or an invalid) token receives `401`.
 
 ## Managing incidents
 
-Once signed in, the **Incidents** page shows every incident (including hidden
-ones) with management controls:
+Once signed in, the **Incidents** page shows every incident (including drafts)
+with management controls:
 
-- **New incident** — create an incident with its title, description, times,
-  affected services, and visibility.
-- **Edit** — change any of an incident's details.
-- **Add update** — post a status update (status + markdown message); the most
-  recent update drives the incident's current status on the timeline.
-- **Hide / Show** — toggle whether unauthenticated visitors can see the incident.
+- **New incident** — immediately saves a new draft (with its start and detection
+  times set to now) and opens its editor so you can fill in the details.
+- **Edit** — change any of an incident's details, including its **state** (set it
+  to `draft` to hide it from the public again). Affected services offer an
+  autocomplete drawn from your configured services and probe names.
+- **Add update** — post a status update (status + markdown message). Updates form
+  the incident's chronological narrative.
 - **Delete** — remove the incident permanently.
+
+Signing in is via the user chip in the header; hover it to reveal **Sign out**.
 
 ::: tip
 Times are entered and displayed in UTC.

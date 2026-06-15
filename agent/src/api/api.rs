@@ -100,7 +100,7 @@ mod tests {
         let app_state = AppState::test(temp_dir.path().to_path_buf()).await;
 
         let now = chrono::Utc::now();
-        let mk = |id: &str, visible: bool| grey_api::Incident {
+        let mk = |id: &str, public: bool| grey_api::Incident {
             id: id.into(),
             title: format!("Incident {id}"),
             description: String::new(),
@@ -109,7 +109,11 @@ mod tests {
             detection_time: None,
             mitigation_time: None,
             affected_services: vec![],
-            visible,
+            state: if public {
+                grey_api::IncidentState::Offline
+            } else {
+                grey_api::IncidentState::Draft
+            },
             updates: vec![],
             created_at: now,
             updated_at: now,
@@ -124,7 +128,7 @@ mod tests {
         assert_eq!(
             incidents.iter().map(|i| i.id.clone()).collect::<Vec<_>>(),
             vec!["vis"],
-            "the public endpoint must hide incidents that are not marked visible"
+            "the public endpoint must hide draft incidents from unauthenticated viewers"
         );
     }
 

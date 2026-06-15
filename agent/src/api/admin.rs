@@ -60,7 +60,7 @@ pub async fn create_incident(
         detection_time: input.detection_time,
         mitigation_time: input.mitigation_time,
         affected_services: input.affected_services,
-        visible: input.visible,
+        state: input.state,
         updates: vec![],
         created_at: now,
         updated_at: now,
@@ -90,7 +90,7 @@ pub async fn update_incident(
     incident.detection_time = input.detection_time;
     incident.mitigation_time = input.mitigation_time;
     incident.affected_services = input.affected_services;
-    incident.visible = input.visible;
+    incident.state = input.state;
     incident.updated_at = Utc::now();
 
     data.state.put_incident(&incident).await?;
@@ -163,12 +163,13 @@ mod tests {
             .uri("/incidents")
             .set_json(serde_json::json!({
                 "title": "Outage", "description": "desc",
-                "start_time": 1_700_000_000, "visible": true
+                "start_time": 1_700_000_000, "state": "offline"
             }))
             .to_request();
         let created: Incident = test::call_and_read_body_json(&app, req).await;
         assert_eq!(created.title, "Outage");
-        assert!(created.visible);
+        assert_eq!(created.state, grey_api::IncidentState::Offline);
+        assert!(created.is_public());
         assert!(created.updates.is_empty());
 
         // The admin list includes it.
@@ -181,12 +182,12 @@ mod tests {
             .uri(&format!("/incidents/{}", created.id))
             .set_json(serde_json::json!({
                 "title": "Outage (resolved)", "start_time": 1_700_000_000,
-                "end_time": 1_700_003_600, "visible": false
+                "end_time": 1_700_003_600, "state": "healthy"
             }))
             .to_request();
         let updated: Incident = test::call_and_read_body_json(&app, req).await;
         assert_eq!(updated.title, "Outage (resolved)");
-        assert!(!updated.visible);
+        assert_eq!(updated.state, grey_api::IncidentState::Healthy);
         assert!(updated.end_time.is_some());
         assert_eq!(updated.id, created.id);
         assert_eq!(updated.created_at, created.created_at);
@@ -198,7 +199,7 @@ mod tests {
             .to_request();
         let with_update: Incident = test::call_and_read_body_json(&app, req).await;
         assert_eq!(with_update.updates.len(), 1);
-        assert_eq!(with_update.current_status(), IncidentStatus::Offline);
+        assert_eq!(with_update.updates[0].status, IncidentStatus::Offline);
 
         // Delete → 204, then everything 404s.
         let req = test::TestRequest::delete().uri(&format!("/incidents/{}", created.id)).to_request();
@@ -209,7 +210,7 @@ mod tests {
 
         let req = test::TestRequest::put()
             .uri(&format!("/incidents/{}", created.id))
-            .set_json(serde_json::json!({ "title": "x", "start_time": 1, "visible": true }))
+            .set_json(serde_json::json!({ "title": "x", "start_time": 1, "state": "healthy" }))
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status(), StatusCode::NOT_FOUND);
     }

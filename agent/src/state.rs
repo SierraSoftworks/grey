@@ -43,13 +43,62 @@ type Migration = fn(&redb::WriteTransaction) -> Result<(), Box<dyn Error>>;
 /// of these that have been applied; new migrations are **appended** here and never reordered or
 /// removed.
 const MIGRATIONS: &[Migration] = &[
-    m001_create_incidents, // version 0 -> 1
+    m001_create_incidents,  // version 0 -> 1
+    m002_visible_to_state,  // version 1 -> 2
 ];
 
 /// Establishes the incidents table. Opening it in a write transaction creates it; this is the
 /// baseline migration that brings a database up to schema version 1.
 fn m001_create_incidents(txn: &redb::WriteTransaction) -> Result<(), Box<dyn Error>> {
     txn.open_table(INCIDENTS_TABLE)?;
+    Ok(())
+}
+
+/// Migrates incident records from the boolean `visible` field to the `state` enum (which adds a
+/// `Draft` state). A hidden incident becomes a draft; a visible one adopts its latest update's
+/// status (defaulting to `unknown`). Records already carrying `state` are left untouched.
+fn m002_visible_to_state(txn: &redb::WriteTransaction) -> Result<(), Box<dyn Error>> {
+    use serde_json::Value;
+
+    let mut table = txn.open_table(INCIDENTS_TABLE)?;
+
+    // Collect the rewrites first; the table can't be mutated while its iterator is live.
+    let mut rewrites: Vec<(String, Vec<u8>)> = Vec::new();
+    for entry in table.iter()?.filter_map(|r| r.ok()) {
+        let (key, value) = entry;
+        let id = key.value().to_string();
+        let Ok(mut doc) = serde_json::from_slice::<Value>(value.value()) else {
+            continue; // leave anything unparseable untouched
+        };
+        let Some(obj) = doc.as_object_mut() else { continue };
+        if obj.contains_key("state") || !obj.contains_key("visible") {
+            continue; // already migrated, or nothing to convert
+        }
+
+        let visible = obj.get("visible").and_then(Value::as_bool).unwrap_or(false);
+        let state = if visible {
+            obj.get("updates")
+                .and_then(Value::as_array)
+                .and_then(|updates| {
+                    updates
+                        .iter()
+                        .max_by_key(|u| u.get("timestamp").and_then(Value::as_i64).unwrap_or(0))
+                })
+                .and_then(|u| u.get("status").and_then(Value::as_str))
+                .unwrap_or("unknown")
+                .to_string()
+        } else {
+            "draft".to_string()
+        };
+
+        obj.remove("visible");
+        obj.insert("state".to_string(), Value::String(state));
+        rewrites.push((id, serde_json::to_vec(&doc)?));
+    }
+
+    for (id, data) in rewrites {
+        table.insert(id.as_str(), data.as_slice())?;
+    }
     Ok(())
 }
 
@@ -244,11 +293,11 @@ impl State {
         Ok(())
     }
 
-    /// Lists stored incidents, most recent first. When `include_hidden` is false, incidents that are
-    /// not marked visible are omitted — this is the public, unauthenticated view.
+    /// Lists stored incidents, most recent first. When `include_drafts` is false, draft incidents
+    /// are omitted — this is the public, unauthenticated view.
     pub async fn list_incidents(
         &self,
-        include_hidden: bool,
+        include_drafts: bool,
     ) -> Result<Vec<grey_api::Incident>, Box<dyn Error>> {
         let txn = self.database.begin_read()?;
         let mut incidents = Vec::new();
@@ -256,7 +305,9 @@ impl State {
             for entry in table.iter()?.filter_map(|r| r.ok()) {
                 let (_key, value) = entry;
                 match serde_json::from_slice::<grey_api::Incident>(value.value()) {
-                    Ok(incident) if include_hidden || incident.visible => incidents.push(incident),
+                    Ok(incident) if include_drafts || incident.is_public() => {
+                        incidents.push(incident)
+                    }
                     Ok(_) => {}
                     Err(err) => {
                         warn!("Skipping an incident record that failed to deserialize: {err:?}")
@@ -985,7 +1036,7 @@ mod tests {
         assert_eq!((g1, g2, g3), (1, 2, 3), "generation must increase on each restart");
     }
 
-    fn sample_incident(id: &str, visible: bool, start_secs: i64) -> grey_api::Incident {
+    fn sample_incident(id: &str, public: bool, start_secs: i64) -> grey_api::Incident {
         let ts = chrono::DateTime::from_timestamp(start_secs, 0).unwrap();
         grey_api::Incident {
             id: id.into(),
@@ -996,7 +1047,12 @@ mod tests {
             detection_time: None,
             mitigation_time: None,
             affected_services: vec![],
-            visible,
+            // A draft is hidden; any other state is public.
+            state: if public {
+                grey_api::IncidentState::Offline
+            } else {
+                grey_api::IncidentState::Draft
+            },
             updates: vec![],
             created_at: ts,
             updated_at: ts,
@@ -1070,7 +1126,11 @@ mod tests {
             incident.updates.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(),
             vec!["u1", "u2"]
         );
-        assert_eq!(incident.current_status(), grey_api::IncidentStatus::Healthy);
+        // The latest update (by timestamp) is the healthy one added first.
+        assert_eq!(
+            incident.updates.iter().max_by_key(|u| u.timestamp).map(|u| u.status),
+            Some(grey_api::IncidentStatus::Healthy)
+        );
 
         // Updating a non-existent incident reports false.
         assert!(!state
@@ -1117,6 +1177,53 @@ mod tests {
             Some(1),
             "the failed migration must not advance the version (atomic rollback)"
         );
+    }
+
+    #[test]
+    fn migration_converts_visible_to_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.redb");
+        let db = Database::create(&path).unwrap();
+
+        // Simulate a v1 database whose incidents still use the old `visible` schema.
+        {
+            let write = db.begin_write().unwrap();
+            {
+                let mut table = write.open_table(INCIDENTS_TABLE).unwrap();
+                let hidden = serde_json::json!({
+                    "id": "a", "title": "a", "start_time": 1, "visible": false,
+                    "created_at": 1, "updated_at": 1, "updates": []
+                });
+                let visible = serde_json::json!({
+                    "id": "b", "title": "b", "start_time": 1, "visible": true,
+                    "created_at": 1, "updated_at": 1,
+                    "updates": [{"id": "u", "status": "offline", "timestamp": 5, "message": "x"}]
+                });
+                table.insert("a", serde_json::to_vec(&hidden).unwrap().as_slice()).unwrap();
+                table.insert("b", serde_json::to_vec(&visible).unwrap().as_slice()).unwrap();
+            }
+            {
+                let mut meta = write.open_table(META_TABLE).unwrap();
+                meta.insert(SCHEMA_VERSION_KEY, 1u64).unwrap();
+            }
+            write.commit().unwrap();
+        }
+
+        State::migrate(&db).unwrap();
+
+        let read = db.begin_read().unwrap();
+        let table = read.open_table(INCIDENTS_TABLE).unwrap();
+        let a: serde_json::Value =
+            serde_json::from_slice(table.get("a").unwrap().unwrap().value()).unwrap();
+        let b: serde_json::Value =
+            serde_json::from_slice(table.get("b").unwrap().unwrap().value()).unwrap();
+
+        // Hidden -> draft; the legacy `visible` field is gone.
+        assert_eq!(a["state"], "draft");
+        assert!(a.get("visible").is_none());
+        // Visible -> the latest update's status.
+        assert_eq!(b["state"], "offline");
+        assert!(b.get("visible").is_none());
     }
 
     #[test]

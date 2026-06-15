@@ -99,7 +99,7 @@ mod tests {
                 detection_time: None,
                 mitigation_time: None,
                 affected_services: vec![],
-                visible: true,
+                state: grey_api::IncidentState::Offline,
                 updates: vec![],
                 created_at: now,
                 updated_at: now,
