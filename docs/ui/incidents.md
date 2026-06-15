@@ -123,9 +123,10 @@ Signing in is via the user chip in the header; hover it to reveal **Sign out**.
 Times are entered and displayed in UTC.
 :::
 
-## Schema migrations
+## Pages and links
 
-Incidents are stored as JSON behind a global schema version recorded in the
-state database. On startup Grey applies any pending migrations as part of
-initializing the database; it only refuses to start if a migration cannot be
-applied, so upgrades are safe and automatic.
+Each incident has a short id shown as dash-grouped base36 (e.g. `x7a8-fw2i`) and
+its own page at `/incidents/{id}`. The landing page shows recent and active
+incidents as compact cards (title, description, and a horizontal timeline whose
+markers reveal each update on hover); the **Incidents** page lists them in full,
+and every incident title links through to its page.
