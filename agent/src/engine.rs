@@ -6,7 +6,7 @@ use tracing_batteries::prelude::opentelemetry::trace::SpanKind as OpenTelemetryS
 use tracing_batteries::prelude::*;
 
 use crate::probe_runner::ProbeRunner;
-use crate::state::State;
+use crate::state::{ProbeStore, State};
 use crate::{Probe, cluster};
 
 pub struct Engine {

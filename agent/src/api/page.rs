@@ -3,6 +3,7 @@ use grey_ui::{App, AppProps};
 use yew::ServerRenderer;
 
 use super::{ASSETS_DIR, AppState};
+use crate::state::{IncidentStore, ProbeStore};
 
 pub async fn index(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpResponse> {
     let probe_histories = data.state.get_probe_states().await?;

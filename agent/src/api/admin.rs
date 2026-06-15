@@ -5,10 +5,12 @@ use serde_json::{Map, Value};
 
 use super::AppState;
 use super::auth::Authenticated;
+use crate::state::IncidentStore;
 
-/// A time-sortable incident/update id: a zero-padded millisecond timestamp with a random suffix to
-/// avoid collisions between records created within the same millisecond.
-fn new_id(now: DateTime<Utc>) -> String {
+/// A time-sortable id for incident updates: a zero-padded millisecond timestamp with a random
+/// suffix to avoid collisions between updates posted within the same millisecond. (Incident ids
+/// themselves are assigned by the store; see [`crate::state::IncidentStore::create_incident`].)
+fn new_update_id(now: DateTime<Utc>) -> String {
     format!("{:013}-{:08x}", now.timestamp_millis(), rand::random::<u32>())
 }
 
@@ -51,8 +53,9 @@ pub async fn create_incident(
 ) -> Result<HttpResponse> {
     let now = Utc::now();
     let input = body.into_inner();
+    // The store assigns the id; this placeholder is overwritten by `create_incident`.
     let incident = Incident {
-        id: new_id(now),
+        id: String::new(),
         title: input.title,
         description: input.description,
         start_time: input.start_time,
@@ -63,8 +66,8 @@ pub async fn create_incident(
         updated_at: now,
     };
 
-    data.state.put_incident(&incident).await?;
-    Ok(HttpResponse::Created().json(incident))
+    let created = data.state.create_incident(incident).await?;
+    Ok(HttpResponse::Created().json(created))
 }
 
 /// `PUT /api/v1/admin/incidents/{id}` — replace an incident's editable fields, preserving its id,
@@ -114,7 +117,7 @@ pub async fn add_update(
     let now = Utc::now();
     let input = body.into_inner();
     let update = IncidentUpdate {
-        id: new_id(now),
+        id: new_update_id(now),
         impact: input.impact,
         timestamp: input.timestamp.unwrap_or(now),
         message: input.message,

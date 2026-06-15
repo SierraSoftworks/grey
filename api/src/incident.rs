@@ -31,6 +31,40 @@ impl Impact {
     }
 }
 
+/// Encodes a numeric incident id as lowercase base36 split into dash-separated groups of at most
+/// four characters, e.g. `1234567 -> "qglj"`, `4000000000 -> "1up3-mtg"`. The underlying value is a
+/// `u32`; the grouped string is the public, human-friendly form used in URLs and the UI.
+pub fn encode_incident_id(id: u32) -> String {
+    const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+
+    let mut chars = Vec::new();
+    let mut n = id;
+    if n == 0 {
+        chars.push(b'0');
+    }
+    while n > 0 {
+        chars.push(DIGITS[(n % 36) as usize]);
+        n /= 36;
+    }
+    chars.reverse();
+
+    chars
+        .chunks(4)
+        .map(|chunk| std::str::from_utf8(chunk).unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+/// Parses a grouped base36 incident id (as produced by [`encode_incident_id`]) back into its `u32`.
+/// Dashes are ignored and letters are case-insensitive; returns `None` for empty or invalid input.
+pub fn decode_incident_id(id: &str) -> Option<u32> {
+    let cleaned: String = id.chars().filter(|c| *c != '-').collect();
+    if cleaned.is_empty() {
+        return None;
+    }
+    u32::from_str_radix(&cleaned, 36).ok()
+}
+
 /// A single update posted against an incident. `message` is markdown; `impact` drives the incident's
 /// status from this point on the timeline.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -182,6 +216,20 @@ mod tests {
             created_at: ts(1_700_000_000),
             updated_at: ts(1_700_000_100),
         }
+    }
+
+    #[test]
+    fn incident_id_round_trips_and_groups() {
+        for id in [0u32, 1, 35, 36, 1_234_567, u32::MAX] {
+            assert_eq!(decode_incident_id(&encode_incident_id(id)), Some(id));
+        }
+        // Groups are at most four base36 characters, dash-separated.
+        let encoded = encode_incident_id(u32::MAX);
+        assert!(encoded.split('-').all(|g| (1..=4).contains(&g.len())), "bad grouping: {encoded}");
+        // Decoding ignores dashes and is case-insensitive; junk is rejected.
+        assert_eq!(decode_incident_id("1U-P3MT-G"), decode_incident_id("1up3mtg"));
+        assert_eq!(decode_incident_id(""), None);
+        assert_eq!(decode_incident_id("!!"), None);
     }
 
     #[test]

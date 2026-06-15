@@ -1,6 +1,7 @@
 use actix_web::{HttpResponse, Result, web};
 
 use super::AppState;
+use crate::state::{IncidentStore, ProbeStore};
 
 impl From<&crate::config::UiConfig> for grey_api::UiConfig {
     fn from(config: &crate::config::UiConfig) -> Self {

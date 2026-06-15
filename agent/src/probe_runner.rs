@@ -5,7 +5,11 @@ use std::{
 };
 use tracing_batteries::prelude::{opentelemetry::trace::Status as OpenTelemetryStatus, *};
 
-use crate::{Probe, Validator, result::ProbeResult, state::State};
+use crate::{
+    Probe, Validator,
+    result::ProbeResult,
+    state::{ProbeStore, State},
+};
 
 const NO_PARENT: Option<tracing::Id> = None;
 
