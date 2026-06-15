@@ -6,13 +6,12 @@ use yew::prelude::*;
 use crate::components::status::StatusLevel;
 use crate::contexts::{
     AuthProvider, IncidentsProvider, NoticesProvider, PeersProvider, ProbesProvider,
-    UiConfigProvider, use_probes,
+    UiConfigProvider,
 };
 use crate::routes::Route;
+use crate::views::{HomeView, IncidentDetail, IncidentsList, NewIncident};
 
-use super::components::{
-    Banner, BannerKind, Header, IncidentBlock, IncidentsPage, IncidentsSection, ProbeList, Timeline,
-};
+use super::components::Header;
 
 #[cfg(feature = "wasm")]
 pub enum ClientMsg {
@@ -288,88 +287,10 @@ fn app_content(props: &AppContentProps) -> Html {
 fn switch(route: Route) -> Html {
     match route {
         Route::Home => html! { <HomeView /> },
-        Route::Incidents => html! { <IncidentsPage /> },
+        Route::Incidents => html! { <IncidentsList /> },
+        Route::NewIncident => html! { <NewIncident /> },
         Route::Incident { id } => html! { <IncidentDetail id={id} /> },
         Route::NotFound => html! { <yew_router::prelude::Redirect<Route> to={Route::Home} /> },
-    }
-}
-
-#[derive(Properties, PartialEq)]
-struct IncidentDetailProps {
-    id: String,
-}
-
-/// A single incident's page, found by id in the (public) incidents context.
-#[function_component(IncidentDetail)]
-fn incident_detail(props: &IncidentDetailProps) -> Html {
-    use crate::contexts::use_incidents;
-
-    let incidents_ctx = use_incidents();
-    let incident = incidents_ctx.incidents.iter().find(|i| i.id == props.id).cloned();
-
-    html! {
-        <div class="content incidents-page">
-            if let Some(incident) = incident {
-                <IncidentBlock incident={incident} />
-            } else {
-                <h1>{"Incident not found"}</h1>
-                <p class="incidents-empty">
-                    {"This incident does not exist or is not publicly visible."}
-                </p>
-            }
-        </div>
-    }
-}
-
-// The status page: overall banner, probe list, notices, and recent/active incidents.
-#[function_component(HomeView)]
-fn home_view() -> Html {
-    use crate::contexts::use_incidents;
-
-    let probes_ctx = use_probes();
-    let incidents_ctx = use_incidents();
-
-    let healthy_probes = probes_ctx
-        .probes
-        .iter()
-        .filter(|probe| probe.passing())
-        .count();
-
-    let banner_kind = match healthy_probes {
-        p if p == probes_ctx.probes.len() => BannerKind::Ok,
-        p if p >= probes_ctx.probes.len() / 2 => BannerKind::Warning,
-        _ => BannerKind::Error,
-    };
-
-    let status_text = match banner_kind {
-        BannerKind::Ok => "All services operating normally",
-        BannerKind::Warning => "Partial degradation in service",
-        BannerKind::Error => "Major outage affecting multiple services",
-    };
-
-    // Show incidents that are active or recent, mirroring the probe-history window.
-    let cutoff = chrono::Utc::now() - chrono::Duration::days(14);
-    let recent_incidents: Vec<grey_api::Incident> = incidents_ctx
-        .incidents
-        .iter()
-        .filter(|incident| {
-            incident.is_active()
-                || incident.start_time >= cutoff
-                || incident.end_time.map(|end| end >= cutoff).unwrap_or(true)
-        })
-        .cloned()
-        .collect();
-
-    html! {
-        <>
-            <div class="content">
-                <Banner kind={banner_kind} text={status_text.to_string()} />
-                <ProbeList />
-            </div>
-
-            <Timeline />
-            <IncidentsSection incidents={recent_incidents} />
-        </>
     }
 }
 

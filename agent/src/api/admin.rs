@@ -1,21 +1,30 @@
-use actix_web::{HttpMessage, HttpRequest, HttpResponse, Result, web};
-use chrono::{DateTime, Utc};
-use grey_api::{AdminUser, Incident, IncidentInput, IncidentUpdate, NewIncidentUpdate};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, Result, http::header, web};
+use chrono::Utc;
+use grey_api::{AdminUser, CreateIncident, Identifier, IncidentEdit, IncidentUpdate};
 use serde_json::{Map, Value};
+use std::str::FromStr;
 
 use super::AppState;
 use super::auth::Authenticated;
-use crate::state::IncidentStore;
-
-/// A time-sortable id for incident updates: a zero-padded millisecond timestamp with a random
-/// suffix to avoid collisions between updates posted within the same millisecond. (Incident ids
-/// themselves are assigned by the store; see [`crate::state::IncidentStore::create_incident`].)
-fn new_update_id(now: DateTime<Utc>) -> String {
-    format!("{:013}-{:08x}", now.timestamp_millis(), rand::random::<u32>())
-}
+use crate::state::{CasOutcome, IncidentStore};
 
 fn not_found() -> HttpResponse {
     HttpResponse::NotFound().json(serde_json::json!({ "error": "Incident not found." }))
+}
+
+/// The ETag for an incident is simply its version, quoted per RFC 7232.
+fn etag(version: u64) -> String {
+    format!("\"{version}\"")
+}
+
+/// Parses the version out of an `If-Match` header (`"3"` or `W/"3"`), if present and numeric.
+fn if_match_version(req: &HttpRequest) -> Option<u64> {
+    let raw = req.headers().get(header::IF_MATCH)?.to_str().ok()?;
+    raw.trim().trim_start_matches("W/").trim_matches('"').parse::<u64>().ok()
+}
+
+fn parse_id(raw: &str) -> Option<Identifier> {
+    Identifier::from_str(raw).ok()
 }
 
 /// `GET /api/v1/admin/me` — the signed-in administrator, derived from validated token claims.
@@ -46,52 +55,69 @@ pub async fn list_incidents(data: web::Data<AppState>) -> Result<HttpResponse> {
     Ok(HttpResponse::Ok().json(incidents))
 }
 
-/// `POST /api/v1/admin/incidents` — create an incident.
-pub async fn create_incident(
-    data: web::Data<AppState>,
-    body: web::Json<IncidentInput>,
-) -> Result<HttpResponse> {
-    let now = Utc::now();
-    let input = body.into_inner();
-    // The store assigns the id; this placeholder is overwritten by `create_incident`.
-    let incident = Incident {
-        id: String::new(),
-        title: input.title,
-        description: input.description,
-        start_time: input.start_time,
-        end_time: input.end_time,
-        affected_services: input.affected_services,
-        updates: vec![],
-        created_at: now,
-        updated_at: now,
-    };
-
-    let created = data.state.create_incident(incident).await?;
-    Ok(HttpResponse::Created().json(created))
-}
-
-/// `PUT /api/v1/admin/incidents/{id}` — replace an incident's editable fields, preserving its id,
-/// creation time and status updates.
-pub async fn update_incident(
+/// `GET /api/v1/admin/incidents/{id}` — a single incident (including hidden), with its version ETag.
+pub async fn get_incident(
     data: web::Data<AppState>,
     path: web::Path<String>,
-    body: web::Json<IncidentInput>,
 ) -> Result<HttpResponse> {
-    let id = path.into_inner();
-    let Some(mut incident) = data.state.get_incident(&id).await? else {
+    let Some(id) = parse_id(&path.into_inner()) else {
         return Ok(not_found());
     };
+    match data.state.get_incident(id).await? {
+        Some(incident) => Ok(HttpResponse::Ok()
+            .insert_header((header::ETAG, etag(incident.version)))
+            .json(incident)),
+        None => Ok(not_found()),
+    }
+}
 
+/// `POST /api/v1/admin/incidents` — create an incident from a title and its opening update.
+pub async fn create_incident(
+    data: web::Data<AppState>,
+    body: web::Json<CreateIncident>,
+) -> Result<HttpResponse> {
     let input = body.into_inner();
-    incident.title = input.title;
-    incident.description = input.description;
-    incident.start_time = input.start_time;
-    incident.end_time = input.end_time;
-    incident.affected_services = input.affected_services;
-    incident.updated_at = Utc::now();
+    let initial = IncidentUpdate {
+        impact: input.impact,
+        timestamp: Utc::now(),
+        message: input.message,
+    };
 
-    data.state.put_incident(&incident).await?;
-    Ok(HttpResponse::Ok().json(incident))
+    let created = data.state.create_incident(input.title, initial).await?;
+    Ok(HttpResponse::Created()
+        .insert_header((header::ETAG, etag(created.version)))
+        .json(created))
+}
+
+/// `PUT /api/v1/admin/incidents/{id}` — replace an incident's title and updates with a check-and-set
+/// against its version (the `If-Match` ETag). Returns 412 on a version mismatch, 428 when no
+/// `If-Match` is supplied.
+pub async fn replace_incident(
+    req: HttpRequest,
+    data: web::Data<AppState>,
+    path: web::Path<String>,
+    body: web::Json<IncidentEdit>,
+) -> Result<HttpResponse> {
+    let Some(id) = parse_id(&path.into_inner()) else {
+        return Ok(not_found());
+    };
+    let Some(expected_version) = if_match_version(&req) else {
+        return Ok(HttpResponse::PreconditionRequired()
+            .json(serde_json::json!({ "error": "An If-Match version header is required." })));
+    };
+
+    match data.state.replace_incident(id, expected_version, body.into_inner()).await? {
+        CasOutcome::Updated(incident) => Ok(HttpResponse::Ok()
+            .insert_header((header::ETAG, etag(incident.version)))
+            .json(incident)),
+        CasOutcome::VersionMismatch(current) => Ok(HttpResponse::PreconditionFailed()
+            .insert_header((header::ETAG, etag(current)))
+            .json(serde_json::json!({
+                "error": "The incident was modified by someone else. Reload and try again.",
+                "version": current,
+            }))),
+        CasOutcome::NotFound => Ok(not_found()),
+    }
 }
 
 /// `DELETE /api/v1/admin/incidents/{id}` — remove an incident.
@@ -99,33 +125,11 @@ pub async fn delete_incident(
     data: web::Data<AppState>,
     path: web::Path<String>,
 ) -> Result<HttpResponse> {
-    if data.state.delete_incident(&path.into_inner()).await? {
-        Ok(HttpResponse::NoContent().finish())
-    } else {
-        Ok(not_found())
-    }
-}
-
-/// `POST /api/v1/admin/incidents/{id}/updates` — append a status update, returning the updated
-/// incident.
-pub async fn add_update(
-    data: web::Data<AppState>,
-    path: web::Path<String>,
-    body: web::Json<NewIncidentUpdate>,
-) -> Result<HttpResponse> {
-    let id = path.into_inner();
-    let now = Utc::now();
-    let input = body.into_inner();
-    let update = IncidentUpdate {
-        id: new_update_id(now),
-        impact: input.impact,
-        timestamp: input.timestamp.unwrap_or(now),
-        message: input.message,
+    let Some(id) = parse_id(&path.into_inner()) else {
+        return Ok(not_found());
     };
-
-    if data.state.add_incident_update(&id, update).await? {
-        let incident = data.state.get_incident(&id).await?;
-        Ok(HttpResponse::Created().json(incident))
+    if data.state.delete_incident(id).await? {
+        Ok(HttpResponse::NoContent().finish())
     } else {
         Ok(not_found())
     }
@@ -135,79 +139,95 @@ pub async fn add_update(
 mod tests {
     use super::*;
     use actix_web::{App, body::MessageBody, http::StatusCode, test};
-    use grey_api::Impact;
-    use tempfile::tempdir;
+    use grey_api::{Impact, Incident};
 
     #[actix_web::test]
-    async fn admin_incident_lifecycle() {
-        // The handlers are exercised through a router (so `web::Path`/`web::Json` extraction is
-        // real), but without the auth middleware — that gate is tested separately in the `api` module.
-        let dir = tempdir().unwrap();
+    async fn admin_incident_cas_lifecycle() {
+        // The handlers run through a router (real path/json/header extraction) without the auth
+        // middleware — that gate is tested separately in the `api` module.
+        let dir = tempfile::tempdir().unwrap();
         let state = AppState::test(dir.path().to_path_buf()).await;
         let app = test::init_service(
             App::new()
                 .app_data(web::Data::new(state))
                 .route("/incidents", web::get().to(list_incidents))
                 .route("/incidents", web::post().to(create_incident))
-                .route("/incidents/{id}", web::put().to(update_incident))
-                .route("/incidents/{id}", web::delete().to(delete_incident))
-                .route("/incidents/{id}/updates", web::post().to(add_update)),
+                .route("/incidents/{id}", web::get().to(get_incident))
+                .route("/incidents/{id}", web::put().to(replace_incident))
+                .route("/incidents/{id}", web::delete().to(delete_incident)),
         )
         .await;
 
-        // Create: a fresh incident has no updates, so it is a hidden draft.
+        // Create with an opening update -> 201 + ETag, version 1, public.
         let req = test::TestRequest::post()
             .uri("/incidents")
-            .set_json(serde_json::json!({
-                "title": "Outage", "description": "desc", "start_time": 1_700_000_000
-            }))
+            .set_json(serde_json::json!({ "title": "Outage", "impact": "offline", "message": "Investigating" }))
             .to_request();
-        let created: Incident = test::call_and_read_body_json(&app, req).await;
-        assert_eq!(created.title, "Outage");
-        assert!(created.updates.is_empty());
-        assert!(!created.is_public(), "a new incident is a hidden draft");
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        assert_eq!(resp.headers().get("etag").unwrap(), "\"1\"");
+        let created: Incident =
+            serde_json::from_slice(&test::read_body(resp).await).unwrap();
+        assert_eq!(created.version, 1);
+        assert_eq!(created.updates.len(), 1);
+        assert!(created.is_public());
 
         // The admin list includes it.
         let req = test::TestRequest::get().uri("/incidents").to_request();
         let all: Vec<Incident> = test::call_and_read_body_json(&app, req).await;
         assert_eq!(all.len(), 1);
 
-        // Replace editable fields: rename and resolve. id/created_at are preserved.
+        // PUT without If-Match -> 428.
+        let edit = serde_json::json!({
+            "title": "Outage (resolved)",
+            "updates": [
+                { "impact": "offline", "timestamp": 1_700_000_000, "message": "down" },
+                { "impact": "none", "timestamp": 1_700_003_600, "message": "fixed" }
+            ]
+        });
         let req = test::TestRequest::put()
             .uri(&format!("/incidents/{}", created.id))
-            .set_json(serde_json::json!({
-                "title": "Outage (resolved)", "start_time": 1_700_000_000,
-                "end_time": 1_700_003_600, "affected_services": ["api"]
-            }))
+            .set_json(edit.clone())
             .to_request();
-        let updated: Incident = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(
+            test::call_service(&app, req).await.status(),
+            StatusCode::PRECONDITION_REQUIRED
+        );
+
+        // PUT with the right If-Match -> 200, version bumped to 2.
+        let req = test::TestRequest::put()
+            .uri(&format!("/incidents/{}", created.id))
+            .insert_header(("If-Match", "\"1\""))
+            .set_json(edit.clone())
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers().get("etag").unwrap(), "\"2\"");
+        let updated: Incident = serde_json::from_slice(&test::read_body(resp).await).unwrap();
+        assert_eq!(updated.version, 2);
         assert_eq!(updated.title, "Outage (resolved)");
-        assert!(updated.end_time.is_some());
-        assert_eq!(updated.affected_services, vec!["api".to_string()]);
-        assert_eq!(updated.id, created.id);
-        assert_eq!(updated.created_at, created.created_at);
+        assert_eq!(updated.current_impact(), Impact::None);
 
-        // Posting an offline update publishes it and sets its impact.
-        let req = test::TestRequest::post()
-            .uri(&format!("/incidents/{}/updates", created.id))
-            .set_json(serde_json::json!({ "impact": "offline", "message": "Investigating" }))
+        // PUT again with the stale version -> 412.
+        let req = test::TestRequest::put()
+            .uri(&format!("/incidents/{}", created.id))
+            .insert_header(("If-Match", "\"1\""))
+            .set_json(edit)
             .to_request();
-        let with_update: Incident = test::call_and_read_body_json(&app, req).await;
-        assert_eq!(with_update.updates.len(), 1);
-        assert_eq!(with_update.updates[0].impact, Impact::Offline);
-        assert!(with_update.is_public());
+        assert_eq!(
+            test::call_service(&app, req).await.status(),
+            StatusCode::PRECONDITION_FAILED
+        );
 
-        // Delete → 204, then everything 404s.
+        // GET single -> 200 + ETag.
+        let req = test::TestRequest::get().uri(&format!("/incidents/{}", created.id)).to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.headers().get("etag").unwrap(), "\"2\"");
+
+        // Delete -> 204, then 404.
         let req = test::TestRequest::delete().uri(&format!("/incidents/{}", created.id)).to_request();
         assert_eq!(test::call_service(&app, req).await.status(), StatusCode::NO_CONTENT);
-
         let req = test::TestRequest::delete().uri(&format!("/incidents/{}", created.id)).to_request();
-        assert_eq!(test::call_service(&app, req).await.status(), StatusCode::NOT_FOUND);
-
-        let req = test::TestRequest::put()
-            .uri(&format!("/incidents/{}", created.id))
-            .set_json(serde_json::json!({ "title": "x", "start_time": 1 }))
-            .to_request();
         assert_eq!(test::call_service(&app, req).await.status(), StatusCode::NOT_FOUND);
     }
 

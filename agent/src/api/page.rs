@@ -88,25 +88,16 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let app_state = AppState::test(temp_dir.path().to_path_buf()).await;
 
-        let now = chrono::Utc::now();
         app_state
             .state
-            .put_incident(&grey_api::Incident {
-                id: "vis".into(),
-                title: "Database outage".into(),
-                description: String::new(),
-                start_time: now,
-                end_time: None,
-                affected_services: vec![],
-                updates: vec![grey_api::IncidentUpdate {
-                    id: "u".into(),
+            .create_incident(
+                "Database outage".into(),
+                grey_api::IncidentUpdate {
                     impact: grey_api::Impact::Offline,
-                    timestamp: now,
+                    timestamp: chrono::Utc::now(),
                     message: String::new(),
-                }],
-                created_at: now,
-                updated_at: now,
-            })
+                },
+            )
             .await
             .unwrap();
 

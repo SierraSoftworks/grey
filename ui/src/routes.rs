@@ -9,6 +9,8 @@ pub enum Route {
     Home,
     #[at("/incidents")]
     Incidents,
+    #[at("/incidents/new")]
+    NewIncident,
     #[at("/incidents/:id")]
     Incident { id: String },
     #[not_found]

@@ -100,38 +100,30 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let app_state = AppState::test(temp_dir.path().to_path_buf()).await;
 
-        let now = chrono::Utc::now();
-        let mk = |id: &str, public: bool| grey_api::Incident {
-            id: id.into(),
-            title: format!("Incident {id}"),
-            description: String::new(),
-            start_time: now,
-            end_time: None,
-            affected_services: vec![],
-            // No updates -> hidden draft; an offline update makes it public.
-            updates: if public {
-                vec![grey_api::IncidentUpdate {
-                    id: format!("{id}-u"),
-                    impact: grey_api::Impact::Offline,
-                    timestamp: now,
-                    message: String::new(),
-                }]
-            } else {
-                vec![]
-            },
-            created_at: now,
-            updated_at: now,
+        let update = |impact| grey_api::IncidentUpdate {
+            impact,
+            timestamp: chrono::Utc::now(),
+            message: String::new(),
         };
-        app_state.state.put_incident(&mk("vis", true)).await.unwrap();
-        app_state.state.put_incident(&mk("hid", false)).await.unwrap();
+        // An offline opening update is public; a hidden one stays a draft.
+        let visible = app_state
+            .state
+            .create_incident("Visible".into(), update(grey_api::Impact::Offline))
+            .await
+            .unwrap();
+        app_state
+            .state
+            .create_incident("Hidden".into(), update(grey_api::Impact::Hidden))
+            .await
+            .unwrap();
 
         let resp = get_incidents(web::Data::new(app_state)).await.expect("Failed to get incidents");
         let body_bytes = resp.into_body().try_into_bytes().unwrap();
         let incidents: Vec<grey_api::Incident> =
             serde_json::from_str(&String::from_utf8_lossy(&body_bytes)).unwrap();
         assert_eq!(
-            incidents.iter().map(|i| i.id.clone()).collect::<Vec<_>>(),
-            vec!["vis"],
+            incidents.iter().map(|i| i.id).collect::<Vec<_>>(),
+            vec![visible.id],
             "the public endpoint must hide draft incidents from unauthenticated viewers"
         );
     }

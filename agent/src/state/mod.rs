@@ -21,7 +21,7 @@ use crate::cluster::GossipStore;
 mod incidents;
 mod probes;
 
-pub use incidents::IncidentStore;
+pub use incidents::{CasOutcome, IncidentStore};
 pub use probes::ProbeStore;
 
 // Maps a (NodeID, Probe Name) to a tuple of (Version, MsgPack Snapshot). Shared with the probe and

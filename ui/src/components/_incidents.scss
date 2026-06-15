@@ -25,14 +25,28 @@
     white-space: nowrap;
 }
 
-// The landing-page incidents section: a colour-coded header over compact summaries.
-.incidents-section .incident-summaries {
-    padding: 1.5rem;
+.incidents-section {
+    max-width: 980px;
+    width: 100%;
+    margin: 2rem auto;
+    color: var(--color-box);
+
+    // The landing-page incidents section: a colour-coded header over compact summaries.
+    .incident-summaries {
+        padding: 1.5rem;
+    }
 }
 
-// The full incidents page / per-incident page: lightweight, no inner section chrome.
+
+
+// The full incidents page / per-incident page: lightweight and centred, with no inner card or
+// `.content` chrome of its own.
 .incidents-page {
+    max-width: 980px;
+    width: 100%;
+    margin: 2rem auto;
     padding: 1.5rem;
+    box-sizing: border-box;
 
     > h1 {
         font-weight: 200;
@@ -61,43 +75,23 @@
     color: $color-text-muted;
 }
 
-// A single incident in full: a self-contained, status-bordered card (no `.section` chrome).
+// A single incident in full: flat, with no card chrome — cards are reserved for probes, signals and
+// the individual update entries. Successive blocks are separated by spacing and the header underline.
 .incident-block {
-    background-color: $background-box;
-    border: 1px solid $color-separator;
-    border-left: solid 6px $color-status-offline;
-    border-radius: $border-radius-medium;
-    padding: 1.5rem;
-    margin: 0 0 1.5rem 0;
+    margin: 0 0 2.5rem 0;
 
     &:last-child {
         margin-bottom: 0;
-    }
-
-    &.ok {
-        border-left-color: $color-status-ok;
-    }
-    &.warn {
-        border-left-color: $color-status-warn;
-    }
-    &.error {
-        border-left-color: $color-status-error;
-    }
-    &.draft {
-        // Drafts are admin-only; mark them distinctly from published incidents.
-        border-left: dashed 6px $color-status-offline;
-    }
-
-    @media screen and (max-width: $mobile) {
-        padding: 1rem;
     }
 
     .incident-block-header {
         display: flex;
         justify-content: space-between;
         align-items: baseline;
-        gap: 1rem;
+        gap: 1rem 1.5rem;
         flex-wrap: wrap;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid $color-separator;
     }
 
     .incident-block-heading {
@@ -110,15 +104,6 @@
             margin: 0;
             font-weight: 400;
         }
-    }
-
-    .incident-affected {
-        font-size: 0.9rem;
-        color: $color-text-muted;
-    }
-
-    .incident-description {
-        margin: 1rem 0;
     }
 }
 
@@ -148,12 +133,6 @@
             font-weight: 400;
         }
     }
-
-    .incident-summary-description {
-        margin: 0.5rem 0;
-        font-size: 0.9rem;
-        color: $color-text-muted;
-    }
 }
 
 // Horizontal event timeline (summary): impact-coloured dots on a connecting line, each revealing an
@@ -165,21 +144,15 @@
     margin-top: 0.75rem;
     padding: 0.25rem 0;
 
-    .hstep {
-        display: flex;
-        align-items: center;
-        flex: 1;
-    }
-
+    // Connecting segments grow to fill the bar; markers keep their intrinsic size. The first child is
+    // a marker (no leading line) so the first update sits at the far left; a trailing line after the
+    // last marker (rendered only when the incident is unresolved) stretches its colour to the right.
     .hline {
         flex: 1;
         height: 2px;
         min-width: 1.5rem;
         background-color: $color-status-offline;
 
-        &.start {
-            background-color: $color-separator;
-        }
         &.ok {
             background-color: $color-status-ok;
         }
@@ -195,6 +168,7 @@
         position: relative;
         display: flex;
         align-items: center;
+        flex: none;
     }
 
     .hdot {
@@ -216,15 +190,15 @@
         }
     }
 
-    // Popover anchored above the hovered dot.
+    // Popover anchored above the hovered dot. Its width is clamped to the viewport, and end markers
+    // anchor it inward (align-left / align-right) so it never runs off the page; interior markers
+    // centre it over the dot.
     .incident-popover {
         position: absolute;
         bottom: calc(100% + 8px);
-        left: 50%;
-        transform: translateX(-50%);
         z-index: 20;
         width: max-content;
-        max-width: 18rem;
+        max-width: min(18rem, 80vw);
         background-color: $color-tooltip-background;
         color: $color-tooltip-text;
         border: 1px solid $color-tooltip-border;
@@ -232,6 +206,17 @@
         padding: 0.6rem 0.75rem;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
         text-align: left;
+
+        &.align-center {
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        &.align-left {
+            left: 0;
+        }
+        &.align-right {
+            right: 0;
+        }
 
         .incident-popover-head {
             display: flex;
@@ -318,25 +303,6 @@
     }
 }
 
-// Admin incidents view: the colour-coded header carries the "New incident" action.
-.incidents-admin {
-    .section.fill {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-
-        .primary-button {
-            background-color: rgba(255, 255, 255, 0.18);
-            border-color: rgba(255, 255, 255, 0.5);
-            color: $color-status-text;
-
-            &:hover {
-                background-color: rgba(255, 255, 255, 0.3);
-            }
-        }
-    }
-}
-
 .incidents-error {
     color: $color-status-error;
     margin: 0;
@@ -407,16 +373,6 @@
         color: $color-text;
     }
 
-    .incident-form-times {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 0.75rem;
-
-        @media screen and (max-width: $mobile) {
-            grid-template-columns: 1fr;
-        }
-    }
-
     .incident-form-actions {
         display: flex;
         gap: 0.5rem;
@@ -428,83 +384,6 @@
             color: $color-text;
             border-radius: $border-radius-small;
             padding: 0.4rem 0.9rem;
-        }
-    }
-}
-
-// Affected-services autocomplete: removable chips plus a type-to-filter dropdown.
-.services-autocomplete {
-    .services-chips {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.4rem;
-        margin-bottom: 0.4rem;
-
-        .service-chip {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.3rem;
-            background-color: $color-separator;
-            border-radius: 999px;
-            padding: 0.15rem 0.3rem 0.15rem 0.6rem;
-            font-size: 0.8rem;
-            color: $color-text;
-
-            .service-chip-remove {
-                border: none;
-                background: none;
-                cursor: pointer;
-                font-size: 1rem;
-                line-height: 1;
-                color: $color-text-muted;
-                padding: 0 0.2rem;
-
-                &:hover {
-                    color: $color-status-error;
-                }
-            }
-        }
-    }
-
-    .services-input-wrap {
-        position: relative;
-
-        input {
-            width: 100%;
-            box-sizing: border-box;
-        }
-
-        .services-dropdown {
-            position: absolute;
-            z-index: 10;
-            top: 100%;
-            left: 0;
-            right: 0;
-            margin: 0.2rem 0 0 0;
-            padding: 0;
-            list-style: none;
-            background-color: $background-box;
-            border: 1px solid $color-separator;
-            border-radius: $border-radius-small;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-            max-height: 12rem;
-            overflow-y: auto;
-
-            .services-option {
-                display: block;
-                width: 100%;
-                text-align: left;
-                border: none;
-                background: none;
-                cursor: pointer;
-                padding: 0.45rem 0.6rem;
-                font: inherit;
-                color: $color-text;
-
-                &:hover {
-                    background-color: $color-separator;
-                }
-            }
         }
     }
 }
@@ -632,12 +511,6 @@
     }
 }
 
-.incident-form-hint {
-    font-size: 0.8rem;
-    color: $color-text-muted;
-    margin: 0;
-}
-
 // Tighten markdown output so it sits naturally inside blocks.
 .markdown {
     line-height: 1.5;
@@ -648,5 +521,155 @@
 
     p:last-child {
         margin-bottom: 0;
+    }
+}
+
+// The admin incidents list: heading on the left, the "New incident" action on the right.
+.incidents-list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.5rem;
+
+    h1 {
+        margin: 0;
+        font-weight: 200;
+    }
+}
+
+// Inline editing on a per-incident page: editable fields read as text until hovered/focused, and a
+// save control surfaces in the header (top-right) only once there are unsaved changes.
+.incident-edit {
+    .incident-edit-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    // The title behaves like its heading until you interact with it.
+    .incident-title-input {
+        flex: 1;
+        min-width: 12rem;
+        font: inherit;
+        font-size: 1.3rem;
+        font-weight: 400;
+        padding: 0.25rem 0.5rem;
+        color: $color-text;
+        background-color: transparent;
+        border: 1px solid transparent;
+        border-radius: $border-radius-small;
+
+        &:hover {
+            border-color: $color-separator;
+        }
+        &:focus {
+            outline: none;
+            border-color: $color-status-unknown;
+            background-color: $background-base;
+        }
+    }
+
+    .save-button {
+        cursor: pointer;
+        white-space: nowrap;
+        font-size: 0.85rem;
+        padding: 0.4rem 0.9rem;
+        color: $color-status-text;
+        background-color: $color-status-ok;
+        border: 1px solid $color-status-ok;
+        border-radius: $border-radius-small;
+
+        &:hover {
+            opacity: 0.9;
+        }
+        &:disabled {
+            opacity: 0.6;
+            cursor: default;
+        }
+    }
+
+    // Each update's controls: impact select + timestamp + remove, above its editable message.
+    .timeline-edit-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        margin-bottom: 0.4rem;
+
+        select {
+            font: inherit;
+            padding: 0.3rem 0.5rem;
+            color: $color-text;
+            background-color: $background-base;
+            border: 1px solid $color-separator;
+            border-radius: $border-radius-small;
+        }
+    }
+
+    .timeline-message-input {
+        width: 100%;
+        box-sizing: border-box;
+        resize: vertical;
+        font: inherit;
+        padding: 0.5rem;
+        color: $color-text;
+        background-color: $background-base;
+        border: 1px solid $color-separator;
+        border-radius: $border-radius-small;
+    }
+
+    .incident-edit-hint {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 1rem 0 0 0;
+        font-size: 0.8rem;
+        color: $color-text-muted;
+    }
+}
+
+// A button rendered as an inline text link (e.g. "Remove" on an update row).
+.link-button {
+    cursor: pointer;
+    border: none;
+    background: none;
+    padding: 0;
+    font: inherit;
+    font-size: 0.8rem;
+    color: $color-text-muted;
+    text-decoration: underline;
+
+    &:hover {
+        color: $color-text;
+    }
+
+    &.danger {
+        color: $color-status-error;
+
+        &:hover {
+            opacity: 0.8;
+            color: $color-status-error;
+        }
+    }
+}
+
+// A small impact-coloured dot used inline in status text.
+.status-dot-inline {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: $color-status-offline;
+
+    &.ok {
+        background-color: $color-status-ok;
+    }
+    &.warn {
+        background-color: $color-status-warn;
+    }
+    &.error {
+        background-color: $color-status-error;
     }
 }

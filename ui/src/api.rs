@@ -1,7 +1,8 @@
 //! Authenticated client for the admin API. Mutating calls attach the stored ID token as an
-//! `Authorization: Bearer` header. Browser-only; the SSR build gets stubs.
+//! `Authorization: Bearer` header and use the incident `version` as an `If-Match` ETag for
+//! check-and-set updates. Browser-only; the SSR build gets stubs.
 
-use grey_api::{AdminUser, Incident, IncidentInput, NewIncidentUpdate};
+use grey_api::{AdminUser, CreateIncident, Incident, IncidentEdit};
 
 /// A failure talking to the admin API, surfaced to the user.
 #[derive(Debug, Clone, PartialEq)]
@@ -10,6 +11,8 @@ pub enum ApiError {
     Unauthorized,
     /// The account is not permitted to perform the action (HTTP 403).
     Forbidden,
+    /// The incident was modified concurrently — the check-and-set failed (HTTP 412/428).
+    Conflict,
     /// A transport-level failure (no response).
     Network(String),
     /// The server returned an error with a message.
@@ -23,6 +26,9 @@ impl std::fmt::Display for ApiError {
             ApiError::Forbidden => {
                 write!(f, "Your account is not permitted to perform this action.")
             }
+            ApiError::Conflict => {
+                write!(f, "This incident was changed elsewhere. Reload and try again.")
+            }
             ApiError::Network(msg) => write!(f, "Network error: {msg}"),
             ApiError::Server(msg) => write!(f, "{msg}"),
         }
@@ -33,7 +39,6 @@ impl std::fmt::Display for ApiError {
 mod browser {
     use super::*;
     use gloo::net::http::{Request, Response};
-    use serde::Serialize;
     use serde::de::DeserializeOwned;
 
     const BASE: &str = "/api/v1/admin";
@@ -50,6 +55,7 @@ mod browser {
         match response.status() {
             401 => ApiError::Unauthorized,
             403 => ApiError::Forbidden,
+            412 | 428 => ApiError::Conflict,
             status => {
                 let message = response
                     .json::<serde_json::Value>()
@@ -70,20 +76,6 @@ mod browser {
         }
     }
 
-    async fn send_json<B: Serialize>(
-        builder: gloo::net::http::RequestBuilder,
-        token: &str,
-        body: &B,
-    ) -> Result<Response, ApiError> {
-        builder
-            .header("Authorization", &bearer(token))
-            .json(body)
-            .map_err(net)?
-            .send()
-            .await
-            .map_err(net)
-    }
-
     pub async fn fetch_me(token: &str) -> Result<AdminUser, ApiError> {
         let response = Request::get(&format!("{BASE}/me"))
             .header("Authorization", &bearer(token))
@@ -102,18 +94,42 @@ mod browser {
         read_json(response).await
     }
 
-    pub async fn create_incident(token: &str, input: &IncidentInput) -> Result<Incident, ApiError> {
-        let response = send_json(Request::post(&format!("{BASE}/incidents")), token, input).await?;
+    pub async fn get_incident(token: &str, id: &str) -> Result<Incident, ApiError> {
+        let response = Request::get(&format!("{BASE}/incidents/{id}"))
+            .header("Authorization", &bearer(token))
+            .send()
+            .await
+            .map_err(net)?;
         read_json(response).await
     }
 
-    pub async fn update_incident(
+    pub async fn create_incident(token: &str, input: &CreateIncident) -> Result<Incident, ApiError> {
+        let response = Request::post(&format!("{BASE}/incidents"))
+            .header("Authorization", &bearer(token))
+            .json(input)
+            .map_err(net)?
+            .send()
+            .await
+            .map_err(net)?;
+        read_json(response).await
+    }
+
+    /// Replaces an incident via check-and-set: `version` is sent as the `If-Match` ETag, so a
+    /// concurrent change surfaces as [`ApiError::Conflict`].
+    pub async fn replace_incident(
         token: &str,
         id: &str,
-        input: &IncidentInput,
+        version: u64,
+        edit: &IncidentEdit,
     ) -> Result<Incident, ApiError> {
-        let response =
-            send_json(Request::put(&format!("{BASE}/incidents/{id}")), token, input).await?;
+        let response = Request::put(&format!("{BASE}/incidents/{id}"))
+            .header("Authorization", &bearer(token))
+            .header("If-Match", &format!("\"{version}\""))
+            .json(edit)
+            .map_err(net)?
+            .send()
+            .await
+            .map_err(net)?;
         read_json(response).await
     }
 
@@ -129,25 +145,11 @@ mod browser {
             Err(error_from(response).await)
         }
     }
-
-    pub async fn add_update(
-        token: &str,
-        id: &str,
-        update: &NewIncidentUpdate,
-    ) -> Result<Incident, ApiError> {
-        let response = send_json(
-            Request::post(&format!("{BASE}/incidents/{id}/updates")),
-            token,
-            update,
-        )
-        .await?;
-        read_json(response).await
-    }
 }
 
 #[cfg(feature = "wasm")]
 pub use browser::{
-    add_update, create_incident, delete_incident, fetch_me, list_incidents, update_incident,
+    create_incident, delete_incident, fetch_me, get_incident, list_incidents, replace_incident,
 };
 
 #[cfg(not(feature = "wasm"))]
@@ -164,29 +166,26 @@ mod stub {
     pub async fn list_incidents(_token: &str) -> Result<Vec<Incident>, ApiError> {
         unavailable()
     }
-    pub async fn create_incident(_t: &str, _i: &IncidentInput) -> Result<Incident, ApiError> {
+    pub async fn get_incident(_token: &str, _id: &str) -> Result<Incident, ApiError> {
         unavailable()
     }
-    pub async fn update_incident(
+    pub async fn create_incident(_t: &str, _i: &CreateIncident) -> Result<Incident, ApiError> {
+        unavailable()
+    }
+    pub async fn replace_incident(
         _t: &str,
         _id: &str,
-        _i: &IncidentInput,
+        _v: u64,
+        _e: &IncidentEdit,
     ) -> Result<Incident, ApiError> {
         unavailable()
     }
     pub async fn delete_incident(_t: &str, _id: &str) -> Result<(), ApiError> {
         unavailable()
     }
-    pub async fn add_update(
-        _t: &str,
-        _id: &str,
-        _u: &NewIncidentUpdate,
-    ) -> Result<Incident, ApiError> {
-        unavailable()
-    }
 }
 
 #[cfg(not(feature = "wasm"))]
 pub use stub::{
-    add_update, create_incident, delete_incident, fetch_me, list_incidents, update_incident,
+    create_incident, delete_incident, fetch_me, get_incident, list_incidents, replace_incident,
 };

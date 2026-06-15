@@ -1,10 +1,11 @@
 //! Incident storage: the [`IncidentStore`] trait and its implementation over the [`State`] redb
-//! store, kept separate from the underlying store itself. Incidents are keyed by a random `u32` and
-//! serialized as JSON; the public id is that number rendered as dash-grouped base36.
+//! store, kept separate from the underlying store itself. Incidents are keyed by the numeric value of
+//! their [`Identifier`] and serialized as JSON. Edits are applied as optimistic check-and-set
+//! operations against the incident's `version`.
 
 use std::error::Error;
 
-use grey_api::{Incident, IncidentUpdate};
+use grey_api::{Identifier, Incident, IncidentEdit, IncidentUpdate};
 use redb::{ReadableDatabase, ReadableTable, TableDefinition};
 use tracing_batteries::prelude::*;
 
@@ -12,45 +13,55 @@ use super::State;
 
 const INCIDENTS_TABLE: TableDefinition<u32, &[u8]> = TableDefinition::new("incidents");
 
+/// The result of a check-and-set [`IncidentStore::replace_incident`].
+pub enum CasOutcome {
+    /// The incident was replaced; carries the new incident (with its bumped version).
+    Updated(Incident),
+    /// The supplied version did not match; carries the current stored version.
+    VersionMismatch(u64),
+    /// No incident exists with the given id.
+    NotFound,
+}
+
 /// Storage operations for incidents.
 #[allow(async_fn_in_trait)]
 pub trait IncidentStore {
-    /// Lists stored incidents, most recent first. When `include_drafts` is false, incidents whose
-    /// current impact is hidden are omitted — the public, unauthenticated view.
-    async fn list_incidents(&self, include_drafts: bool) -> Result<Vec<Incident>, Box<dyn Error>>;
+    /// Lists stored incidents, most recently started first. When `include_hidden` is false, incidents
+    /// whose current impact is hidden are omitted — the public, unauthenticated view.
+    async fn list_incidents(&self, include_hidden: bool) -> Result<Vec<Incident>, Box<dyn Error>>;
 
-    /// Fetches a single incident by its (grouped base36) id.
-    async fn get_incident(&self, id: &str) -> Result<Option<Incident>, Box<dyn Error>>;
+    /// Fetches a single incident by id.
+    async fn get_incident(&self, id: Identifier) -> Result<Option<Incident>, Box<dyn Error>>;
 
-    /// Creates an incident, assigning it a fresh, unused random id (retrying on the astronomically
-    /// unlikely chance of a collision). The incident's `id` is overwritten with the generated
-    /// grouped-base36 form, and the stored incident is returned.
-    async fn create_incident(&self, incident: Incident) -> Result<Incident, Box<dyn Error>>;
+    /// Creates an incident with a single opening update, assigning a fresh unused id and version 1.
+    async fn create_incident(
+        &self,
+        title: String,
+        initial: IncidentUpdate,
+    ) -> Result<Incident, Box<dyn Error>>;
 
-    /// Replaces an existing incident, keyed by its id.
-    async fn put_incident(&self, incident: &Incident) -> Result<(), Box<dyn Error>>;
+    /// Replaces an incident's title and updates if `expected_version` matches the stored version,
+    /// bumping the version on success (optimistic concurrency).
+    async fn replace_incident(
+        &self,
+        id: Identifier,
+        expected_version: u64,
+        edit: IncidentEdit,
+    ) -> Result<CasOutcome, Box<dyn Error>>;
 
     /// Deletes an incident, returning whether a record was actually removed.
-    async fn delete_incident(&self, id: &str) -> Result<bool, Box<dyn Error>>;
-
-    /// Appends a status update to an existing incident, keeping updates ordered by timestamp and
-    /// refreshing `updated_at`. Returns whether the target incident exists.
-    async fn add_incident_update(
-        &self,
-        id: &str,
-        update: IncidentUpdate,
-    ) -> Result<bool, Box<dyn Error>>;
+    async fn delete_incident(&self, id: Identifier) -> Result<bool, Box<dyn Error>>;
 }
 
 impl IncidentStore for State {
-    async fn list_incidents(&self, include_drafts: bool) -> Result<Vec<Incident>, Box<dyn Error>> {
+    async fn list_incidents(&self, include_hidden: bool) -> Result<Vec<Incident>, Box<dyn Error>> {
         let txn = self.database.begin_read()?;
         let mut incidents = Vec::new();
         if let Ok(table) = txn.open_table(INCIDENTS_TABLE) {
             for entry in table.iter()?.filter_map(|r| r.ok()) {
                 let (_key, value) = entry;
                 match serde_json::from_slice::<Incident>(value.value()) {
-                    Ok(incident) if include_drafts || incident.is_public() => {
+                    Ok(incident) if include_hidden || incident.is_public() => {
                         incidents.push(incident)
                     }
                     Ok(_) => {}
@@ -60,26 +71,28 @@ impl IncidentStore for State {
                 }
             }
         }
-        incidents.sort_by(|a, b| b.start_time.cmp(&a.start_time));
+        // Most recently active first; incidents with no updates sort last.
+        incidents.sort_by(|a, b| b.last_updated().cmp(&a.last_updated()));
         Ok(incidents)
     }
 
-    async fn get_incident(&self, id: &str) -> Result<Option<Incident>, Box<dyn Error>> {
-        let Some(key) = grey_api::decode_incident_id(id) else {
-            return Ok(None);
-        };
+    async fn get_incident(&self, id: Identifier) -> Result<Option<Incident>, Box<dyn Error>> {
         let txn = self.database.begin_read()?;
         if let Ok(table) = txn.open_table(INCIDENTS_TABLE)
-            && let Some(value) = table.get(key)?
+            && let Some(value) = table.get(u32::from(id))?
         {
             return Ok(Some(serde_json::from_slice::<Incident>(value.value())?));
         }
         Ok(None)
     }
 
-    async fn create_incident(&self, mut incident: Incident) -> Result<Incident, Box<dyn Error>> {
+    async fn create_incident(
+        &self,
+        title: String,
+        initial: IncidentUpdate,
+    ) -> Result<Incident, Box<dyn Error>> {
         let txn = self.database.begin_write()?;
-        {
+        let incident = {
             let mut table = txn.open_table(INCIDENTS_TABLE)?;
 
             let mut key = rand::random::<u32>();
@@ -92,103 +105,73 @@ impl IncidentStore for State {
                 }
             }
 
-            incident.id = grey_api::encode_incident_id(key);
-            let data = serde_json::to_vec(&incident)?;
-            table.insert(key, data.as_slice())?;
-        }
+            let incident = Incident {
+                id: Identifier::from(key),
+                title,
+                version: 1,
+                updates: vec![initial],
+            };
+            table.insert(key, serde_json::to_vec(&incident)?.as_slice())?;
+            incident
+        };
         txn.commit()?;
         Ok(incident)
     }
 
-    async fn put_incident(&self, incident: &Incident) -> Result<(), Box<dyn Error>> {
-        let key = grey_api::decode_incident_id(&incident.id)
-            .ok_or_else(|| format!("invalid incident id: {}", incident.id))?;
-        let data = serde_json::to_vec(incident)?;
-        let txn = self.database.begin_write()?;
-        {
-            let mut table = txn.open_table(INCIDENTS_TABLE)?;
-            table.insert(key, data.as_slice())?;
-        }
-        txn.commit()?;
-        Ok(())
-    }
-
-    async fn delete_incident(&self, id: &str) -> Result<bool, Box<dyn Error>> {
-        let Some(key) = grey_api::decode_incident_id(id) else {
-            return Ok(false);
-        };
-        let txn = self.database.begin_write()?;
-        let existed = {
-            let mut table = txn.open_table(INCIDENTS_TABLE)?;
-            table.remove(key)?.is_some()
-        };
-        txn.commit()?;
-        Ok(existed)
-    }
-
-    async fn add_incident_update(
+    async fn replace_incident(
         &self,
-        id: &str,
-        update: IncidentUpdate,
-    ) -> Result<bool, Box<dyn Error>> {
-        let Some(key) = grey_api::decode_incident_id(id) else {
-            return Ok(false);
-        };
+        id: Identifier,
+        expected_version: u64,
+        edit: IncidentEdit,
+    ) -> Result<CasOutcome, Box<dyn Error>> {
+        let key = u32::from(id);
         let txn = self.database.begin_write()?;
-        let found = {
+        let outcome = {
             let mut table = txn.open_table(INCIDENTS_TABLE)?;
-            // Read the existing record into an owned value so the read guard is released before we
-            // insert the updated record back into the same table.
             let existing: Option<Incident> = table
                 .get(key)?
                 .map(|value| serde_json::from_slice::<Incident>(value.value()))
                 .transpose()?;
 
             match existing {
-                Some(mut incident) => {
-                    incident.updates.push(update);
-                    incident.updates.sort_by_key(|u| u.timestamp);
-                    incident.updated_at = chrono::Utc::now();
-                    let data = serde_json::to_vec(&incident)?;
-                    table.insert(key, data.as_slice())?;
-                    true
+                None => CasOutcome::NotFound,
+                Some(existing) if existing.version != expected_version => {
+                    CasOutcome::VersionMismatch(existing.version)
                 }
-                None => false,
+                Some(existing) => {
+                    let updated = Incident {
+                        id,
+                        title: edit.title,
+                        version: existing.version + 1,
+                        updates: edit.updates,
+                    };
+                    table.insert(key, serde_json::to_vec(&updated)?.as_slice())?;
+                    CasOutcome::Updated(updated)
+                }
             }
         };
         txn.commit()?;
-        Ok(found)
+        Ok(outcome)
+    }
+
+    async fn delete_incident(&self, id: Identifier) -> Result<bool, Box<dyn Error>> {
+        let txn = self.database.begin_write()?;
+        let existed = {
+            let mut table = txn.open_table(INCIDENTS_TABLE)?;
+            table.remove(u32::from(id))?.is_some()
+        };
+        txn.commit()?;
+        Ok(existed)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use grey_api::Impact;
+    use grey_api::{IncidentEdit, Impact};
 
-    fn sample_incident(id: &str, public: bool, start_secs: i64) -> Incident {
-        let ts = chrono::DateTime::from_timestamp(start_secs, 0).unwrap();
-        Incident {
-            id: id.into(),
-            title: format!("Incident {id}"),
-            description: "details".into(),
-            start_time: ts,
-            end_time: None,
-            affected_services: vec![],
-            // No updates -> hidden (a draft); an offline update makes it public.
-            updates: if public {
-                vec![sample_update(&format!("{id}-u"), Impact::Offline, start_secs)]
-            } else {
-                vec![]
-            },
-            created_at: ts,
-            updated_at: ts,
-        }
-    }
-
-    fn sample_update(id: &str, impact: Impact, secs: i64) -> IncidentUpdate {
+    fn update(impact: Impact, secs: i64) -> IncidentUpdate {
         IncidentUpdate {
-            id: id.into(),
             impact,
             timestamp: chrono::DateTime::from_timestamp(secs, 0).unwrap(),
             message: "update".into(),
@@ -196,63 +179,60 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn incident_crud_and_visibility_filter() {
+    async fn create_get_list_delete_and_visibility() {
         let dir = tempfile::tempdir().unwrap();
         let state = State::test(dir.path().to_path_buf()).await;
 
-        // The ids "a"/"b"/"c" are valid base36, so they double as their own redb keys here.
-        state.put_incident(&sample_incident("a", true, 300)).await.unwrap();
-        state.put_incident(&sample_incident("b", false, 200)).await.unwrap();
-        state.put_incident(&sample_incident("c", true, 100)).await.unwrap();
+        let public = state.create_incident("Public".into(), update(Impact::Offline, 200)).await.unwrap();
+        let hidden = state.create_incident("Hidden".into(), update(Impact::Hidden, 100)).await.unwrap();
 
-        // The public view hides drafts; the admin view shows everything, newest first.
-        let public = state.list_incidents(false).await.unwrap();
-        assert_eq!(public.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec!["a", "c"]);
-        let all = state.list_incidents(true).await.unwrap();
-        assert_eq!(all.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec!["a", "b", "c"]);
+        // Fresh ids are distinct and version starts at 1.
+        assert_ne!(public.id, hidden.id);
+        assert_eq!(public.version, 1);
 
-        // Fetch by id round-trips; an unknown id is None.
-        assert_eq!(state.get_incident("b").await.unwrap().unwrap().id, "b");
-        assert!(state.get_incident("missing-xyz").await.unwrap().is_none());
+        // Round-trips by id.
+        assert_eq!(state.get_incident(public.id).await.unwrap().unwrap().title, "Public");
 
-        // Deletion is reported and idempotent.
-        assert!(state.delete_incident("b").await.unwrap());
-        assert!(!state.delete_incident("b").await.unwrap());
-        assert!(state.get_incident("b").await.unwrap().is_none());
+        // The public view hides the hidden incident; the admin view shows both.
+        let visible = state.list_incidents(false).await.unwrap();
+        assert_eq!(visible.iter().map(|i| i.title.as_str()).collect::<Vec<_>>(), vec!["Public"]);
+        assert_eq!(state.list_incidents(true).await.unwrap().len(), 2);
+
+        assert!(state.delete_incident(public.id).await.unwrap());
+        assert!(!state.delete_incident(public.id).await.unwrap());
+        assert!(state.get_incident(public.id).await.unwrap().is_none());
     }
 
     #[tokio::test]
-    async fn add_incident_update_appends_in_timestamp_order() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = State::test(dir.path().to_path_buf()).await;
-        state.put_incident(&sample_incident("a", true, 0)).await.unwrap();
-
-        // Add out of order; storage keeps updates sorted by timestamp. (start update is "a-u" @ 0.)
-        assert!(state.add_incident_update("a", sample_update("u2", Impact::None, 200)).await.unwrap());
-        assert!(state.add_incident_update("a", sample_update("u1", Impact::Offline, 100)).await.unwrap());
-
-        let incident = state.get_incident("a").await.unwrap().unwrap();
-        assert_eq!(
-            incident.updates.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(),
-            vec!["a-u", "u1", "u2"]
-        );
-        assert_eq!(incident.current_impact(), Impact::None);
-
-        assert!(!state.add_incident_update("missing-xyz", sample_update("x", Impact::None, 1)).await.unwrap());
-    }
-
-    #[tokio::test]
-    async fn create_incident_assigns_unique_decodable_ids() {
+    async fn replace_is_check_and_set() {
         let dir = tempfile::tempdir().unwrap();
         let state = State::test(dir.path().to_path_buf()).await;
 
-        let mut blank = sample_incident("ignored", false, 0);
-        blank.id = String::new();
-        let a = state.create_incident(blank.clone()).await.unwrap();
-        let b = state.create_incident(blank).await.unwrap();
+        let incident = state.create_incident("Outage".into(), update(Impact::Offline, 100)).await.unwrap();
+        let edit = IncidentEdit {
+            title: "Outage (resolved)".into(),
+            updates: vec![update(Impact::Offline, 100), update(Impact::None, 200)],
+        };
 
-        assert_ne!(a.id, b.id, "each incident must get a distinct id");
-        assert!(grey_api::decode_incident_id(&a.id).is_some(), "id must decode as base36");
-        assert_eq!(state.get_incident(&a.id).await.unwrap().unwrap().id, a.id);
+        // Correct version -> updated, version bumped, content replaced.
+        let outcome = state.replace_incident(incident.id, incident.version, edit.clone()).await.unwrap();
+        let updated = match outcome {
+            CasOutcome::Updated(i) => i,
+            _ => panic!("expected Updated"),
+        };
+        assert_eq!(updated.version, 2);
+        assert_eq!(updated.title, "Outage (resolved)");
+        assert_eq!(updated.current_impact(), Impact::None);
+
+        // Stale version -> conflict reporting the current version; the store is unchanged.
+        let stale = state.replace_incident(incident.id, incident.version, edit).await.unwrap();
+        assert!(matches!(stale, CasOutcome::VersionMismatch(2)));
+        assert_eq!(state.get_incident(incident.id).await.unwrap().unwrap().version, 2);
+
+        // Unknown id -> not found.
+        assert!(matches!(
+            state.replace_incident(Identifier::from(424242u32), 1, IncidentEdit { title: "x".into(), updates: vec![] }).await.unwrap(),
+            CasOutcome::NotFound
+        ));
     }
 }
