@@ -96,11 +96,13 @@ mod tests {
                 description: String::new(),
                 start_time: now,
                 end_time: None,
-                detection_time: None,
-                mitigation_time: None,
                 affected_services: vec![],
-                state: grey_api::IncidentState::Offline,
-                updates: vec![],
+                updates: vec![grey_api::IncidentUpdate {
+                    id: "u".into(),
+                    impact: grey_api::Impact::Offline,
+                    timestamp: now,
+                    message: String::new(),
+                }],
                 created_at: now,
                 updated_at: now,
             })

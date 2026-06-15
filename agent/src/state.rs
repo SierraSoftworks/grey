@@ -43,8 +43,9 @@ type Migration = fn(&redb::WriteTransaction) -> Result<(), Box<dyn Error>>;
 /// of these that have been applied; new migrations are **appended** here and never reordered or
 /// removed.
 const MIGRATIONS: &[Migration] = &[
-    m001_create_incidents,  // version 0 -> 1
-    m002_visible_to_state,  // version 1 -> 2
+    m001_create_incidents,   // version 0 -> 1
+    m002_visible_to_state,   // version 1 -> 2
+    m003_status_to_impact,   // version 2 -> 3
 ];
 
 /// Establishes the incidents table. Opening it in a write transaction creates it; this is the
@@ -93,6 +94,104 @@ fn m002_visible_to_state(txn: &redb::WriteTransaction) -> Result<(), Box<dyn Err
 
         obj.remove("visible");
         obj.insert("state".to_string(), Value::String(state));
+        rewrites.push((id, serde_json::to_vec(&doc)?));
+    }
+
+    for (id, data) in rewrites {
+        table.insert(id.as_str(), data.as_slice())?;
+    }
+    Ok(())
+}
+
+/// Migrates incident records to the impact-based schema: each update's `status` becomes an `impact`
+/// (`healthy`/`unknown` -> `none`, others preserved), the obsolete `state`, `detection_time` and
+/// `mitigation_time` fields are dropped, and an incident that was visible but had no updates gains a
+/// synthesized opening update so it stays visible with the right impact.
+fn m003_status_to_impact(txn: &redb::WriteTransaction) -> Result<(), Box<dyn Error>> {
+    use serde_json::Value;
+
+    fn status_to_impact(status: &str) -> &'static str {
+        match status {
+            "offline" => "offline",
+            "degraded" => "degraded",
+            _ => "none", // healthy / unknown / anything unexpected
+        }
+    }
+    fn state_to_impact(state: &str) -> &'static str {
+        match state {
+            "offline" => "offline",
+            "degraded" => "degraded",
+            "healthy" | "unknown" => "none",
+            _ => "hidden", // draft
+        }
+    }
+
+    let mut table = txn.open_table(INCIDENTS_TABLE)?;
+
+    let mut rewrites: Vec<(String, Vec<u8>)> = Vec::new();
+    for entry in table.iter()?.filter_map(|r| r.ok()) {
+        let (key, value) = entry;
+        let id = key.value().to_string();
+        let Ok(mut doc) = serde_json::from_slice::<Value>(value.value()) else {
+            continue;
+        };
+        let Some(obj) = doc.as_object_mut() else { continue };
+
+        let has_state = obj.contains_key("state");
+        let updates_have_status = obj
+            .get("updates")
+            .and_then(Value::as_array)
+            .map(|arr| arr.iter().any(|u| u.get("status").is_some()))
+            .unwrap_or(false);
+        if !has_state && !updates_have_status {
+            continue; // already in the new format
+        }
+
+        let old_state = obj
+            .get("state")
+            .and_then(Value::as_str)
+            .unwrap_or("draft")
+            .to_string();
+
+        // Rename each update's `status` -> `impact`.
+        if let Some(updates) = obj.get_mut("updates").and_then(Value::as_array_mut) {
+            for update in updates.iter_mut() {
+                if let Some(update) = update.as_object_mut() {
+                    if let Some(status) = update.remove("status") {
+                        let impact = status_to_impact(status.as_str().unwrap_or(""));
+                        update.insert("impact".to_string(), Value::String(impact.to_string()));
+                    }
+                }
+            }
+        }
+
+        // A previously visible incident with no updates would now read as hidden; synthesize an
+        // opening update at its start time so it keeps its visibility and impact.
+        let no_updates = obj
+            .get("updates")
+            .and_then(Value::as_array)
+            .map(|a| a.is_empty())
+            .unwrap_or(true);
+        if no_updates && old_state != "draft" {
+            let start = obj.get("start_time").cloned().unwrap_or(Value::from(0));
+            let synthesized = serde_json::json!({
+                "id": format!("{id}-migrated"),
+                "impact": state_to_impact(&old_state),
+                "timestamp": start,
+                "message": "",
+            });
+            match obj.get_mut("updates").and_then(Value::as_array_mut) {
+                Some(arr) => arr.push(synthesized),
+                None => {
+                    obj.insert("updates".to_string(), Value::Array(vec![synthesized]));
+                }
+            }
+        }
+
+        obj.remove("state");
+        obj.remove("detection_time");
+        obj.remove("mitigation_time");
+
         rewrites.push((id, serde_json::to_vec(&doc)?));
     }
 
@@ -1044,29 +1143,22 @@ mod tests {
             description: "details".into(),
             start_time: ts,
             end_time: None,
-            detection_time: None,
-            mitigation_time: None,
             affected_services: vec![],
-            // A draft is hidden; any other state is public.
-            state: if public {
-                grey_api::IncidentState::Offline
+            // No updates -> hidden (a draft); an offline update makes it public.
+            updates: if public {
+                vec![sample_update(&format!("{id}-u"), grey_api::Impact::Offline, start_secs)]
             } else {
-                grey_api::IncidentState::Draft
+                vec![]
             },
-            updates: vec![],
             created_at: ts,
             updated_at: ts,
         }
     }
 
-    fn sample_update(
-        id: &str,
-        status: grey_api::IncidentStatus,
-        secs: i64,
-    ) -> grey_api::IncidentUpdate {
+    fn sample_update(id: &str, impact: grey_api::Impact, secs: i64) -> grey_api::IncidentUpdate {
         grey_api::IncidentUpdate {
             id: id.into(),
-            status,
+            impact,
             timestamp: chrono::DateTime::from_timestamp(secs, 0).unwrap(),
             message: "update".into(),
         }
@@ -1078,6 +1170,12 @@ mod tests {
             Ok(table) => table.get(SCHEMA_VERSION_KEY).unwrap().map(|v| v.value()),
             Err(_) => None,
         }
+    }
+
+    fn read_incident(db: &Database, id: &str) -> grey_api::Incident {
+        let read = db.begin_read().unwrap();
+        let table = read.open_table(INCIDENTS_TABLE).unwrap();
+        serde_json::from_slice(table.get(id).unwrap().unwrap().value()).unwrap()
     }
 
     #[tokio::test]
@@ -1111,30 +1209,27 @@ mod tests {
         let state = State::test(dir.path().to_path_buf()).await;
         state.put_incident(&sample_incident("a", true, 0)).await.unwrap();
 
-        // Add out of order; storage keeps updates sorted by timestamp.
+        // Add out of order; storage keeps updates sorted by timestamp. (start update is "a-u" @ 0.)
         assert!(state
-            .add_incident_update("a", sample_update("u2", grey_api::IncidentStatus::Healthy, 200))
+            .add_incident_update("a", sample_update("u2", grey_api::Impact::None, 200))
             .await
             .unwrap());
         assert!(state
-            .add_incident_update("a", sample_update("u1", grey_api::IncidentStatus::Offline, 100))
+            .add_incident_update("a", sample_update("u1", grey_api::Impact::Offline, 100))
             .await
             .unwrap());
 
         let incident = state.get_incident("a").await.unwrap().unwrap();
         assert_eq!(
             incident.updates.iter().map(|u| u.id.as_str()).collect::<Vec<_>>(),
-            vec!["u1", "u2"]
+            vec!["a-u", "u1", "u2"]
         );
-        // The latest update (by timestamp) is the healthy one added first.
-        assert_eq!(
-            incident.updates.iter().max_by_key(|u| u.timestamp).map(|u| u.status),
-            Some(grey_api::IncidentStatus::Healthy)
-        );
+        // The latest update (by timestamp) drives the current impact.
+        assert_eq!(incident.current_impact(), grey_api::Impact::None);
 
         // Updating a non-existent incident reports false.
         assert!(!state
-            .add_incident_update("missing", sample_update("x", grey_api::IncidentStatus::Unknown, 1))
+            .add_incident_update("missing", sample_update("x", grey_api::Impact::None, 1))
             .await
             .unwrap());
     }
@@ -1209,7 +1304,8 @@ mod tests {
             write.commit().unwrap();
         }
 
-        State::migrate(&db).unwrap();
+        // Run only m001+m002 to exercise the visible -> state conversion in isolation.
+        State::migrate_with(&db, &MIGRATIONS[..2]).unwrap();
 
         let read = db.begin_read().unwrap();
         let table = read.open_table(INCIDENTS_TABLE).unwrap();
@@ -1224,6 +1320,58 @@ mod tests {
         // Visible -> the latest update's status.
         assert_eq!(b["state"], "offline");
         assert!(b.get("visible").is_none());
+    }
+
+    #[test]
+    fn migration_converts_status_to_impact() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::create(dir.path().join("state.redb")).unwrap();
+
+        // Simulate a v2 database: incidents carry `state` and updates use `status`.
+        {
+            let write = db.begin_write().unwrap();
+            {
+                let mut table = write.open_table(INCIDENTS_TABLE).unwrap();
+                // Visible, no updates -> should gain a synthesized opening update.
+                let visible_no_updates = serde_json::json!({
+                    "id": "a", "title": "a", "start_time": 7, "state": "offline",
+                    "detection_time": 8, "created_at": 1, "updated_at": 1, "updates": []
+                });
+                // Has updates -> status renamed to impact (healthy -> none).
+                let with_updates = serde_json::json!({
+                    "id": "b", "title": "b", "start_time": 1, "state": "healthy",
+                    "created_at": 1, "updated_at": 1,
+                    "updates": [{"id": "u", "status": "healthy", "timestamp": 5, "message": "ok"}]
+                });
+                table.insert("a", serde_json::to_vec(&visible_no_updates).unwrap().as_slice()).unwrap();
+                table.insert("b", serde_json::to_vec(&with_updates).unwrap().as_slice()).unwrap();
+            }
+            {
+                let mut meta = write.open_table(META_TABLE).unwrap();
+                meta.insert(SCHEMA_VERSION_KEY, 2u64).unwrap();
+            }
+            write.commit().unwrap();
+        }
+
+        State::migrate(&db).unwrap();
+
+        // Records now deserialize as the current Incident type (proving the schema converted).
+        let a = read_incident(&db, "a");
+        let b = read_incident(&db, "b");
+
+        // Visible-with-no-updates gained a synthesized opening update and stays public + offline.
+        assert_eq!(a.current_impact(), grey_api::Impact::Offline);
+        assert_eq!(a.updates.len(), 1);
+        // status:healthy -> impact:none.
+        assert_eq!(b.current_impact(), grey_api::Impact::None);
+
+        // The legacy fields are gone from the stored JSON.
+        let read = db.begin_read().unwrap();
+        let table = read.open_table(INCIDENTS_TABLE).unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_slice(table.get("a").unwrap().unwrap().value()).unwrap();
+        assert!(raw.get("state").is_none());
+        assert!(raw.get("detection_time").is_none());
     }
 
     #[test]

@@ -106,15 +106,18 @@ mod tests {
             description: String::new(),
             start_time: now,
             end_time: None,
-            detection_time: None,
-            mitigation_time: None,
             affected_services: vec![],
-            state: if public {
-                grey_api::IncidentState::Offline
+            // No updates -> hidden draft; an offline update makes it public.
+            updates: if public {
+                vec![grey_api::IncidentUpdate {
+                    id: format!("{id}-u"),
+                    impact: grey_api::Impact::Offline,
+                    timestamp: now,
+                    message: String::new(),
+                }]
             } else {
-                grey_api::IncidentState::Draft
+                vec![]
             },
-            updates: vec![],
             created_at: now,
             updated_at: now,
         };

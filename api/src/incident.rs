@@ -1,46 +1,50 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// The health status reported by an incident update. The vocabulary mirrors the probe status
-/// language used elsewhere in the UI so the two can share styling.
+/// The impact an incident update reports. An incident's current impact is that of its most recent
+/// update (defaulting to `Hidden` when it has none). `Hidden` keeps the incident from unauthenticated
+/// viewers, replacing the previous draft/visible concept.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
-pub enum IncidentStatus {
-    Healthy,
-    Degraded,
+pub enum Impact {
+    /// The service is fully unavailable.
     Offline,
+    /// The service is degraded but partially available.
+    Degraded,
+    /// No service impact (e.g. resolved, or informational).
+    None,
+    /// Hidden from unauthenticated viewers — used while preparing an incident.
     #[default]
-    Unknown,
+    Hidden,
 }
 
-/// The lifecycle state of an incident as a whole. `Draft` keeps the incident hidden from
-/// unauthenticated viewers (replacing the previous `visible` flag); every other state is public and
-/// also describes the incident's current severity.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum IncidentState {
-    /// Not yet published — visible only to administrators. Newly created incidents start here.
-    #[default]
-    Draft,
-    Healthy,
-    Degraded,
-    Offline,
-    Unknown,
+impl Impact {
+    /// Severity rank for picking the "worst" impact among active incidents. Higher is worse;
+    /// `Hidden` ranks lowest since hidden incidents never affect the public status.
+    pub fn rank(self) -> u8 {
+        match self {
+            Impact::Offline => 3,
+            Impact::Degraded => 2,
+            Impact::None => 1,
+            Impact::Hidden => 0,
+        }
+    }
 }
 
-/// A single status update posted against an incident. `message` is markdown.
+/// A single update posted against an incident. `message` is markdown; `impact` drives the incident's
+/// status from this point on the timeline.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct IncidentUpdate {
     pub id: String,
-    pub status: IncidentStatus,
+    pub impact: Impact,
     #[serde(with = "chrono::serde::ts_seconds")]
     pub timestamp: DateTime<Utc>,
     pub message: String,
 }
 
 /// An operator-recorded incident/event, persisted in the state database and surfaced on the UI
-/// timeline. Times other than `start_time` are optional so an incident can be filled in as it
-/// progresses (detected, mitigated, resolved).
+/// timeline. Its impact is derived from its updates, which run from `start_time` to the optional
+/// `end_time`.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Incident {
     pub id: String,
@@ -54,19 +58,10 @@ pub struct Incident {
     pub start_time: DateTime<Utc>,
     #[serde(default, with = "chrono::serde::ts_seconds_option")]
     pub end_time: Option<DateTime<Utc>>,
-    #[serde(default, with = "chrono::serde::ts_seconds_option")]
-    pub detection_time: Option<DateTime<Utc>>,
-    #[serde(default, with = "chrono::serde::ts_seconds_option")]
-    pub mitigation_time: Option<DateTime<Utc>>,
 
     /// Optional service tags (matching probe `service` tags) this incident affects.
     #[serde(default)]
     pub affected_services: Vec<String>,
-
-    /// The incident's lifecycle state. Defaults to `Draft` so a record missing the field fails
-    /// closed (hidden from the public) rather than leaking.
-    #[serde(default)]
-    pub state: IncidentState,
 
     #[serde(default)]
     pub updates: Vec<IncidentUpdate>,
@@ -78,20 +73,47 @@ pub struct Incident {
 }
 
 impl Incident {
-    /// Whether the incident is visible to unauthenticated viewers (i.e. not a draft).
-    pub fn is_public(&self) -> bool {
-        !matches!(self.state, IncidentState::Draft)
+    /// The incident's current impact: that of its most recent update, or `Hidden` when it has no
+    /// updates (a freshly created, not-yet-published incident).
+    pub fn current_impact(&self) -> Impact {
+        self.updates
+            .iter()
+            .max_by_key(|u| u.timestamp)
+            .map(|u| u.impact)
+            .unwrap_or(Impact::Hidden)
     }
 
-    /// Whether the incident is currently affecting service: ongoing (no `end_time`) and in a
-    /// degraded or offline state. Drives the "active incidents" header colour.
+    /// Whether the incident is visible to unauthenticated viewers (its current impact is not hidden).
+    pub fn is_public(&self) -> bool {
+        self.current_impact() != Impact::Hidden
+    }
+
+    /// Whether the incident is currently affecting service: ongoing (no `end_time`) and currently
+    /// offline or degraded. Drives the "active incidents" header colour.
     pub fn is_active(&self) -> bool {
-        self.end_time.is_none() && matches!(self.state, IncidentState::Degraded | IncidentState::Offline)
+        self.end_time.is_none() && matches!(self.current_impact(), Impact::Offline | Impact::Degraded)
     }
 
     /// Whether the incident is still ongoing (has no recorded `end_time`).
     pub fn is_ongoing(&self) -> bool {
         self.end_time.is_none()
+    }
+
+    /// When the current impact began: the start of the trailing run of updates sharing the current
+    /// impact. `None` when there are no updates. Drives the "offline for 1h" header text.
+    pub fn impact_since(&self) -> Option<DateTime<Utc>> {
+        let current = self.current_impact();
+        let mut sorted: Vec<&IncidentUpdate> = self.updates.iter().collect();
+        sorted.sort_by_key(|u| u.timestamp);
+        let mut since = None;
+        for update in sorted.iter().rev() {
+            if update.impact == current {
+                since = Some(update.timestamp);
+            } else {
+                break;
+            }
+        }
+        since
     }
 }
 
@@ -107,22 +129,15 @@ pub struct IncidentInput {
     pub start_time: DateTime<Utc>,
     #[serde(default, with = "chrono::serde::ts_seconds_option")]
     pub end_time: Option<DateTime<Utc>>,
-    #[serde(default, with = "chrono::serde::ts_seconds_option")]
-    pub detection_time: Option<DateTime<Utc>>,
-    #[serde(default, with = "chrono::serde::ts_seconds_option")]
-    pub mitigation_time: Option<DateTime<Utc>>,
     #[serde(default)]
     pub affected_services: Vec<String>,
-    /// The incident's lifecycle state. Defaults to `Draft`.
-    #[serde(default)]
-    pub state: IncidentState,
 }
 
-/// A status update posted against an incident. The server assigns the update's `id`, and defaults
-/// the `timestamp` to the current time when omitted.
+/// An update posted against an incident. The server assigns the update's `id`, and defaults the
+/// `timestamp` to the current time when omitted.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct NewIncidentUpdate {
-    pub status: IncidentStatus,
+    pub impact: Impact,
     pub message: String,
     #[serde(default, with = "chrono::serde::ts_seconds_option")]
     pub timestamp: Option<DateTime<Utc>>,
@@ -146,6 +161,15 @@ mod tests {
         DateTime::from_timestamp(secs, 0).unwrap()
     }
 
+    fn update(id: &str, impact: Impact, secs: i64) -> IncidentUpdate {
+        IncidentUpdate {
+            id: id.into(),
+            impact,
+            timestamp: ts(secs),
+            message: format!("update {id}"),
+        }
+    }
+
     fn sample() -> Incident {
         Incident {
             id: "1700000000-abc".into(),
@@ -153,78 +177,94 @@ mod tests {
             description: "Primary DB unreachable".into(),
             start_time: ts(1_700_000_000),
             end_time: None,
-            detection_time: Some(ts(1_700_000_060)),
-            mitigation_time: None,
             affected_services: vec!["api".into()],
-            state: IncidentState::Offline,
-            updates: vec![IncidentUpdate {
-                id: "u1".into(),
-                status: IncidentStatus::Offline,
-                timestamp: ts(1_700_000_100),
-                message: "We are investigating.".into(),
-            }],
+            updates: vec![update("u1", Impact::Offline, 1_700_000_100)],
             created_at: ts(1_700_000_000),
             updated_at: ts(1_700_000_100),
         }
     }
 
     #[test]
-    fn status_and_state_serialize_lowercase() {
-        assert_eq!(
-            serde_json::to_string(&IncidentStatus::Degraded).unwrap(),
-            "\"degraded\""
-        );
-        assert_eq!(
-            serde_json::from_str::<IncidentState>("\"draft\"").unwrap(),
-            IncidentState::Draft
-        );
-        assert_eq!(IncidentState::default(), IncidentState::Draft);
+    fn impact_serializes_lowercase() {
+        assert_eq!(serde_json::to_string(&Impact::Degraded).unwrap(), "\"degraded\"");
+        assert_eq!(serde_json::to_string(&Impact::None).unwrap(), "\"none\"");
+        assert_eq!(serde_json::from_str::<Impact>("\"hidden\"").unwrap(), Impact::Hidden);
+        assert_eq!(Impact::default(), Impact::Hidden);
+        assert!(Impact::Offline.rank() > Impact::Degraded.rank());
+        assert!(Impact::None.rank() > Impact::Hidden.rank());
     }
 
     #[test]
     fn incident_round_trips_with_epoch_timestamps() {
         let incident = sample();
         let json = serde_json::to_value(&incident).unwrap();
-        // Timestamps are serialized as unix epoch seconds, matching the rest of the API.
         assert_eq!(json["startTime"].as_i64(), None, "fields are snake_case, not camelCase");
         assert_eq!(json["start_time"].as_i64(), Some(1_700_000_000));
         assert_eq!(json["end_time"], serde_json::Value::Null);
-        assert_eq!(json["state"], "offline");
+        assert_eq!(json["updates"][0]["impact"], "offline");
 
         let decoded: Incident = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, incident);
     }
 
     #[test]
-    fn public_and_active_reflect_state_and_resolution() {
+    fn current_impact_follows_latest_update() {
         let mut incident = sample();
-        // Offline + ongoing -> public and active.
+        // Latest update is offline -> public and active.
+        assert_eq!(incident.current_impact(), Impact::Offline);
         assert!(incident.is_public());
         assert!(incident.is_active());
 
-        // A draft is hidden and never active.
-        incident.state = IncidentState::Draft;
-        assert!(!incident.is_public());
-        assert!(!incident.is_active());
-
-        // A resolved offline incident is public but no longer active.
-        incident.state = IncidentState::Offline;
-        incident.end_time = Some(ts(1_700_000_500));
+        // Adding a later "none" update resolves the impact.
+        incident.updates.push(update("u2", Impact::None, 1_700_000_500));
+        assert_eq!(incident.current_impact(), Impact::None);
         assert!(incident.is_public());
-        assert!(!incident.is_active());
+        assert!(!incident.is_active(), "a 'none' impact is not active");
+
+        // A hidden latest update takes it private.
+        incident.updates.push(update("u3", Impact::Hidden, 1_700_000_900));
+        assert!(!incident.is_public());
     }
 
     #[test]
-    fn missing_state_defaults_to_draft_failing_closed() {
+    fn no_updates_means_hidden_and_inactive() {
+        let mut incident = sample();
+        incident.updates.clear();
+        assert_eq!(incident.current_impact(), Impact::Hidden);
+        assert!(!incident.is_public(), "an incident with no updates is a hidden draft");
+        assert!(!incident.is_active());
+        assert_eq!(incident.impact_since(), None);
+    }
+
+    #[test]
+    fn impact_since_is_the_start_of_the_trailing_run() {
+        let mut incident = sample();
+        incident.updates = vec![
+            update("a", Impact::Offline, 100),
+            update("b", Impact::Offline, 200),
+            update("c", Impact::Degraded, 300),
+        ];
+        // Current impact is degraded since 300 (the trailing run of equal impacts).
+        assert_eq!(incident.current_impact(), Impact::Degraded);
+        assert_eq!(incident.impact_since(), Some(ts(300)));
+
+        // A continuous offline run reports the first offline timestamp.
+        incident.updates = vec![
+            update("a", Impact::Offline, 100),
+            update("b", Impact::Offline, 200),
+        ];
+        assert_eq!(incident.impact_since(), Some(ts(100)));
+    }
+
+    #[test]
+    fn missing_updates_default_to_hidden_failing_closed() {
         let incident: Incident = serde_json::from_str(
             r#"{"id":"x","title":"t","start_time":1700000000,"created_at":1700000000,"updated_at":1700000000}"#,
         )
         .unwrap();
-        assert_eq!(incident.state, IncidentState::Draft, "missing state must fail closed (hidden)");
-        assert!(!incident.is_public());
-        assert!(incident.end_time.is_none());
-        assert!(incident.affected_services.is_empty());
+        assert!(!incident.is_public(), "missing updates must fail closed (hidden)");
         assert!(incident.updates.is_empty());
+        assert!(incident.affected_services.is_empty());
         assert_eq!(incident.description, "");
     }
 }

@@ -1,4 +1,4 @@
-//! Administrator-only incident management UI: the full (including draft) incident list with
+//! Administrator-only incident management UI: the full (including hidden) incident list with
 //! create / edit / add-update / delete controls. Browser-only — it reads DOM input values and
 //! performs authenticated mutations — so the whole module is gated to the `wasm` build.
 
@@ -6,7 +6,7 @@ use crate::api;
 use crate::components::incidents_timeline::{IncidentBlock, active_summary};
 use crate::contexts::use_probes;
 use chrono::{DateTime, NaiveDateTime, Utc};
-use grey_api::{Incident, IncidentInput, IncidentState, IncidentStatus, NewIncidentUpdate};
+use grey_api::{Impact, Incident, IncidentInput, NewIncidentUpdate};
 use std::collections::BTreeSet;
 use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
 use yew::prelude::*;
@@ -24,32 +24,12 @@ fn parse_dt(value: &str) -> Option<DateTime<Utc>> {
         .map(|naive| naive.and_utc())
 }
 
-fn status_from_str(value: &str) -> IncidentStatus {
+fn impact_from_str(value: &str) -> Impact {
     match value {
-        "healthy" => IncidentStatus::Healthy,
-        "degraded" => IncidentStatus::Degraded,
-        "offline" => IncidentStatus::Offline,
-        _ => IncidentStatus::Unknown,
-    }
-}
-
-fn state_from_str(value: &str) -> IncidentState {
-    match value {
-        "healthy" => IncidentState::Healthy,
-        "degraded" => IncidentState::Degraded,
-        "offline" => IncidentState::Offline,
-        "unknown" => IncidentState::Unknown,
-        _ => IncidentState::Draft,
-    }
-}
-
-fn state_value(state: IncidentState) -> &'static str {
-    match state {
-        IncidentState::Draft => "draft",
-        IncidentState::Healthy => "healthy",
-        IncidentState::Degraded => "degraded",
-        IncidentState::Offline => "offline",
-        IncidentState::Unknown => "unknown",
+        "offline" => Impact::Offline,
+        "degraded" => Impact::Degraded,
+        "none" => Impact::None,
+        _ => Impact::Hidden,
     }
 }
 
@@ -111,7 +91,8 @@ pub fn admin_incidents(props: &AdminIncidentsProps) -> Html {
         });
     }
 
-    // "New incident" saves a draft (started + detected = now) and opens its editor immediately.
+    // "New incident" saves a blank draft (started = now, no updates so it stays hidden) and opens
+    // its editor immediately.
     let on_new = {
         let token = token.clone();
         let incidents = incidents.clone();
@@ -122,16 +103,12 @@ pub fn admin_incidents(props: &AdminIncidentsProps) -> Html {
             let incidents = incidents.clone();
             let editing = editing.clone();
             let error = error.clone();
-            let now = Utc::now();
             let draft = IncidentInput {
                 title: "Untitled incident".to_string(),
                 description: String::new(),
-                start_time: now,
+                start_time: Utc::now(),
                 end_time: None,
-                detection_time: Some(now),
-                mitigation_time: None,
                 affected_services: vec![],
-                state: IncidentState::Draft,
             };
             wasm_bindgen_futures::spawn_local(async move {
                 match api::create_incident(&token, &draft).await {
@@ -306,10 +283,7 @@ fn incident_form(props: &IncidentFormProps) -> Html {
     let description = use_state(|| incident.description.clone());
     let start = use_state(|| dt_to_input(incident.start_time));
     let end = use_state(|| incident.end_time.map(dt_to_input).unwrap_or_default());
-    let detection = use_state(|| incident.detection_time.map(dt_to_input).unwrap_or_default());
-    let mitigation = use_state(|| incident.mitigation_time.map(dt_to_input).unwrap_or_default());
     let services = use_state(|| incident.affected_services.clone());
-    let state = use_state(|| incident.state);
     let error = use_state(|| Option::<String>::None);
     let saving = use_state(|| false);
 
@@ -328,14 +302,6 @@ fn incident_form(props: &IncidentFormProps) -> Html {
         set.into_iter().collect()
     };
 
-    let on_state = {
-        let state = state.clone();
-        Callback::from(move |e: Event| {
-            let el: HtmlSelectElement = e.target_unchecked_into();
-            state.set(state_from_str(&el.value()));
-        })
-    };
-
     let on_services_change = {
         let services = services.clone();
         Callback::from(move |next: Vec<String>| services.set(next))
@@ -344,15 +310,12 @@ fn incident_form(props: &IncidentFormProps) -> Html {
     let onsubmit = {
         let token = props.token.clone();
         let id = incident.id.clone();
-        let (title, description, start, end, detection, mitigation, services, state) = (
+        let (title, description, start, end, services) = (
             title.clone(),
             description.clone(),
             start.clone(),
             end.clone(),
-            detection.clone(),
-            mitigation.clone(),
             services.clone(),
-            state.clone(),
         );
         let error = error.clone();
         let saving = saving.clone();
@@ -371,10 +334,7 @@ fn incident_form(props: &IncidentFormProps) -> Html {
                 description: (*description).clone(),
                 start_time: parse_dt(&start).unwrap_or_else(Utc::now),
                 end_time: parse_dt(&end),
-                detection_time: parse_dt(&detection),
-                mitigation_time: parse_dt(&mitigation),
                 affected_services: (*services).clone(),
-                state: *state,
             };
 
             let token = token.clone();
@@ -408,15 +368,6 @@ fn incident_form(props: &IncidentFormProps) -> Html {
             <label>{"Title"}
                 <input type="text" value={(*title).clone()} oninput={bind_input(&title)} />
             </label>
-            <label>{"State"}
-                <select onchange={on_state}>
-                    <option value="draft" selected={*state == IncidentState::Draft}>{"Draft (hidden from public)"}</option>
-                    <option value="healthy" selected={*state == IncidentState::Healthy}>{"Healthy"}</option>
-                    <option value="degraded" selected={*state == IncidentState::Degraded}>{"Degraded"}</option>
-                    <option value="offline" selected={*state == IncidentState::Offline}>{"Offline"}</option>
-                    <option value="unknown" selected={*state == IncidentState::Unknown}>{"Unknown"}</option>
-                </select>
-            </label>
             <label>{"Description (markdown)"}
                 <textarea rows="4" value={(*description).clone()} oninput={bind_textarea(&description)} />
             </label>
@@ -424,13 +375,7 @@ fn incident_form(props: &IncidentFormProps) -> Html {
                 <label>{"Started (UTC)"}
                     <input type="datetime-local" value={(*start).clone()} oninput={bind_input(&start)} />
                 </label>
-                <label>{"Detected (UTC)"}
-                    <input type="datetime-local" value={(*detection).clone()} oninput={bind_input(&detection)} />
-                </label>
-                <label>{"Mitigated (UTC)"}
-                    <input type="datetime-local" value={(*mitigation).clone()} oninput={bind_input(&mitigation)} />
-                </label>
-                <label>{"Resolved (UTC)"}
+                <label>{"Ended (UTC)"}
                     <input type="datetime-local" value={(*end).clone()} oninput={bind_input(&end)} />
                 </label>
             </div>
@@ -441,6 +386,9 @@ fn incident_form(props: &IncidentFormProps) -> Html {
                     on_change={on_services_change}
                 />
             </label>
+            <p class="incident-form-hint">
+                {"Set the incident's impact by posting updates (Offline, Degraded, Operational, or Hidden). An incident with no updates stays a hidden draft."}
+            </p>
             <div class="incident-form-actions">
                 <button type="submit" class="primary-button" disabled={*saving}>
                     { if *saving { "Saving…" } else { "Save" } }
@@ -582,23 +530,23 @@ struct UpdateFormProps {
 
 #[function_component(UpdateForm)]
 fn update_form(props: &UpdateFormProps) -> Html {
-    let status = use_state(|| "offline".to_string());
+    let impact = use_state(|| "offline".to_string());
     let message = use_state(String::new);
     let error = use_state(|| Option::<String>::None);
     let saving = use_state(|| false);
 
-    let on_status = {
-        let status = status.clone();
+    let on_impact = {
+        let impact = impact.clone();
         Callback::from(move |e: Event| {
             let el: HtmlSelectElement = e.target_unchecked_into();
-            status.set(el.value());
+            impact.set(el.value());
         })
     };
 
     let onsubmit = {
         let token = props.token.clone();
         let id = props.incident_id.clone();
-        let status = status.clone();
+        let impact = impact.clone();
         let message = message.clone();
         let error = error.clone();
         let saving = saving.clone();
@@ -611,7 +559,7 @@ fn update_form(props: &UpdateFormProps) -> Html {
                 return;
             }
             let update = NewIncidentUpdate {
-                status: status_from_str(&status),
+                impact: impact_from_str(&impact),
                 message: message_value,
                 timestamp: None,
             };
@@ -639,16 +587,16 @@ fn update_form(props: &UpdateFormProps) -> Html {
 
     html! {
         <form class="incident-form incident-update-form" onsubmit={onsubmit}>
-            <h4>{"Add status update"}</h4>
+            <h4>{"Add update"}</h4>
             if let Some(err) = (*error).clone() {
                 <p class="incidents-error">{err}</p>
             }
-            <label>{"Status"}
-                <select onchange={on_status}>
-                    <option value="offline" selected={*status == "offline"}>{"Offline"}</option>
-                    <option value="degraded" selected={*status == "degraded"}>{"Degraded"}</option>
-                    <option value="healthy" selected={*status == "healthy"}>{"Healthy"}</option>
-                    <option value="unknown" selected={*status == "unknown"}>{"Unknown"}</option>
+            <label>{"Impact"}
+                <select onchange={on_impact}>
+                    <option value="offline" selected={*impact == "offline"}>{"Offline"}</option>
+                    <option value="degraded" selected={*impact == "degraded"}>{"Degraded"}</option>
+                    <option value="none" selected={*impact == "none"}>{"Operational (no impact)"}</option>
+                    <option value="hidden" selected={*impact == "hidden"}>{"Hidden"}</option>
                 </select>
             </label>
             <label>{"Message (markdown)"}

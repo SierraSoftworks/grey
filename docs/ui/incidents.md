@@ -6,20 +6,22 @@ status page. Unlike [notices](./notices.md), which are static entries in your
 configuration file, incidents are created and managed live through the UI and
 stored in Grey's state database.
 
-An incident has a title, a description (markdown), a start time, optional
-detection / mitigation / resolution times, an optional list of affected
-services, an overall **state**, and a series of **status updates** (each with a
-status of `healthy`, `degraded`, `offline` or `unknown`, a timestamp, and a
-markdown message).
+An incident has a title, a description (markdown), a start time, an optional end
+time, an optional list of affected services, and a series of **updates** (each
+with an **impact**, a timestamp, and a markdown message).
 
-An incident's state is one of `draft`, `healthy`, `degraded`, `offline` or
-`unknown`. A **draft** is visible only to administrators — use it to prepare an
-incident before publishing it by changing its state. `degraded` and `offline`
-incidents that are still ongoing are counted as *active*.
+Each update's impact is one of `offline`, `degraded`, `none` (no impact) or
+`hidden`. An incident's current impact is that of its most recent update, and an
+incident with no updates is treated as `hidden` — so a freshly created incident
+is a hidden draft until you publish it by posting an update. `offline` and
+`degraded` incidents that are still ongoing (no end time) are *active*; the
+overall status shown on the page is the worst impact among the active incidents.
 
 Incidents appear as status-coloured blocks beneath the probes on the status
 page (under a header that turns amber/red when incidents are active), and in
-full on the dedicated **Incidents** page.
+full on the dedicated **Incidents** page. Each block carries a timeline running
+from the incident's start to its end, with its updates shown as cards along the
+way; the connecting line keeps each update's colour until the next one.
 
 ::: tip
 Incidents are stored locally in Grey's state database (`state.redb`) as JSON.
@@ -104,13 +106,15 @@ with no (or an invalid) token receives `401`.
 Once signed in, the **Incidents** page shows every incident (including drafts)
 with management controls:
 
-- **New incident** — immediately saves a new draft (with its start and detection
-  times set to now) and opens its editor so you can fill in the details.
-- **Edit** — change any of an incident's details, including its **state** (set it
-  to `draft` to hide it from the public again). Affected services offer an
-  autocomplete drawn from your configured services and probe names.
-- **Add update** — post a status update (status + markdown message). Updates form
-  the incident's chronological narrative.
+- **New incident** — immediately saves a new draft (with its start time set to
+  now) and opens its editor so you can fill in the details.
+- **Edit** — change the incident's title, description, start/end times and
+  affected services. Affected services offer an autocomplete drawn from your
+  configured services and probe names. (Impact is set through updates, not here.)
+- **Add update** — post an update with an **impact** (`offline`, `degraded`,
+  `none`, or `hidden`) and a markdown message. The latest update sets the
+  incident's current impact, so posting a non-`hidden` update publishes a draft,
+  and posting a `none` update (plus setting an end time) resolves it.
 - **Delete** — remove the incident permanently.
 
 Signing in is via the user chip in the header; hover it to reveal **Sign out**.

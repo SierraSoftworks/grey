@@ -57,10 +57,7 @@ pub async fn create_incident(
         description: input.description,
         start_time: input.start_time,
         end_time: input.end_time,
-        detection_time: input.detection_time,
-        mitigation_time: input.mitigation_time,
         affected_services: input.affected_services,
-        state: input.state,
         updates: vec![],
         created_at: now,
         updated_at: now,
@@ -87,10 +84,7 @@ pub async fn update_incident(
     incident.description = input.description;
     incident.start_time = input.start_time;
     incident.end_time = input.end_time;
-    incident.detection_time = input.detection_time;
-    incident.mitigation_time = input.mitigation_time;
     incident.affected_services = input.affected_services;
-    incident.state = input.state;
     incident.updated_at = Utc::now();
 
     data.state.put_incident(&incident).await?;
@@ -121,7 +115,7 @@ pub async fn add_update(
     let input = body.into_inner();
     let update = IncidentUpdate {
         id: new_id(now),
-        status: input.status,
+        impact: input.impact,
         timestamp: input.timestamp.unwrap_or(now),
         message: input.message,
     };
@@ -138,7 +132,7 @@ pub async fn add_update(
 mod tests {
     use super::*;
     use actix_web::{App, body::MessageBody, http::StatusCode, test};
-    use grey_api::IncidentStatus;
+    use grey_api::Impact;
     use tempfile::tempdir;
 
     #[actix_web::test]
@@ -158,48 +152,47 @@ mod tests {
         )
         .await;
 
-        // Create
+        // Create: a fresh incident has no updates, so it is a hidden draft.
         let req = test::TestRequest::post()
             .uri("/incidents")
             .set_json(serde_json::json!({
-                "title": "Outage", "description": "desc",
-                "start_time": 1_700_000_000, "state": "offline"
+                "title": "Outage", "description": "desc", "start_time": 1_700_000_000
             }))
             .to_request();
         let created: Incident = test::call_and_read_body_json(&app, req).await;
         assert_eq!(created.title, "Outage");
-        assert_eq!(created.state, grey_api::IncidentState::Offline);
-        assert!(created.is_public());
         assert!(created.updates.is_empty());
+        assert!(!created.is_public(), "a new incident is a hidden draft");
 
         // The admin list includes it.
         let req = test::TestRequest::get().uri("/incidents").to_request();
         let all: Vec<Incident> = test::call_and_read_body_json(&app, req).await;
         assert_eq!(all.len(), 1);
 
-        // Replace: rename, hide, resolve. id/created_at are preserved.
+        // Replace editable fields: rename and resolve. id/created_at are preserved.
         let req = test::TestRequest::put()
             .uri(&format!("/incidents/{}", created.id))
             .set_json(serde_json::json!({
                 "title": "Outage (resolved)", "start_time": 1_700_000_000,
-                "end_time": 1_700_003_600, "state": "healthy"
+                "end_time": 1_700_003_600, "affected_services": ["api"]
             }))
             .to_request();
         let updated: Incident = test::call_and_read_body_json(&app, req).await;
         assert_eq!(updated.title, "Outage (resolved)");
-        assert_eq!(updated.state, grey_api::IncidentState::Healthy);
         assert!(updated.end_time.is_some());
+        assert_eq!(updated.affected_services, vec!["api".to_string()]);
         assert_eq!(updated.id, created.id);
         assert_eq!(updated.created_at, created.created_at);
 
-        // Append a status update.
+        // Posting an offline update publishes it and sets its impact.
         let req = test::TestRequest::post()
             .uri(&format!("/incidents/{}/updates", created.id))
-            .set_json(serde_json::json!({ "status": "offline", "message": "Investigating" }))
+            .set_json(serde_json::json!({ "impact": "offline", "message": "Investigating" }))
             .to_request();
         let with_update: Incident = test::call_and_read_body_json(&app, req).await;
         assert_eq!(with_update.updates.len(), 1);
-        assert_eq!(with_update.updates[0].status, IncidentStatus::Offline);
+        assert_eq!(with_update.updates[0].impact, Impact::Offline);
+        assert!(with_update.is_public());
 
         // Delete → 204, then everything 404s.
         let req = test::TestRequest::delete().uri(&format!("/incidents/{}", created.id)).to_request();
@@ -210,7 +203,7 @@ mod tests {
 
         let req = test::TestRequest::put()
             .uri(&format!("/incidents/{}", created.id))
-            .set_json(serde_json::json!({ "title": "x", "start_time": 1, "state": "healthy" }))
+            .set_json(serde_json::json!({ "title": "x", "start_time": 1 }))
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status(), StatusCode::NOT_FOUND);
     }
