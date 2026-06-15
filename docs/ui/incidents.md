@@ -6,22 +6,24 @@ status page. Unlike [notices](./notices.md), which are static entries in your
 configuration file, incidents are created and managed live through the UI and
 stored in Grey's state database.
 
-An incident has a title, a description (markdown), a start time, an optional end
-time, an optional list of affected services, and a series of **updates** (each
-with an **impact**, a timestamp, and a markdown message).
+An incident is just a title and a series of **updates**, each with an **impact**,
+a timestamp, and a markdown message. Its start, current status and resolution are
+all inferred from those updates — there are no separate description, time or
+affected-service fields to keep in sync.
 
 Each update's impact is one of `offline`, `degraded`, `none` (no impact) or
 `hidden`. An incident's current impact is that of its most recent update, and an
 incident with no updates is treated as `hidden` — so a freshly created incident
-is a hidden draft until you publish it by posting an update. `offline` and
-`degraded` incidents that are still ongoing (no end time) are *active*; the
-overall status shown on the page is the worst impact among the active incidents.
+is a hidden draft until you publish it by posting a visible update. An incident
+whose current impact is `offline` or `degraded` is *active*; the overall status
+shown on the page is the worst impact among the active incidents. Posting a
+`none` update resolves an incident, returning its current impact to operational.
 
-Incidents appear as status-coloured blocks beneath the probes on the status
-page (under a header that turns amber/red when incidents are active), and in
-full on the dedicated **Incidents** page. Each block carries a timeline running
-from the incident's start to its end, with its updates shown as cards along the
-way; the connecting line keeps each update's colour until the next one.
+Incidents appear beneath the probes on the status page — the page's top-line
+status turns amber or red while any incident is active — and in full on the
+dedicated **Incidents** page. Each incident is shown as a vertical timeline of
+its updates, every update a card coloured by its impact, with the connecting line
+keeping each update's colour until the next one.
 
 ::: tip
 Incidents are stored locally in Grey's state database (`state.redb`) as JSON.
@@ -103,30 +105,35 @@ with no (or an invalid) token receives `401`.
 
 ## Managing incidents
 
-Once signed in, the **Incidents** page shows every incident (including drafts)
-with management controls:
+Once signed in, the **Incidents** page shows every incident (including hidden
+drafts), and each incident's own page becomes editable:
 
-- **New incident** — immediately saves a new draft (with its start time set to
-  now) and opens its editor so you can fill in the details.
-- **Edit** — change the incident's title, description, start/end times and
-  affected services. Affected services offer an autocomplete drawn from your
-  configured services and probe names. (Impact is set through updates, not here.)
-- **Add update** — post an update with an **impact** (`offline`, `degraded`,
-  `none`, or `hidden`) and a markdown message. The latest update sets the
-  incident's current impact, so posting a non-`hidden` update publishes a draft,
-  and posting a `none` update (plus setting an end time) resolves it.
+- **New incident** — opens a dedicated page for a title and the incident's
+  opening update (an impact and a markdown message). Saving creates the incident
+  with that first update and takes you to its page.
+- **Edit** — on an incident's page, click any field (the title, or an update's
+  impact or message) to change it. A **Save** control appears at the top-right as
+  soon as there are unsaved changes. Saving is an atomic check-and-set, so an
+  edit made against a stale version is rejected rather than overwriting a
+  concurrent change.
+- **Add / remove updates** — add a new update, or remove an existing one, from
+  the incident's page, then save. The latest update sets the incident's current
+  impact, so posting a visible update publishes a draft and posting a `none`
+  update resolves the incident.
 - **Delete** — remove the incident permanently.
 
-Signing in is via the user chip in the header; hover it to reveal **Sign out**.
+Signing in is via the **Sign in** button in the header; once signed in, hover the
+user chip to reveal **Sign out**.
 
 ::: tip
-Times are entered and displayed in UTC.
+Each update is timestamped automatically when you add it, and all times are
+displayed in UTC.
 :::
 
 ## Pages and links
 
-Each incident has a short id shown as dash-grouped base36 (e.g. `x7a8-fw2i`) and
+Each incident has a short id shown as dash-grouped base36 (e.g. `1up-3mt-g`) and
 its own page at `/incidents/{id}`. The landing page shows recent and active
-incidents as compact cards (title, description, and a horizontal timeline whose
-markers reveal each update on hover); the **Incidents** page lists them in full,
-and every incident title links through to its page.
+incidents as compact summaries — a title and a horizontal timeline whose markers
+reveal each update on hover; the **Incidents** page lists them in full, and every
+incident title links through to its page.
