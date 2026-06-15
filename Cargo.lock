@@ -1311,9 +1311,9 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "filt-rs"
-version = "1.0.1"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09b729c44478072040180e720cd278664aeb425bbfe17f6ce00b94b958b09d7c"
+checksum = "ba8a8018aa38b1fdd61f1e0132ae724ba0640c4938b2fc9010396d4adad5b475"
 dependencies = [
  "chrono",
  "human-errors",
