@@ -2,6 +2,7 @@ pub mod banner;
 pub mod cluster_status;
 pub mod header;
 pub mod history;
+pub mod icons;
 pub mod incidents_timeline;
 pub mod markdown;
 pub mod probe;

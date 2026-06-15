@@ -53,7 +53,9 @@ struct AdminIncidentDetailProps {
 #[cfg(feature = "wasm")]
 #[function_component(AdminIncidentDetail)]
 fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
+    use crate::components::icons::{check_icon, edit_icon, save_icon};
     use crate::components::incidents_timeline::{impact_class, impact_label};
+    use crate::components::markdown::render_markdown;
     use crate::routes::Route;
     use crate::views::{impact_value, parse_impact};
     use chrono::Utc;
@@ -67,6 +69,9 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
     let updates = use_state(Vec::<IncidentUpdate>::new);
     let error = use_state(|| Option::<String>::None);
     let saving = use_state(|| false);
+    // Which posted update (by index) currently has its message open in a textarea; the rest render
+    // their message as markdown.
+    let editing = use_state(|| Option::<usize>::None);
     let navigator = use_navigator();
 
     // Load the incident (including hidden) once.
@@ -104,7 +109,10 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
         };
     };
 
-    let dirty = current.title != *title || current.updates != *updates;
+    // The unchanged baseline, in the same (sorted) order as the editable list, so reordering by the
+    // server's storage order never reads as a spurious change.
+    let baseline: Vec<IncidentUpdate> = current.sorted_updates().into_iter().cloned().collect();
+    let dirty = current.title != *title || baseline != *updates;
 
     let on_title = {
         let title = title.clone();
@@ -168,6 +176,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
         let loaded = loaded.clone();
         let error = error.clone();
         let saving = saving.clone();
+        let editing = editing.clone();
         Callback::from(move |_| {
             let edit = IncidentEdit {
                 title: (*title).trim().to_string(),
@@ -180,6 +189,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
             let updates = updates.clone();
             let error = error.clone();
             let saving = saving.clone();
+            let editing = editing.clone();
             saving.set(true);
             wasm_bindgen_futures::spawn_local(async move {
                 let result = crate::api::replace_incident(&token, &id, version, &edit).await;
@@ -190,6 +200,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                         updates.set(incident.sorted_updates().into_iter().cloned().collect());
                         loaded.set(Some(incident));
                         error.set(None);
+                        editing.set(None);
                     }
                     Err(e) => error.set(Some(e.to_string())),
                 }
@@ -226,20 +237,25 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
         <div class="incidents-page incident-edit">
             <article class="incident-block">
                 <div class="incident-block-header">
-                    <input
-                        class="incident-title-input"
-                        type="text"
-                        value={(*title).clone()}
-                        oninput={on_title}
-                    />
-                    <div class="incident-edit-actions">
+                    <div class="incident-title-block">
+                        <input
+                            class="incident-title-input"
+                            type="text"
+                            value={(*title).clone()}
+                            oninput={on_title}
+                        />
                         <span class="incident-id">{format!("#{}", current.id)}</span>
-                        if dirty {
-                            <button class="save-button" title="Save changes" disabled={*saving} onclick={on_save}>
-                                { if *saving { "Saving…" } else { "💾 Save" } }
-                            </button>
-                        }
                     </div>
+                    if dirty {
+                        <button
+                            class={classes!("save-icon", (*saving).then_some("saving"))}
+                            title="Save changes"
+                            disabled={*saving}
+                            onclick={on_save}
+                        >
+                            { save_icon() }
+                        </button>
+                    }
                 </div>
 
                 if let Some(err) = (*error).clone() {
@@ -249,6 +265,11 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                 <ul class="incident-timeline editing">
                     { for (*updates).iter().enumerate().map(|(i, update)| {
                         let class = impact_class(update.impact);
+                        // An update is "posted" once it is part of the loaded incident: its impact then
+                        // becomes fixed and only its message stays editable. New (unsaved) updates keep
+                        // full control so the impact can still be chosen before the first save.
+                        let posted = current.updates.iter().any(|u| u.timestamp == update.timestamp);
+                        let is_editing = *editing == Some(i);
                         html! {
                             <li class="timeline-item">
                                 <div class="timeline-rail">
@@ -258,21 +279,51 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                                     }
                                 </div>
                                 <div class="timeline-body">
-                                    <div class="timeline-edit-row">
-                                        <select onchange={on_update_impact(i)}>
-                                            { for [Impact::Offline, Impact::Degraded, Impact::None, Impact::Hidden].into_iter().map(|opt| html! {
-                                                <option value={impact_value(opt)} selected={opt == update.impact}>{impact_label(opt)}</option>
-                                            }) }
-                                        </select>
-                                        <span class="timeline-time">{update.timestamp.format("%Y-%m-%d %H:%M UTC").to_string()}</span>
-                                        <button type="button" class="link-button danger" onclick={on_remove_update(i)}>{"Remove"}</button>
-                                    </div>
-                                    <textarea
-                                        class="timeline-message-input"
-                                        rows="2"
-                                        value={update.message.clone()}
-                                        oninput={on_update_message(i)}
-                                    />
+                                    if posted {
+                                        <div class="timeline-time">{update.timestamp.format("%Y-%m-%d %H:%M UTC").to_string()}</div>
+                                        <div class={classes!("timeline-card", class)}>
+                                            <div class="timeline-card-head">
+                                                <span class={classes!("incident-status-pill", class)}>{impact_label(update.impact)}</span>
+                                                if is_editing {
+                                                    <button type="button" class="icon-button" title="Done editing"
+                                                        onclick={ let editing = editing.clone(); Callback::from(move |_| editing.set(None)) }>
+                                                        { check_icon() }
+                                                    </button>
+                                                } else {
+                                                    <button type="button" class="icon-button" title="Edit message"
+                                                        onclick={ let editing = editing.clone(); Callback::from(move |_| editing.set(Some(i))) }>
+                                                        { edit_icon() }
+                                                    </button>
+                                                }
+                                            </div>
+                                            if is_editing {
+                                                <textarea
+                                                    class="timeline-message-input"
+                                                    rows="3"
+                                                    value={update.message.clone()}
+                                                    oninput={on_update_message(i)}
+                                                />
+                                            } else {
+                                                <div class="timeline-card-message markdown">{ render_markdown(&update.message) }</div>
+                                            }
+                                        </div>
+                                    } else {
+                                        <div class="timeline-edit-row">
+                                            <select onchange={on_update_impact(i)}>
+                                                { for [Impact::Offline, Impact::Degraded, Impact::None, Impact::Hidden].into_iter().map(|opt| html! {
+                                                    <option value={impact_value(opt)} selected={opt == update.impact}>{impact_label(opt)}</option>
+                                                }) }
+                                            </select>
+                                            <span class="timeline-time">{update.timestamp.format("%Y-%m-%d %H:%M UTC").to_string()}</span>
+                                            <button type="button" class="link-button danger" onclick={on_remove_update(i)}>{"Remove"}</button>
+                                        </div>
+                                        <textarea
+                                            class="timeline-message-input"
+                                            rows="3"
+                                            value={update.message.clone()}
+                                            oninput={on_update_message(i)}
+                                        />
+                                    }
                                 </div>
                             </li>
                         }

@@ -96,6 +96,8 @@ pub struct IncidentSummaryProps {
 pub fn incident_summary(props: &IncidentSummaryProps) -> Html {
     let incident = &props.incident;
     let (status_text, status_class) = incident_status(incident);
+    // The most recent update's message, shown as a one-glance summary of where the incident stands.
+    let latest_message = incident.sorted_updates().last().map(|u| u.message.clone());
 
     html! {
         <div class="incident-summary">
@@ -107,6 +109,9 @@ pub fn incident_summary(props: &IncidentSummaryProps) -> Html {
                 </h3>
                 <span class={classes!("incident-streak", status_class)}>{status_text}</span>
             </div>
+            if let Some(message) = latest_message {
+                <div class="incident-summary-message markdown">{ render_markdown(&message) }</div>
+            }
             <HorizontalTimeline incident={incident.clone()} />
         </div>
     }

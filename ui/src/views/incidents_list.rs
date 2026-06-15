@@ -74,7 +74,10 @@ fn admin_incidents_list(props: &AdminIncidentsListProps) -> Html {
         <div class="incidents-page">
             <div class="incidents-list-header">
                 <h1>{"Incidents"}</h1>
-                <Link<Route> to={Route::NewIncident} classes="primary-button">{"New incident"}</Link<Route>>
+                <Link<Route> to={Route::NewIncident} classes="declare-incident">
+                    { crate::components::icons::warning_icon() }
+                    <span>{"Declare Incident"}</span>
+                </Link<Route>>
             </div>
             if let Some(err) = (*error).clone() {
                 <p class="incidents-error">{err}</p>

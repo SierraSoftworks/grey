@@ -94,11 +94,12 @@
         border-bottom: 1px solid $color-separator;
     }
 
+    // Title with the id stacked beneath it.
     .incident-block-heading {
         display: flex;
-        align-items: baseline;
-        gap: 0.5rem;
-        flex-wrap: wrap;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.15rem;
 
         .incident-block-title {
             margin: 0;
@@ -107,7 +108,7 @@
     }
 }
 
-// A compact incident summary (landing page): title, description, horizontal timeline.
+// A compact incident summary (landing page): title, latest update, horizontal timeline.
 .incident-summary {
     padding: 1rem 0;
     border-bottom: 1px solid $color-separator;
@@ -132,6 +133,13 @@
             margin: 0;
             font-weight: 400;
         }
+    }
+
+    // The latest update's message, shown beneath the title as an at-a-glance status line.
+    .incident-summary-message {
+        margin: 0.4rem 0 0 0;
+        font-size: 0.9rem;
+        color: $color-text-muted;
     }
 }
 
@@ -524,7 +532,7 @@
     }
 }
 
-// The admin incidents list: heading on the left, the "New incident" action on the right.
+// The admin incidents list: heading on the left, the "Declare Incident" action on the right.
 .incidents-list-header {
     display: flex;
     justify-content: space-between;
@@ -539,19 +547,56 @@
     }
 }
 
+// Inline SVG icons inherit the surrounding text colour and scale with the text.
+.icon {
+    width: 1.1rem;
+    height: 1.1rem;
+    flex: none;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+// The "Declare Incident" action: a clean, warning-coloured outline (triangle icon + label).
+.declare-incident {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    text-decoration: none;
+    font-size: 0.9rem;
+    color: $color-status-warn;
+    background: none;
+    border: 1px solid $color-status-warn;
+    border-radius: $border-radius-small;
+    padding: 0.4rem 0.85rem;
+
+    &:hover {
+        color: $color-status-text;
+        background-color: $color-status-warn;
+    }
+}
+
 // Inline editing on a per-incident page: editable fields read as text until hovered/focused, and a
 // save control surfaces in the header (top-right) only once there are unsaved changes.
 .incident-edit {
-    .incident-edit-actions {
+    // Title line and the save indicator should sit at the top of the header, not on its baseline.
+    .incident-block-header {
+        align-items: flex-start;
+    }
+
+    // Title with the id stacked beneath it, filling the header beside the save indicator.
+    .incident-title-block {
         display: flex;
-        align-items: center;
-        gap: 0.75rem;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.15rem;
+        flex: 1;
+        min-width: 0;
     }
 
     // The title behaves like its heading until you interact with it.
     .incident-title-input {
-        flex: 1;
-        min-width: 12rem;
+        width: 100%;
+        box-sizing: border-box;
         font: inherit;
         font-size: 1.3rem;
         font-weight: 400;
@@ -571,26 +616,66 @@
         }
     }
 
-    .save-button {
+    // The save indicator: just the icon (no button chrome), shown only when there are changes.
+    .save-icon {
         cursor: pointer;
-        white-space: nowrap;
-        font-size: 0.85rem;
-        padding: 0.4rem 0.9rem;
-        color: $color-status-text;
-        background-color: $color-status-ok;
-        border: 1px solid $color-status-ok;
-        border-radius: $border-radius-small;
+        border: none;
+        background: none;
+        padding: 0.1rem;
+        margin: 0.3rem 0 0 0.5rem;
+        color: $color-status-unknown;
+        display: inline-flex;
+        align-items: center;
+
+        .icon {
+            width: 1.35rem;
+            height: 1.35rem;
+        }
 
         &:hover {
-            opacity: 0.9;
+            opacity: 0.8;
         }
+        &.saving,
         &:disabled {
-            opacity: 0.6;
+            opacity: 0.5;
             cursor: default;
         }
     }
 
-    // Each update's controls: impact select + timestamp + remove, above its editable message.
+    // Icon-only affordances inside a posted update's card (edit / done, toggling the message editor).
+    .icon-button {
+        cursor: pointer;
+        border: none;
+        background: none;
+        padding: 0;
+        color: $color-text-muted;
+        display: inline-flex;
+        align-items: center;
+
+        .icon {
+            width: 1rem;
+            height: 1rem;
+        }
+
+        &:hover {
+            color: $color-text;
+        }
+    }
+
+    // A posted update's card header: the fixed impact pill, with the edit/done icon at the far right.
+    .timeline-card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        margin-bottom: 0.4rem;
+
+        .incident-status-pill {
+            margin-bottom: 0;
+        }
+    }
+
+    // Each new (unposted) update's controls: impact select + timestamp + remove, above its message.
     .timeline-edit-row {
         display: flex;
         align-items: center;
