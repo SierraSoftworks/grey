@@ -128,9 +128,11 @@ pub fn incident_summary(props: &IncidentSummaryProps) -> Html {
     }
 }
 
-/// The horizontal timeline used in summaries: the first update sits at the far left; the segment
-/// after the last update extends to the far right in its colour, unless it has returned to
-/// operational (a terminal marker). Popovers anchor inward at the ends so they stay on-screen.
+/// The horizontal timeline used in summaries: a lead-in tail in the first update's colour runs in
+/// from the left, the updates' impact-coloured dots sit on connecting segments, and a lead-out tail
+/// in the last update's colour trails off to the right. The tails fade outward to imply that time
+/// led up to, and continued past, the events. Popovers anchor inward at the ends so they stay
+/// on-screen.
 #[derive(Properties, PartialEq)]
 pub struct HorizontalTimelineProps {
     pub incident: Incident,
@@ -144,10 +146,11 @@ pub fn horizontal_timeline(props: &HorizontalTimelineProps) -> Html {
         return html! {};
     }
     let last = updates.len() - 1;
-    let extend_tail = updates[last].impact != Impact::None;
 
     html! {
         <div class="incident-hbar">
+            // The lead-in tail carries the first update's colour, fading in from the left.
+            <span class={classes!("hline", "lead-in", impact_class(updates[0].impact))}></span>
             { for updates.iter().enumerate().map(|(i, update)| {
                 let dot_class = impact_class(update.impact);
                 let is_open = *active == Some(i);
@@ -183,10 +186,8 @@ pub fn horizontal_timeline(props: &HorizontalTimelineProps) -> Html {
                     </>
                 }
             }) }
-            // The final state extends to the right edge unless the incident is resolved.
-            if extend_tail {
-                <span class={classes!("hline", impact_class(updates[last].impact))}></span>
-            }
+            // The lead-out tail carries the last update's colour, fading off to the right.
+            <span class={classes!("hline", "lead-out", impact_class(updates[last].impact))}></span>
         </div>
     }
 }

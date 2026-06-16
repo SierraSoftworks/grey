@@ -154,9 +154,9 @@
     margin-top: 0.75rem;
     padding: 0.25rem 0;
 
-    // Connecting segments grow to fill the bar; markers keep their intrinsic size. The first child is
-    // a marker (no leading line) so the first update sits at the far left; a trailing line after the
-    // last marker (rendered only when the incident is unresolved) stretches its colour to the right.
+    // Connecting segments grow to fill the bar; markers keep their intrinsic size. A lead-in tail
+    // before the first marker and a lead-out tail after the last carry the nearest marker's colour
+    // and fade outward, implying that time led up to — and continued past — the events.
     .hline {
         flex: 1;
         height: 2px;
@@ -171,6 +171,19 @@
         }
         &.error {
             background-color: $color-status-error;
+        }
+
+        // The tails fade toward the open (outer) end. Masking the solid colour keeps the per-impact
+        // colour rules above intact.
+        &.lead-in {
+            mask-image: linear-gradient(to right, transparent, #000);
+            -webkit-mask-image: linear-gradient(to right, transparent, #000);
+            flex: 0.3;
+        }
+        &.lead-out {
+            mask-image: linear-gradient(to right, #000, transparent);
+            -webkit-mask-image: linear-gradient(to right, #000, transparent);
+            flex: 0.3;
         }
     }
 
