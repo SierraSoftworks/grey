@@ -134,7 +134,7 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
                 <label>{"Initial update"}
                     <textarea rows="4" value={(*message).clone()} oninput={on_message} placeholder="Enter initial update in markdown form..." />
                 </label>
-                <div class="incident-form-actions">
+                <div class="incident-form__actions">
                     <button type="submit" class="primary-button" disabled={*saving}>
                         { if *saving { "Creating…" } else { "Create incident" } }
                     </button>
