@@ -3,7 +3,6 @@ use chrono::Datelike;
 use grey_api::UiConfig;
 use yew::prelude::*;
 
-use crate::components::status::StatusLevel;
 use crate::contexts::{
     AuthProvider, IncidentsProvider, NoticesProvider, PeersProvider, ProbesProvider,
     UiConfigProvider,

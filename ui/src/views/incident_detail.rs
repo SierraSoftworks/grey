@@ -54,10 +54,9 @@ struct AdminIncidentDetailProps {
 #[function_component(AdminIncidentDetail)]
 fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
     use crate::components::icons::{check_icon, edit_icon, save_icon};
-    use crate::components::incidents_timeline::{impact_class, impact_label};
     use crate::components::markdown::render_markdown;
     use crate::routes::Route;
-    use crate::views::{impact_value, parse_impact};
+    use crate::styles::impact_class;
     use chrono::Utc;
     use grey_api::{Impact, IncidentEdit, IncidentUpdate};
     use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
@@ -130,7 +129,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
             let el: HtmlSelectElement = e.target_unchecked_into();
             let mut next = (*updates).clone();
             if let Some(u) = next.get_mut(index) {
-                u.impact = parse_impact(&el.value());
+                u.impact = el.value().parse().unwrap_or_default();
             }
             updates.set(next);
         })
@@ -292,7 +291,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                                         <div class="timeline-time">{update.timestamp.format("%Y-%m-%d %H:%M UTC").to_string()}</div>
                                         <div class={classes!("timeline-card", class)}>
                                             <div class="timeline-card-head">
-                                                <span class={classes!("incident-status-pill", class)}>{impact_label(update.impact)}</span>
+                                                <span class={classes!("incident-status-pill", class)}>{update.impact.label()}</span>
                                                 if is_editing {
                                                     <button type="button" class="icon-button" title="Done editing"
                                                         onclick={ let editing = editing.clone(); Callback::from(move |_| editing.set(None)) }>
@@ -320,7 +319,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                                         <div class="timeline-edit-row">
                                             <select onchange={on_update_impact(i)}>
                                                 { for [Impact::Offline, Impact::Degraded, Impact::None, Impact::Hidden].into_iter().map(|opt| html! {
-                                                    <option value={impact_value(opt)} selected={opt == update.impact}>{impact_label(opt)}</option>
+                                                    <option value={opt.as_str()} selected={opt == update.impact}>{opt.label()}</option>
                                                 }) }
                                             </select>
                                             <span class="timeline-time">{update.timestamp.format("%Y-%m-%d %H:%M UTC").to_string()}</span>
@@ -345,7 +344,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                 </div>
 
                 <p class="incident-edit-hint">
-                    { format!("Current status: {} · {} update(s)", impact_label(current.current_impact()), current.updates.len()) }
+                    { format!("Current status: {} · {} update(s)", current.current_impact().label(), current.updates.len()) }
                     <span class={classes!("status-dot-inline", status_class)}></span>
                 </p>
             </article>

@@ -4,6 +4,7 @@ use chrono::Utc;
 
 use crate::components::Popover;
 use crate::formatters::{availability, compact_duration};
+use crate::styles::{pass_class, sample_class};
 
 #[cfg(feature = "wasm")]
 use {
@@ -15,7 +16,7 @@ use {
 use gloo_console as console;
 
 #[derive(Properties, PartialEq)]
-pub struct HistoryProps {
+pub struct ProbeHistoryProps {
     pub samples: Vec<ProbeHistoryBucket>,
 
     /// The probe's cluster-converged streak record, used to render the most recent
@@ -31,8 +32,8 @@ struct TooltipData {
     pub probe_result: Option<ProbeHistoryBucket>,
 }
 
-#[function_component(History)]
-pub fn history(props: &HistoryProps) -> Html {
+#[function_component(ProbeHistory)]
+pub fn probe_history(props: &ProbeHistoryProps) -> Html {
     let auth_data = use_context::<crate::contexts::AuthContext>().expect("AuthContext not found");
     let tooltip_data = use_state(TooltipData::default);
 
@@ -107,14 +108,7 @@ pub fn history(props: &HistoryProps) -> Html {
                 let is_current = index + 1 == props.samples.len();
                 let current_streak = (is_current && !props.streak.is_empty()).then_some(&props.streak);
                 let current_passing = current_streak.map(|s| s.passing());
-                let sample_class = match (current_passing, sample.max_availability()) {
-                    (Some(false), _) => "error",
-                    (Some(true), sli) if sli > 99.9 => "ok",
-                    (Some(true), _) => "warn",
-                    (None, sli) if sli > 99.9 => "ok",
-                    (None, sli) if sli < 90.0 => "error",
-                    (None, _) => "warn",
-                };
+                let sample_class = sample_class(current_passing, sample.max_availability());
 
                 // Serialize the entire ProbeResult to JSON
                 let probe_result_json = serde_json::to_string(sample).unwrap_or_default();
@@ -153,11 +147,17 @@ pub fn history(props: &HistoryProps) -> Html {
 
 fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::Streak>, include_observers: bool) -> Html {
     let (status_text, status_class) = match streak {
-        Some(streak) if streak.passing() => (format!("Passing{}", streak.since().map(|t| compact_duration(Utc::now() - t)).map(|t| format!(" for {}", t)).unwrap_or_default()), "ok"),
-        Some(streak) => (format!("Failing{}", streak.since().map(|t| compact_duration(Utc::now() - t)).map(|t| format!(" for {}", t)).unwrap_or_default()), "error"),
+        Some(streak) => {
+            let since = streak
+                .since()
+                .map(|t| format!(" for {}", compact_duration(Utc::now() - t)))
+                .unwrap_or_default();
+            let label = if streak.passing() { "Passing" } else { "Failing" };
+            (format!("{label}{since}"), pass_class(streak.passing()))
+        }
         _ => (
             (if probe_result.max_availability() == 100.0 { "Passed" } else { "Failed" }).to_string(),
-            if probe_result.pass { "ok" } else { "error" },
+            pass_class(probe_result.pass),
         ),
     };
 
@@ -216,7 +216,7 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::S
                         <div class="tooltip-section">
                             <div class="tooltip-section-title">{"Observers"}</div>
                             {for relevant_observations.iter().map(|(name, observation)| {
-                                let validation_class = if observation.success_rate() > 99.0 { "ok" } else { "error" };
+                                let validation_class = pass_class(observation.success_rate() > 99.0);
                                 html! {
                                     <div class="tooltip-section-entry">
                                         <div class="tooltip-section-entry-header">
@@ -240,7 +240,7 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::S
                         <div class="tooltip-section">
                             <div class="tooltip-section-title">{"Checks"}</div>
                             {for probe_result.validations.iter().map(|(name, validation)| {
-                                let validation_class = if validation.pass { "ok" } else { "error" };
+                                let validation_class = pass_class(validation.pass);
                                 html! {
                                     <div class="tooltip-section-entry">
                                         <div class="tooltip-section-entry-header">

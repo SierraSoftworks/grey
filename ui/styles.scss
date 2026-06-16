@@ -4,13 +4,20 @@
 @use 'src/styles/layout';
 @use 'src/styles/tooltip';
 
+// Shared base element styles
+@use 'src/styles/status';
+@use 'src/styles/buttons';
+@use 'src/styles/forms';
+@use 'src/styles/page';
+@use 'src/styles/markdown';
+
 // Component Styles
 @use 'src/components/header';
-@use 'src/components/status';
 @use 'src/components/status_dot';
 @use 'src/components/popover';
-@use 'src/components/history';
+@use 'src/components/probe_history';
 @use 'src/components/probe';
-@use 'src/components/peer';
+@use 'src/components/cluster_status';
 @use 'src/components/timeline';
+@use 'src/components/incident_timeline';
 @use 'src/components/incidents';

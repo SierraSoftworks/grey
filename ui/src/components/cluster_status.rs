@@ -1,4 +1,5 @@
 use crate::contexts::use_peers;
+use crate::styles::cluster_class;
 use grey_api::{Peer, PeerHealth};
 use yew::prelude::*;
 
@@ -28,13 +29,7 @@ pub fn cluster_status() -> Html {
         .filter(|p| p.health == PeerHealth::Online)
         .count();
 
-    let level_class = if members.iter().any(|p| p.health == PeerHealth::Offline) {
-        "error"
-    } else if members.iter().any(|p| p.health == PeerHealth::Suspect) {
-        "warning"
-    } else {
-        "good"
-    };
+    let level_class = cluster_class(&members);
 
     html! {
         // tabindex makes the chip focusable so the popover also opens via keyboard/touch

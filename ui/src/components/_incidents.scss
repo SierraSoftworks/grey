@@ -1,31 +1,5 @@
 @use '../styles/variables' as *;
 
-// Status pill colours. Block borders come from the shared `.section.{ok|warn|error|unknown}` rules;
-// drafts get their own muted, dashed treatment below.
-@mixin pill-color($class, $color) {
-    .incident-status-pill.#{$class} {
-        background-color: $color;
-    }
-}
-
-@include pill-color(ok, $color-status-ok);
-@include pill-color(warn, $color-status-warn);
-@include pill-color(error, $color-status-error);
-@include pill-color(unknown, $color-status-unknown);
-
-// A compact status pill reused on incident blocks and update entries.
-.incident-status-pill {
-    display: inline-block;
-    padding: 0.1rem 0.6rem;
-    border-radius: 999px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: $color-status-text;
-    background-color: $color-status-offline;
-    white-space: nowrap;
-    margin: 0 0.5rem;
-}
-
 .incidents-section {
     max-width: 980px;
     width: 100%;
@@ -36,28 +10,6 @@
     .incident-summaries {
         padding: 1.5rem;
     }
-}
-
-
-
-// The full incidents page / per-incident page: lightweight and centred, with no inner card or
-// `.content` chrome of its own.
-.incidents-page {
-    max-width: 980px;
-    width: 100%;
-    margin: 2rem auto;
-    padding: 1.5rem;
-    box-sizing: border-box;
-
-    > h1 {
-        font-weight: 200;
-        margin-top: 0;
-    }
-}
-
-.incidents-empty {
-    color: $color-text-muted;
-    margin: 0;
 }
 
 // A title link reused by summaries and blocks.
@@ -158,75 +110,6 @@
     margin-right: 0.5rem;
 }
 
-// Horizontal event timeline (summary): impact-coloured dots on a connecting line, each revealing an
-// update popover on hover (like the probe history buckets). The line into a dot carries the
-// preceding dot's colour.
-.incident-hbar {
-    display: flex;
-    align-items: center;
-    margin-top: 0.75rem;
-    padding: 0.25rem 0;
-
-    // Connecting segments grow to fill the bar; markers keep their intrinsic size. A lead-in tail
-    // before the first marker and a lead-out tail after the last carry the nearest marker's colour
-    // and fade outward, implying that time led up to — and continued past — the events.
-    .hline {
-        flex: 1;
-        height: 2px;
-        min-width: 1.5rem;
-        background-color: $color-status-offline;
-
-        &.ok {
-            background-color: $color-status-ok;
-        }
-        &.warn {
-            background-color: $color-status-warn;
-        }
-        &.error {
-            background-color: $color-status-error;
-        }
-
-        // The tails fade toward the open (outer) end. Masking the solid colour keeps the per-impact
-        // colour rules above intact.
-        &.lead-in {
-            mask-image: linear-gradient(to right, transparent, #000);
-            -webkit-mask-image: linear-gradient(to right, transparent, #000);
-            flex: 0.3;
-        }
-        &.lead-out {
-            mask-image: linear-gradient(to right, #000, transparent);
-            -webkit-mask-image: linear-gradient(to right, #000, transparent);
-            flex: 0.3;
-        }
-    }
-
-    .hdot-wrap {
-        position: relative;
-        display: flex;
-        align-items: center;
-        flex: none;
-    }
-
-    .hdot {
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        background-color: $color-status-offline;
-        box-shadow: 0 0 0 2px $background-box;
-        cursor: pointer;
-
-        &.ok {
-            background-color: $color-status-ok;
-        }
-        &.warn {
-            background-color: $color-status-warn;
-        }
-        &.error {
-            background-color: $color-status-error;
-        }
-    }
-}
-
 // Header user chip: shows the signed-in user; hovering reveals a "Sign out" overlay; clicking signs
 // the user out.
 .user-chip {
@@ -263,42 +146,6 @@
     }
 }
 
-.auth-button,
-.primary-button {
-    cursor: pointer;
-    border: 1px solid $color-separator;
-    background-color: $background-box;
-    color: $color-text;
-    border-radius: $border-radius-small;
-    padding: 0.4rem 0.9rem;
-    font-size: 0.85rem;
-
-    &:hover {
-        background-color: $color-separator;
-    }
-}
-
-.primary-button {
-    background-color: $color-status-unknown;
-    color: $color-status-text;
-    border-color: $color-status-unknown;
-
-    &:hover {
-        opacity: 0.9;
-        background-color: $color-status-unknown;
-    }
-
-    &:disabled {
-        opacity: 0.6;
-        cursor: default;
-    }
-}
-
-.incidents-error {
-    color: $color-status-error;
-    margin: 0;
-}
-
 .incident-admin-controls {
     display: flex;
     flex-wrap: wrap;
@@ -327,58 +174,6 @@
     }
 }
 
-// Create / edit / update forms.
-.incident-form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    background-color: $background-box;
-    border: 1px solid $color-separator;
-    border-radius: $border-radius-medium;
-    padding: 1.5rem;
-    margin: 0 auto 1.5rem auto;
-
-    h3,
-    h4 {
-        margin: 0;
-        font-weight: 400;
-    }
-
-    label {
-        display: flex;
-        flex-direction: column;
-        gap: 0.25rem;
-        font-size: 0.85rem;
-        color: $color-text-muted;
-    }
-
-    input[type="text"],
-    input[type="datetime-local"],
-    textarea,
-    select {
-        font: inherit;
-        padding: 0.5rem;
-        border: 1px solid $color-separator;
-        border-radius: $border-radius-small;
-        background-color: $background-base;
-        color: $color-text;
-    }
-
-    .incident-form-actions {
-        display: flex;
-        gap: 0.5rem;
-
-        button:not(.primary-button) {
-            cursor: pointer;
-            border: 1px solid $color-separator;
-            background-color: $background-base;
-            color: $color-text;
-            border-radius: $border-radius-small;
-            padding: 0.4rem 0.9rem;
-        }
-    }
-}
-
 // Header status text on the right of an incident block (mirrors a probe's streak text).
 .incident-streak {
     font-size: 0.85rem;
@@ -399,120 +194,6 @@
     }
 }
 
-// Element-Plus-style event timeline inside an incident block: a vertical rail of colour-coded
-// circles, the connecting line keeping the preceding circle's colour, update cards and key dates.
-.incident-timeline {
-    list-style: none;
-    margin: 1.25rem 0 0 0;
-    padding: 0;
-
-    .timeline-item {
-        display: flex;
-        gap: 0.85rem;
-        align-items: stretch;
-
-        &:last-child {
-            .timeline-body {
-                padding-bottom: 0;
-            }
-
-            .timeline-tail {
-                &.ok {
-                    background: linear-gradient( to bottom, $color-status-ok calc(100% - 2rem), $background-base);
-                }
-
-                &.warn {
-                    background: linear-gradient( to bottom, $color-status-warn calc(100% - 2rem), $background-base);
-                }
-
-                &.error {
-                    background: linear-gradient( to bottom, $color-status-error calc(100% - 2rem), $background-base);
-                }
-            }
-        }
-    }
-
-    .timeline-rail {
-        position: relative;
-        flex: none;
-        width: 14px;
-    }
-
-    .timeline-circle {
-        position: absolute;
-        top: 4px;
-        left: 50%;
-        width: 12px;
-        height: 12px;
-        margin-left: -6px;
-        border-radius: 50%;
-        box-shadow: 0 0 0 2px $background-box;
-        z-index: 1;
-    }
-
-    .timeline-tail {
-        position: absolute;
-        top: 6px;
-        bottom: -0.4rem;
-        left: 50%;
-        width: 2px;
-        margin-left: -1px;
-    }
-
-    // Circle + connecting-line colours by impact; key dates use a neutral marker.
-    .timeline-circle,
-    .timeline-tail {
-        background-color: $color-status-offline;
-
-        &.ok {
-            background-color: $color-status-ok;
-        }
-        &.warn {
-            background-color: $color-status-warn;
-        }
-        &.error {
-            background-color: $color-status-error;
-        }
-    }
-
-    .timeline-body {
-        flex: 1;
-        min-width: 0;
-        padding-bottom: 1.25rem;
-    }
-
-    .timeline-time {
-        font-size: 0.78rem;
-        color: $color-text-muted;
-    }
-
-    .timeline-keydate {
-        font-weight: 600;
-    }
-
-    .timeline-card {
-        margin-top: 0.35rem;
-        padding: 0.75rem 1rem;
-
-        .timeline-card-message {
-            font-size: 0.9rem;
-        }
-    }
-}
-
-// Tighten markdown output so it sits naturally inside blocks.
-.markdown {
-    line-height: 1.5;
-
-    p:first-child {
-        margin-top: 0;
-    }
-
-    p:last-child {
-        margin-bottom: 0;
-    }
-}
-
 // The admin incidents list: heading on the left, the "Declare Incident" action on the right.
 .incidents-list-header {
     display: flex;
@@ -525,34 +206,6 @@
     h1 {
         margin: 0;
         font-weight: 200;
-    }
-}
-
-// Inline SVG icons inherit the surrounding text colour and scale with the text.
-.icon {
-    width: 1.1rem;
-    height: 1.1rem;
-    flex: none;
-    display: inline-block;
-    vertical-align: middle;
-}
-
-// The "Declare Incident" action: a clean, warning-coloured outline (triangle icon + label).
-.declare-incident {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    text-decoration: none;
-    font-size: 0.9rem;
-    color: $color-status-warn;
-    background: none;
-    border: 1px solid $color-status-warn;
-    border-radius: $border-radius-small;
-    padding: 0.4rem 0.85rem;
-
-    &:hover {
-        color: $color-status-text;
-        background-color: $color-status-warn;
     }
 }
 
@@ -693,31 +346,6 @@
         margin: 1rem 0 0 0;
         font-size: 0.8rem;
         color: $color-text-muted;
-    }
-}
-
-// A button rendered as an inline text link (e.g. "Remove" on an update row).
-.link-button {
-    cursor: pointer;
-    border: none;
-    background: none;
-    padding: 0;
-    font: inherit;
-    font-size: 0.8rem;
-    color: $color-text-muted;
-    text-decoration: underline;
-
-    &:hover {
-        color: $color-text;
-    }
-
-    &.danger {
-        color: $color-status-error;
-
-        &:hover {
-            opacity: 0.8;
-            color: $color-status-error;
-        }
     }
 }
 

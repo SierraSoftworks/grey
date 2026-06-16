@@ -1,0 +1,197 @@
+@use '../styles/variables' as *;
+
+// Status pill colours. Block borders come from the shared `.section.{ok|warn|error|unknown}` rules;
+// drafts get their own muted, dashed treatment below.
+@mixin pill-color($class, $color) {
+    .incident-status-pill.#{$class} {
+        background-color: $color;
+    }
+}
+
+@include pill-color(ok, $color-status-ok);
+@include pill-color(warn, $color-status-warn);
+@include pill-color(error, $color-status-error);
+@include pill-color(unknown, $color-status-unknown);
+
+// A compact status pill reused on incident blocks and update entries.
+.incident-status-pill {
+    display: inline-block;
+    padding: 0.1rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: $color-status-text;
+    background-color: $color-status-offline;
+    white-space: nowrap;
+    margin: 0 0.5rem;
+}
+
+// Horizontal event timeline (summary): impact-coloured dots on a connecting line, each revealing an
+// update popover on hover (like the probe history buckets). The line into a dot carries the
+// preceding dot's colour.
+.incident-hbar {
+    display: flex;
+    align-items: center;
+    margin-top: 0.75rem;
+    padding: 0.25rem 0;
+
+    // Connecting segments grow to fill the bar; markers keep their intrinsic size. A lead-in tail
+    // before the first marker and a lead-out tail after the last carry the nearest marker's colour
+    // and fade outward, implying that time led up to — and continued past — the events.
+    .hline {
+        flex: 1;
+        height: 2px;
+        min-width: 1.5rem;
+        background-color: $color-status-offline;
+
+        &.ok {
+            background-color: $color-status-ok;
+        }
+        &.warn {
+            background-color: $color-status-warn;
+        }
+        &.error {
+            background-color: $color-status-error;
+        }
+
+        // The tails fade toward the open (outer) end. Masking the solid colour keeps the per-impact
+        // colour rules above intact.
+        &.lead-in {
+            mask-image: linear-gradient(to right, transparent, #000);
+            -webkit-mask-image: linear-gradient(to right, transparent, #000);
+            flex: 0.3;
+        }
+        &.lead-out {
+            mask-image: linear-gradient(to right, #000, transparent);
+            -webkit-mask-image: linear-gradient(to right, #000, transparent);
+            flex: 0.3;
+        }
+    }
+
+    .hdot-wrap {
+        position: relative;
+        display: flex;
+        align-items: center;
+        flex: none;
+    }
+
+    .hdot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background-color: $color-status-offline;
+        box-shadow: 0 0 0 2px $background-box;
+        cursor: pointer;
+
+        &.ok {
+            background-color: $color-status-ok;
+        }
+        &.warn {
+            background-color: $color-status-warn;
+        }
+        &.error {
+            background-color: $color-status-error;
+        }
+    }
+}
+
+// Element-Plus-style event timeline inside an incident block: a vertical rail of colour-coded
+// circles, the connecting line keeping the preceding circle's colour, update cards and key dates.
+.incident-timeline {
+    list-style: none;
+    margin: 1.25rem 0 0 0;
+    padding: 0;
+
+    .timeline-item {
+        display: flex;
+        gap: 0.85rem;
+        align-items: stretch;
+
+        &:last-child {
+            .timeline-body {
+                padding-bottom: 0;
+            }
+
+            .timeline-tail {
+                &.ok {
+                    background: linear-gradient( to bottom, $color-status-ok calc(100% - 2rem), $background-base);
+                }
+
+                &.warn {
+                    background: linear-gradient( to bottom, $color-status-warn calc(100% - 2rem), $background-base);
+                }
+
+                &.error {
+                    background: linear-gradient( to bottom, $color-status-error calc(100% - 2rem), $background-base);
+                }
+            }
+        }
+    }
+
+    .timeline-rail {
+        position: relative;
+        flex: none;
+        width: 14px;
+    }
+
+    .timeline-circle {
+        position: absolute;
+        top: 4px;
+        left: 50%;
+        width: 12px;
+        height: 12px;
+        margin-left: -6px;
+        border-radius: 50%;
+        box-shadow: 0 0 0 2px $background-box;
+        z-index: 1;
+    }
+
+    .timeline-tail {
+        position: absolute;
+        top: 6px;
+        bottom: -0.4rem;
+        left: 50%;
+        width: 2px;
+        margin-left: -1px;
+    }
+
+    // Circle + connecting-line colours by impact; key dates use a neutral marker.
+    .timeline-circle,
+    .timeline-tail {
+        background-color: $color-status-offline;
+
+        &.ok {
+            background-color: $color-status-ok;
+        }
+        &.warn {
+            background-color: $color-status-warn;
+        }
+        &.error {
+            background-color: $color-status-error;
+        }
+    }
+
+    .timeline-body {
+        flex: 1;
+        min-width: 0;
+        padding-bottom: 1.25rem;
+    }
+
+    .timeline-time {
+        font-size: 0.78rem;
+        color: $color-text-muted;
+    }
+
+    .timeline-keydate {
+        font-weight: 600;
+    }
+
+    .timeline-card {
+        margin-top: 0.35rem;
+        padding: 0.75rem 1rem;
+
+        .timeline-card-message {
+            font-size: 0.9rem;
+        }
+    }
+}

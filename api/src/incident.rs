@@ -31,6 +31,42 @@ impl Impact {
             Impact::Hidden => 0,
         }
     }
+
+    /// A human-readable label for display (e.g. in status text and `<select>` options).
+    pub fn label(self) -> &'static str {
+        match self {
+            Impact::Offline => "Offline",
+            Impact::Degraded => "Degraded",
+            Impact::None => "Operational",
+            Impact::Hidden => "Hidden",
+        }
+    }
+
+    /// The serialised token for this impact, matching the serde (`rename_all = "lowercase"`)
+    /// representation — used as `<select>`/`<option>` values and anywhere a stable string is needed.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Impact::Offline => "offline",
+            Impact::Degraded => "degraded",
+            Impact::None => "none",
+            Impact::Hidden => "hidden",
+        }
+    }
+}
+
+impl std::str::FromStr for Impact {
+    type Err = ();
+
+    /// Parses an impact from its [`Impact::as_str`] token, falling back to `Hidden` for anything
+    /// unrecognised (the safest default, since hidden incidents stay private).
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(match value {
+            "offline" => Impact::Offline,
+            "degraded" => Impact::Degraded,
+            "none" => Impact::None,
+            _ => Impact::Hidden,
+        })
+    }
 }
 
 /// A single update posted against an incident, identified by its position in the incident's `updates`

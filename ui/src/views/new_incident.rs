@@ -86,7 +86,7 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
             }
             let input = grey_api::CreateIncident {
                 title: title_value,
-                impact: crate::views::parse_impact(&impact),
+                impact: impact.parse().unwrap_or_default(),
                 message: message_value,
             };
             let token = token.clone();

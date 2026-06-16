@@ -1,5 +1,6 @@
-use super::History;
+use super::ProbeHistory;
 use crate::formatters::{availability, compact_duration};
+use crate::styles::probe_class;
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
@@ -14,13 +15,7 @@ pub fn probe(props: &ProbeProps) -> Html {
 
     // Key the status off the currently observed state so a recovery is reflected
     // immediately, using the recent average only to grade how severe an ongoing failure is.
-    let probe_class = if props.probe.passing() {
-        "ok"
-    } else if recent_availability > 80.0 {
-        "warn"
-    } else {
-        "error"
-    };
+    let probe_class = probe_class(props.probe.passing(), recent_availability);
 
     // How long the probe has held its current state, e.g. "healthy for 5d" or "unhealthy for 17m".
     let streak_text = streak.since().map(|since| {
@@ -58,7 +53,7 @@ pub fn probe(props: &ProbeProps) -> Html {
                 }
                 <div class="availability">{availability(props.probe.availability())}</div>
             </div>
-            <History samples={props.probe.history.clone()} streak={streak} />
+            <ProbeHistory samples={props.probe.history.clone()} streak={streak} />
         </div>
     }
 }

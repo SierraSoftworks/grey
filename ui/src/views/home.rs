@@ -2,7 +2,7 @@ use chrono::Utc;
 use grey_api::Impact;
 use yew::prelude::*;
 
-use crate::components::incidents_timeline::worst_impact;
+use crate::components::incidents::worst_impact;
 use crate::components::{Banner, BannerKind, IncidentsSection, ProbeList, Timeline};
 use crate::contexts::{use_incidents, use_probes};
 
