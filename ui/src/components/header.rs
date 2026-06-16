@@ -28,23 +28,23 @@ pub fn header() -> Html {
 
     html! {
         <header class={header_class}>
-            <Link<Route> to={Route::Home} classes="header-brand">
+            <Link<Route> to={Route::Home} classes="header__brand">
                 <img src={config_ctx.config.logo.clone()} alt="The company logo." />
-                <span class="title">{&config_ctx.config.title}</span>
+                <span class="header__title">{&config_ctx.config.title}</span>
             </Link<Route>>
 
-            <nav class="header-nav">
-                <Link<Route> to={Route::Incidents} classes="nav-link">{"Incidents"}</Link<Route>>
+            <nav class="header__nav">
+                <Link<Route> to={Route::Incidents} classes="header__nav-link">{"Incidents"}</Link<Route>>
                 {
                     for config_ctx.config.links.iter().map(|link| {
                         html! {
-                            <a href={link.url.clone()} class="nav-link" target="_blank" rel="noopener noreferrer">{&link.title}</a>
+                            <a href={link.url.clone()} class="header__nav-link" target="_blank" rel="noopener noreferrer">{&link.title}</a>
                         }
                     })
                 }
             </nav>
 
-            <div class="header-controls">
+            <div class="header__controls">
                 if auth.is_authenticated() {
                     <ClusterStatus />
                 }
@@ -60,8 +60,8 @@ pub fn header() -> Html {
                     <button class="auth-button" onclick={auth.login.reform(|_| ())}>{"Sign in"}</button>
                 }
 
-                <button class="menu-toggle" onclick={toggle_menu}>
-                    <div class="hamburger">
+                <button class="header__menu-toggle" onclick={toggle_menu}>
+                    <div class="header__hamburger">
                         <span></span>
                         <span></span>
                         <span></span>

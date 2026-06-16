@@ -19,43 +19,43 @@ header {
         z-index: 1000;
 
         // Create a top row for brand and controls
-        .header-brand,
-        .header-controls {
+        .header__brand,
+        .header__controls {
             display: flex;
         }
 
         // On mobile, position brand and controls in a row
-        .header-brand {
+        .header__brand {
             flex: 1;
         }
 
-        .header-menu {
+        .header__menu {
             align-items: center;
         }
 
         &.menu-open {
-            .header-nav {
+            .header__nav {
                 max-height: 300px;
                 opacity: 1;
                 visibility: visible;
             }
 
-            .menu-toggle .hamburger span:nth-child(1) {
+            .header__menu-toggle .header__hamburger span:nth-child(1) {
                 transform: rotate(45deg) translate(5px, 5px);
             }
 
-            .menu-toggle .hamburger span:nth-child(2) {
+            .header__menu-toggle .header__hamburger span:nth-child(2) {
                 opacity: 0;
             }
 
-            .menu-toggle .hamburger span:nth-child(3) {
+            .header__menu-toggle .header__hamburger span:nth-child(3) {
                 transform: rotate(-45deg) translate(7px, -6px);
             }
         }
     }
 }
 
-.header-brand {
+.header__brand {
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -75,20 +75,20 @@ header {
         margin: 0 1rem 0 0;
     }
 
-    .title {
+    .header__title {
         font-size: 1.2rem;
         font-weight: 500;
     }
 }
 
-.header-nav {
+.header__nav {
     display: flex;
     flex-direction: row;
     align-items: center;
     gap: 1rem;
 
 
-    .nav-link {
+    .header__nav-link {
         color: $color-base;
         text-decoration: none;
         padding: 1rem;
@@ -113,7 +113,7 @@ header {
         order: 3; // Move below everything else on mobile
         align-items: stretch;
 
-        .nav-link {
+        .header__nav-link {
             padding: 1rem 2rem;
             border-bottom: 1px solid $color-separator;
 
@@ -124,7 +124,7 @@ header {
     }
 }
 
-.header-controls {
+.header__controls {
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -141,7 +141,7 @@ header {
     }
 }
 
-.menu-toggle {
+.header__menu-toggle {
     display: none;
     background: none;
     border: none;
@@ -155,7 +155,7 @@ header {
     }
 }
 
-.hamburger {
+.header__hamburger {
     width: 24px;
     height: 18px;
     position: relative;
