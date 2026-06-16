@@ -60,29 +60,6 @@
     }
 }
 
-.tooltip-status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-
-    &.ok {
-        background-color: $color-status-ok;
-    }
-
-    &.warn {
-        background-color: $color-status-warn;
-    }
-
-    &.error {
-        background-color: $color-status-error;
-    }
-
-    &.unknown {
-        background-color: $color-status-unknown;
-    }
-}
-
 .tooltip-details {
     display: flex;
     flex-direction: column;

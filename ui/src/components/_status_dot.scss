@@ -1,14 +1,19 @@
 @use '../styles/variables' as *;
 
-// A small, static status dot matching the probe-history tooltip dots. Used wherever a compact
-// colour cue for a status/impact level is needed (e.g. the incident timeline popovers).
-.status-dot-indicator {
+// The canonical status dot used across the UI (probe headers, popovers, tooltips, inline status
+// hints). Colour comes from a modifier class (`ok`/`warn`/`error`/`unknown`/`draft`); the diameter
+// is set inline by the `StatusDot` component, and `.active` enables the pulse animation.
+.status-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
     flex-shrink: 0;
     display: inline-block;
     background-color: $color-status-unknown;
+
+    &.active {
+        animation: pulse 2s infinite;
+    }
 
     &.ok {
         background-color: $color-status-ok;
@@ -28,5 +33,22 @@
 
     &.draft {
         background-color: $color-status-offline;
+    }
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 0.7;
+        transform: scale(1.2);
+    }
+
+    100% {
+        opacity: 1;
+        transform: scale(1);
     }
 }

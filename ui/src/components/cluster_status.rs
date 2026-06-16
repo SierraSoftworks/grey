@@ -35,7 +35,7 @@ pub fn cluster_status() -> Html {
         // tabindex makes the chip focusable so the popover also opens via keyboard/touch
         // (the stylesheet shows it on :hover and :focus-within).
         <div class={format!("status-indicator cluster-status {level_class}")} tabindex="0">
-            <div class="status-dot"></div>
+            <div class="status-dot active"></div>
             <span class="status-text">{"Cluster"}</span>
 
             <div class="cluster-popover">

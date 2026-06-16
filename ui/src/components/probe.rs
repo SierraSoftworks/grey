@@ -1,4 +1,4 @@
-use super::ProbeHistory;
+use super::{ProbeHistory, StatusDot};
 use crate::formatters::{availability, compact_duration};
 use crate::styles::probe_class;
 use yew::prelude::*;
@@ -31,7 +31,7 @@ pub fn probe(props: &ProbeProps) -> Html {
         <div class="probe">
             <div class="probe-title">
                 <div class="probe-name-section">
-                    <div class={format!("status-dot {}", probe_class)}></div>
+                    <StatusDot class={probe_class} active=true />
                     <h3 class="probe-name">{&props.probe.name}</h3>
 
                     if !props.probe.tags.is_empty() {

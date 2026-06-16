@@ -1,7 +1,7 @@
 use grey_api::Identifier;
 use yew::prelude::*;
 
-use crate::components::IncidentBlock;
+use crate::components::{IncidentBlock, StatusDot};
 use crate::contexts::{use_auth, use_incidents};
 
 /// The `/incidents/{id}` page. Public visitors see the read-only incident; signed-in administrators
@@ -345,7 +345,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
 
                 <p class="incident-edit-hint">
                     { format!("Current status: {} · {} update(s)", current.current_impact().label(), current.updates.len()) }
-                    <span class={classes!("status-dot-inline", status_class)}></span>
+                    <StatusDot class={status_class} size=10 />
                 </p>
             </article>
         </div>

@@ -2,7 +2,7 @@ use grey_api::ProbeHistoryBucket;
 use yew::prelude::*;
 use chrono::Utc;
 
-use crate::components::Popover;
+use crate::components::{Popover, StatusDot};
 use crate::formatters::{availability, compact_duration};
 use crate::styles::{pass_class, sample_class};
 
@@ -220,7 +220,7 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::S
                                 html! {
                                     <div class="tooltip-section-entry">
                                         <div class="tooltip-section-entry-header">
-                                            <div class={format!("tooltip-status-dot {}", validation_class)}></div>
+                                            <StatusDot class={validation_class} />
                                             <span class="tooltip-section-entry-name">{availability(observation.success_rate())}</span>
                                             <span class="tooltip-section-entry-message">{*name}</span>
                                         </div>
@@ -244,7 +244,7 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::S
                                 html! {
                                     <div class="tooltip-section-entry">
                                         <div class="tooltip-section-entry-header">
-                                            <div class={format!("tooltip-status-dot {}", validation_class)}></div>
+                                            <StatusDot class={validation_class} />
                                             <span class="tooltip-section-entry-name">{name}</span>
                                         </div>
                                         if let Some(ref msg) = validation.message {

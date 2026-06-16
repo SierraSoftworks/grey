@@ -348,22 +348,3 @@
         color: $color-text-muted;
     }
 }
-
-// A small impact-coloured dot used inline in status text.
-.status-dot-inline {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background-color: $color-status-offline;
-
-    &.ok {
-        background-color: $color-status-ok;
-    }
-    &.warn {
-        background-color: $color-status-warn;
-    }
-    &.error {
-        background-color: $color-status-error;
-    }
-}
