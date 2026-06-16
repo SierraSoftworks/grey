@@ -199,51 +199,6 @@
             background-color: $color-status-error;
         }
     }
-
-    // Popover anchored above the hovered dot. Its width is clamped to the viewport, and end markers
-    // anchor it inward (align-left / align-right) so it never runs off the page; interior markers
-    // centre it over the dot.
-    .incident-popover {
-        position: absolute;
-        bottom: calc(100% + 8px);
-        z-index: 20;
-        width: max-content;
-        max-width: min(18rem, 80vw);
-        background-color: $color-tooltip-background;
-        color: $color-tooltip-text;
-        border: 1px solid $color-tooltip-border;
-        border-radius: $border-radius-small;
-        padding: 0.6rem 0.75rem;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-        text-align: left;
-
-        &.align-center {
-            left: 50%;
-            transform: translateX(-50%);
-        }
-        &.align-left {
-            left: 0;
-        }
-        &.align-right {
-            right: 0;
-        }
-
-        .incident-popover-head {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            margin-bottom: 0.4rem;
-        }
-
-        .incident-popover-time {
-            font-size: 0.75rem;
-            opacity: 0.8;
-        }
-
-        .incident-popover-body {
-            font-size: 0.85rem;
-        }
-    }
 }
 
 // Header user chip: shows the signed-in user; hovering reveals a "Sign out" overlay; clicking signs

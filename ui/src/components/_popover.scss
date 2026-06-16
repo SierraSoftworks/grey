@@ -1,0 +1,76 @@
+@use '../styles/variables' as *;
+
+// Hover popover styled like the probe-history tooltip: a white card with an arrow pointing down to
+// its trigger. It positions itself absolutely, so the trigger must be a positioned ancestor; end
+// triggers anchor it inward (align-left / align-right) so it never runs off the page, while interior
+// triggers centre it. The arrow follows the trigger regardless of alignment.
+.popover {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    z-index: 20;
+    width: max-content;
+    max-width: min(18rem, 80vw);
+    background-color: $background-box;
+    color: $color-text;
+    border: 1px solid $color-separator;
+    border-radius: $border-radius-medium;
+    padding: 0.6rem 0.75rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    text-align: left;
+
+    // The downward arrow affixed to the bottom of the card, pointing at the trigger.
+    &::after {
+        content: '';
+        position: absolute;
+        top: 100%;
+        border: 6px solid transparent;
+        border-top-color: $background-box;
+    }
+
+    &.align-center {
+        left: 50%;
+        transform: translateX(-50%);
+
+        &::after {
+            left: 50%;
+            transform: translateX(-50%);
+        }
+    }
+    &.align-left {
+        left: 0;
+
+        &::after {
+            left: 6px;
+        }
+    }
+    &.align-right {
+        right: 0;
+
+        &::after {
+            right: 6px;
+        }
+    }
+
+    .popover-head {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+    }
+
+    .popover-status {
+        font-weight: 600;
+        font-size: 0.8rem;
+    }
+
+    .popover-body {
+        font-size: 0.85rem;
+    }
+
+    .popover-time {
+        margin-top: 0.5rem;
+        font-size: 0.7rem;
+        color: $color-text-muted;
+    }
+}

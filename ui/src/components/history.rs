@@ -1,7 +1,9 @@
 use grey_api::ProbeHistoryBucket;
 use yew::prelude::*;
+use chrono::Utc;
 
-use crate::formatters::availability;
+use crate::components::Popover;
+use crate::formatters::{availability, compact_duration};
 
 #[cfg(feature = "wasm")]
 use {
@@ -132,18 +134,14 @@ pub fn history(props: &HistoryProps) -> Html {
                                 {render_tooltip(probe_result, current_streak, auth_data.is_authenticated())}
                             } else {
                                 // Fallback for SSR or when probe_result is None
-                                <div class="tooltip visible">
-                                    <div class="tooltip-header">
-                                        <div class="tooltip-status-dot unknown"></div>
-                                        {"Loading..."}
-                                    </div>
+                                <Popover status_class="unknown" status="Loading...">
                                     <div class="tooltip-details">
                                         <div class="tooltip-row">
                                             <span class="tooltip-label">{"Status:"}</span>
                                             <span>{"Details loading..."}</span>
                                         </div>
                                     </div>
-                                </div>
+                                </Popover>
                             }
                         }
                     </span>
@@ -155,15 +153,15 @@ pub fn history(props: &HistoryProps) -> Html {
 
 fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::Streak>, include_observers: bool) -> Html {
     let (status_text, status_class) = match streak {
-        Some(streak) if streak.passing() => ("Passing", "ok"),
-        Some(_) => ("Failing", "error"),
-        None => (
-            if probe_result.max_availability() == 100.0 { "Passed" } else { "Failed" },
+        Some(streak) if streak.passing() => (format!("Passing{}", streak.since().map(|t| compact_duration(Utc::now() - t)).map(|t| format!(" for {}", t)).unwrap_or_default()), "ok"),
+        Some(streak) => (format!("Failing{}", streak.since().map(|t| compact_duration(Utc::now() - t)).map(|t| format!(" for {}", t)).unwrap_or_default()), "error"),
+        _ => (
+            (if probe_result.max_availability() == 100.0 { "Passed" } else { "Failed" }).to_string(),
             if probe_result.pass { "ok" } else { "error" },
         ),
     };
 
-    // Format the timestamp
+    // Format the bucket's timestamp — shown in the popover's footer.
     let timestamp = probe_result
         .start_time
         .format("%Y-%m-%d %H:%M:%S UTC")
@@ -183,21 +181,18 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::S
 
 
     html! {
-        <div class="tooltip visible">
-            <div class="tooltip-header">
-                <div class={format!("tooltip-status-dot {}", status_class)}></div>
-                {status_text}
-            </div>
+        <Popover
+            class="history-popover"
+            status_class={status_class}
+            status={status_text}
+            timestamp={timestamp}
+        >
             <div class="tooltip-details">
                 if !probe_result.message.is_empty() {
                     <div class="tooltip-row">
                         <span>{&probe_result.message}</span>
                     </div>
                 }
-                <div class="tooltip-row">
-                    <span class="tooltip-label">{"Bucket:"}</span>
-                    <span>{timestamp}</span>
-                </div>
                 <div class="tooltip-row">
                     <span class="tooltip-label">{"Latency:"}</span>
                     <span>{duration_text}</span>
@@ -264,7 +259,7 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::S
                     }
                 </div>
             }
-        </div>
+        </Popover>
     }
 }
 
@@ -287,7 +282,7 @@ mod tests {
 
     async fn render(streak: grey_api::Streak) -> String {
         let bucket = ProbeHistoryBucket {
-            start_time: chrono::Utc::now(),
+            start_time: chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
             pass: true,
             message: String::new(),
             validations: Default::default(),
@@ -299,20 +294,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_tooltip_labels_bucket_and_streak_timestamps() {
+    async fn test_tooltip_shows_bucket_footer_and_streak_since() {
         let mut streak = grey_api::Streak::default();
         streak.observe(true, chrono::Utc::now() - chrono::Duration::days(5));
 
         let html = render(streak).await;
-        assert!(html.contains("Bucket:"), "expected the bucket timestamp label, got: {html}");
-        assert!(html.contains("Since:"), "expected the streak timestamp label, got: {html}");
+        assert!(html.contains("popover-time"), "expected the bucket timestamp footer, got: {html}");
+        assert!(html.contains("2023-11-14"), "expected the bucket timestamp value in the footer, got: {html}");
         assert!(html.contains("Passing"), "expected the streak status, got: {html}");
     }
 
     #[tokio::test]
     async fn test_tooltip_omits_streak_row_for_legacy_records() {
         let html = render(grey_api::Streak::default()).await;
-        assert!(html.contains("Bucket:"), "expected the bucket timestamp label, got: {html}");
-        assert!(!html.contains("Since:"), "expected no streak row, got: {html}");
+        assert!(html.contains("popover-time"), "expected the bucket timestamp footer, got: {html}");
     }
 }

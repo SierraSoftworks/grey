@@ -1,0 +1,32 @@
+@use '../styles/variables' as *;
+
+// A small, static status dot matching the probe-history tooltip dots. Used wherever a compact
+// colour cue for a status/impact level is needed (e.g. the incident timeline popovers).
+.status-dot-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+    background-color: $color-status-unknown;
+
+    &.ok {
+        background-color: $color-status-ok;
+    }
+
+    &.warn {
+        background-color: $color-status-warn;
+    }
+
+    &.error {
+        background-color: $color-status-error;
+    }
+
+    &.unknown {
+        background-color: $color-status-unknown;
+    }
+
+    &.draft {
+        background-color: $color-status-offline;
+    }
+}

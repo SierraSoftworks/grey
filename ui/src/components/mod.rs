@@ -5,9 +5,11 @@ pub mod history;
 pub mod icons;
 pub mod incidents_timeline;
 pub mod markdown;
+pub mod popover;
 pub mod probe;
 pub mod probe_list;
 pub mod status;
+pub mod status_dot;
 pub mod timeline;
 
 pub use banner::{Banner, BannerKind};
@@ -15,8 +17,10 @@ pub use cluster_status::ClusterStatus;
 pub use header::Header;
 pub use history::History;
 pub use incidents_timeline::{IncidentBlock, IncidentsSection};
+pub use popover::{Popover, PopoverAlign};
 pub use probe::Probe;
 pub use probe_list::ProbeList;
+pub use status_dot::StatusDot;
 pub use timeline::Timeline;
 
 // Re-export UI types from the API library

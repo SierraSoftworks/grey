@@ -48,60 +48,16 @@
     &.unknown {
         background-color: $color-status-unknown;
     }
-
-    &.tooltip-target .tooltip {
-        opacity: 1;
-        visibility: visible;
-    }
 }
 
-// Tooltip styles
-.tooltip {
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    background-color: $background-box;
-    color: $color-text;
-    padding: 0.75rem;
-    border-radius: $border-radius-medium;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    font-size: 0.75rem;
-    line-height: 1.4;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    z-index: 1000;
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.2s, visibility 0.2s;
-    border: 1px solid $color-separator;
-    min-width: 200px;
-    max-width: 40vw;
-    pointer-events: none;
-    margin-bottom: 8px;
+// The probe-history popover reuses the shared `.popover` component; its multi-column content
+// (observers and checks side by side) needs more room than the default narrow popover.
+.popover.history-popover {
+    max-width: min(40rem, 80vw);
 
-    &.visible {
-        opacity: 1;
-        visibility: visible;
+    .tooltip-details {
+        white-space: nowrap;
     }
-
-    &::after {
-        content: '';
-        position: absolute;
-        top: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        border: 6px solid transparent;
-        border-top-color: $background-box;
-    }
-}
-
-.tooltip-header {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
-    font-weight: 600;
 }
 
 .tooltip-status-dot {

@@ -6,6 +6,7 @@
 //! Editing lives on the per-incident page (see `views::incident_detail`), not here.
 
 use crate::components::markdown::render_markdown;
+use crate::components::{Popover, PopoverAlign};
 use crate::formatters::compact_duration;
 use crate::routes::Route;
 use chrono::{DateTime, Utc};
@@ -153,7 +154,7 @@ pub fn horizontal_timeline(props: &HorizontalTimelineProps) -> Html {
                 let on_enter = { let active = active.clone(); Callback::from(move |_| active.set(Some(i))) };
                 let on_leave = { let active = active.clone(); Callback::from(move |_| active.set(None)) };
                 // Anchor popovers inward at the ends so they don't run off the page.
-                let align = if i == 0 { "align-left" } else if i == last { "align-right" } else { "align-center" };
+                let align = if i == 0 { PopoverAlign::Left } else if i == last { PopoverAlign::Right } else { PopoverAlign::Center };
                 html! {
                     <>
                         // The line before a marker carries the preceding marker's colour.
@@ -167,17 +168,16 @@ pub fn horizontal_timeline(props: &HorizontalTimelineProps) -> Html {
                         >
                             <span class={classes!("hdot", dot_class)}></span>
                             if is_open {
-                                <div class={classes!("incident-popover", align)}>
-                                    <div class="incident-popover-head">
-                                        <span class={classes!("incident-status-pill", dot_class)}>
-                                            {impact_label(update.impact)}
-                                        </span>
-                                        <span class="incident-popover-time">{time_format(update.timestamp)}</span>
-                                    </div>
-                                    <div class="incident-popover-body markdown">
+                                <Popover
+                                    {align}
+                                    status_class={dot_class}
+                                    status={impact_label(update.impact)}
+                                    timestamp={time_format(update.timestamp)}
+                                >
+                                    <div class="markdown">
                                         { render_markdown(&update.message) }
                                     </div>
-                                </div>
+                                </Popover>
                             }
                         </div>
                     </>
