@@ -87,7 +87,7 @@ pub fn vertical_timeline(props: &VerticalTimelineProps) -> Html {
     // Most recent update first.
     updates.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
     if updates.is_empty() {
-        return html! { <p class="incidents-empty">{"No updates yet."}</p> };
+        return html! { <p class="empty-state">{"No updates yet."}</p> };
     }
 
     html! {

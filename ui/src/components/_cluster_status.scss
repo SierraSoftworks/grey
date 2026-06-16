@@ -26,7 +26,7 @@
     transition: opacity 0.2s, visibility 0.2s;
 }
 
-.cluster-popover-content {
+.cluster-popover__content {
     position: relative;
     background-color: $background-box;
     color: $color-text;
@@ -62,7 +62,7 @@
         }
     }
 
-    .peer-identity {
+    .peer__identity {
         display: flex;
         align-items: center;
         gap: 0.5rem;
@@ -70,7 +70,7 @@
         min-width: 0;
     }
 
-    .peer-id {
+    .peer__id {
         font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
         font-size: 0.85rem;
         color: $color-text;
@@ -79,7 +79,7 @@
         white-space: nowrap;
     }
 
-    .peer-current-tag {
+    .peer__current-tag {
         flex: 0 0 auto;
         font-size: 0.65rem;
         font-weight: 600;
@@ -92,7 +92,7 @@
         padding: 0.1rem 0.3rem;
     }
 
-    .peer-health {
+    .peer__health {
         font-size: 0.7rem;
         font-weight: 600;
         text-transform: uppercase;
@@ -115,7 +115,7 @@
         }
     }
 
-    .peer-last-seen {
+    .peer__last-seen {
         color: $color-text-muted;
         font-size: 0.8rem;
         white-space: nowrap;
@@ -124,7 +124,7 @@
     }
 }
 
-.cluster-popover-title {
+.cluster-popover__title {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
@@ -133,7 +133,7 @@
     padding: 0.25rem 0 0.5rem;
     border-bottom: 1px solid $color-separator;
 
-    .cluster-popover-summary {
+    .cluster-popover__summary {
         font-weight: 400;
         font-size: 0.8rem;
         color: $color-text-muted;
@@ -142,7 +142,7 @@
 }
 
 // Coloured peer health indicator: green = online, blue = transitive, orange = suspect, grey = offline.
-.peer-status-dot {
+.peer__status-dot {
     width: 10px;
     height: 10px;
     border-radius: 50%;

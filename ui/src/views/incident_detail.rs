@@ -30,12 +30,12 @@ pub fn incident_detail(props: &IncidentDetailProps) -> Html {
     let incident = incidents_ctx.incidents.iter().find(|i| Some(i.id) == wanted).cloned();
 
     html! {
-        <div class="incidents-page">
+        <div class="page">
             if let Some(incident) = incident {
                 <IncidentBlock incident={incident} />
             } else {
                 <h1>{"Incident not found"}</h1>
-                <p class="incidents-empty">
+                <p class="empty-state">
                     {"This incident does not exist or is not publicly visible."}
                 </p>
             }
@@ -100,11 +100,11 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
 
     let Some(current) = (*loaded).clone() else {
         return html! {
-            <div class="incidents-page">
+            <div class="page">
                 if let Some(err) = (*error).clone() {
-                    <p class="incidents-error">{err}</p>
+                    <p class="error-text">{err}</p>
                 } else {
-                    <p class="incidents-empty">{"Loading…"}</p>
+                    <p class="empty-state">{"Loading…"}</p>
                 }
             </div>
         };
@@ -244,12 +244,12 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
     let status_class = impact_class(current.current_impact());
 
     html! {
-        <div class="incidents-page incident-edit">
+        <div class="page incident-edit">
             <article class="incident-block">
-                <div class="incident-block-header">
-                    <div class="incident-title-block">
+                <div class="incident-block__header">
+                    <div class="incident-edit__title-block">
                         <input
-                            class="incident-title-input"
+                            class="incident-edit__title-input"
                             type="text"
                             value={(*title).clone()}
                             oninput={on_title}
@@ -258,7 +258,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                     </div>
                     if dirty {
                         <button
-                            class={classes!("save-icon", (*saving).then_some("saving"))}
+                            class={classes!("incident-edit__save-icon", (*saving).then_some("saving"))}
                             title="Save changes"
                             disabled={*saving}
                             onclick={on_save}
@@ -269,7 +269,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                 </div>
 
                 if let Some(err) = (*error).clone() {
-                    <p class="incidents-error">{err}</p>
+                    <p class="error-text">{err}</p>
                 }
 
                 <ul class="incident-timeline incident-timeline--editing">
@@ -293,12 +293,12 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                                             <div class="incident-timeline__card-head">
                                                 <span class={classes!("incident-status-pill", class)}>{update.impact.label()}</span>
                                                 if is_editing {
-                                                    <button type="button" class="icon-button" title="Done editing"
+                                                    <button type="button" class="incident-edit__icon-button" title="Done editing"
                                                         onclick={ let editing = editing.clone(); Callback::from(move |_| editing.set(None)) }>
                                                         { check_icon() }
                                                     </button>
                                                 } else {
-                                                    <button type="button" class="icon-button" title="Edit message"
+                                                    <button type="button" class="incident-edit__icon-button" title="Edit message"
                                                         onclick={ let editing = editing.clone(); Callback::from(move |_| editing.set(Some(i))) }>
                                                         { edit_icon() }
                                                     </button>
@@ -343,7 +343,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                     <button type="button" class="danger" onclick={on_delete}>{"Delete incident"}</button>
                 </div>
 
-                <p class="incident-edit-hint">
+                <p class="incident-edit__hint">
                     { format!("Current status: {} · {} update(s)", current.current_impact().label(), current.updates.len()) }
                     <StatusDot class={status_class} size=10 />
                 </p>

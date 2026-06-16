@@ -39,10 +39,10 @@ pub fn cluster_status() -> Html {
             <span class="status-text">{"Cluster"}</span>
 
             <div class="cluster-popover">
-                <div class="cluster-popover-content">
-                    <div class="cluster-popover-title">
+                <div class="cluster-popover__content">
+                    <div class="cluster-popover__title">
                         <span>{"Cluster Members"}</span>
-                        <span class="cluster-popover-summary">{format!("{online}/{} online", members.len())}</span>
+                        <span class="cluster-popover__summary">{format!("{online}/{} online", members.len())}</span>
                     </div>
                     {for members.iter().map(render_member)}
                 </div>
@@ -55,15 +55,15 @@ fn render_member(peer: &Peer) -> Html {
     let class = peer.health.as_str();
     html! {
         <div class="peer">
-            <div class="peer-identity">
-                <div class={format!("peer-status-dot {class}")}></div>
-                <span class="peer-id">{&peer.id}</span>
+            <div class="peer__identity">
+                <div class={format!("peer__status-dot {class}")}></div>
+                <span class="peer__id">{&peer.id}</span>
                 if peer.current {
-                    <span class="peer-current-tag">{"this node"}</span>
+                    <span class="peer__current-tag">{"this node"}</span>
                 }
             </div>
-            <span class={format!("peer-health {class}")}>{health_label(peer.health)}</span>
-            <span class="peer-last-seen">{relative_time(peer.last_seen)}</span>
+            <span class={format!("peer__health {class}")}>{health_label(peer.health)}</span>
+            <span class="peer__last-seen">{relative_time(peer.last_seen)}</span>
         </div>
     }
 }

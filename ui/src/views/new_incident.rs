@@ -10,9 +10,9 @@ pub fn new_incident() -> Html {
 
     if !auth.is_authenticated() {
         return html! {
-            <div class="incidents-page">
+            <div class="page">
                 <h1>{"New incident"}</h1>
-                <p class="incidents-empty">{"Sign in as an administrator to create an incident."}</p>
+                <p class="empty-state">{"Sign in as an administrator to create an incident."}</p>
             </div>
         };
     }
@@ -114,11 +114,11 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
     };
 
     html! {
-        <div class="incidents-page">
+        <div class="page">
             <h1>{"New incident"}</h1>
             <form class="incident-form" onsubmit={onsubmit}>
                 if let Some(err) = (*error).clone() {
-                    <p class="incidents-error">{err}</p>
+                    <p class="error-text">{err}</p>
                 }
                 <label>{"Title"}
                     <input type="text" value={(*title).clone()} oninput={on_title} />

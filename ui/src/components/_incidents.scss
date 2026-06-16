@@ -7,7 +7,7 @@
     color: var(--color-box);
 
     // The landing-page incidents section: a colour-coded header over compact summaries.
-    .incident-summaries {
+    .incidents-section__summaries {
         padding: 1.5rem;
     }
 }
@@ -38,7 +38,7 @@
         margin-bottom: 0;
     }
 
-    .incident-block-header {
+    .incident-block__header {
         display: flex;
         justify-content: space-between;
         align-items: baseline;
@@ -49,13 +49,13 @@
     }
 
     // Title with the id stacked beneath it.
-    .incident-block-heading {
+    .incident-block__heading {
         display: flex;
         flex-direction: column;
         align-items: flex-start;
         gap: 0.15rem;
 
-        .incident-block-title {
+        .incident-block__title {
             margin: 0;
             font-weight: 400;
         }
@@ -76,21 +76,21 @@
         padding-bottom: 0;
     }
 
-    .incident-summary-header {
+    .incident-summary__header {
         display: flex;
         justify-content: space-between;
         align-items: baseline;
         gap: 1rem;
         flex-wrap: wrap;
 
-        .incident-summary-title {
+        .incident-summary__title {
             margin: 0;
             font-weight: 400;
         }
     }
 
     // The latest update's message, shown beneath the title as an at-a-glance status line.
-    .incident-summary-message {
+    .incident-summary__message {
         margin: 0.4rem 0 0 0;
         font-size: 0.9rem;
         color: $color-text-muted;
@@ -213,12 +213,12 @@
 // save control surfaces in the header (top-right) only once there are unsaved changes.
 .incident-edit {
     // Title line and the save indicator should sit at the top of the header, not on its baseline.
-    .incident-block-header {
+    .incident-block__header {
         align-items: flex-start;
     }
 
     // Title with the id stacked beneath it, filling the header beside the save indicator.
-    .incident-title-block {
+    .incident-edit__title-block {
         display: flex;
         flex-direction: column;
         align-items: flex-start;
@@ -228,7 +228,7 @@
     }
 
     // The title behaves like its heading until you interact with it.
-    .incident-title-input {
+    .incident-edit__title-input {
         width: 100%;
         box-sizing: border-box;
         font: inherit;
@@ -251,7 +251,7 @@
     }
 
     // The save indicator: just the icon (no button chrome), shown only when there are changes.
-    .save-icon {
+    .incident-edit__save-icon {
         cursor: pointer;
         border: none;
         background: none;
@@ -277,7 +277,7 @@
     }
 
     // Icon-only affordances inside a posted update's card (edit / done, toggling the message editor).
-    .icon-button {
+    .incident-edit__icon-button {
         cursor: pointer;
         border: none;
         background: none;
@@ -339,7 +339,7 @@
         border-radius: $border-radius-small;
     }
 
-    .incident-edit-hint {
+    .incident-edit__hint {
         display: flex;
         align-items: center;
         gap: 0.5rem;

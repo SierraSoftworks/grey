@@ -38,7 +38,7 @@ pub fn incidents_section(props: &IncidentsSectionProps) -> Html {
 
     html! {
         <div class="incidents-section">
-            <div class="incident-summaries">
+            <div class="incidents-section__summaries">
                 { for props.incidents.iter().map(|incident| html! {
                     <IncidentSummary key={incident.id.to_string()} incident={incident.clone()} />
                 }) }
@@ -63,8 +63,8 @@ pub fn incident_summary(props: &IncidentSummaryProps) -> Html {
 
     html! {
         <div class="incident-summary">
-            <div class="incident-summary-header">
-                <h3 class="incident-summary-title">
+            <div class="incident-summary__header">
+                <h3 class="incident-summary__title">
                     <span class="incident-summary__timestamp">{date_format(incident.started_at().unwrap_or_else(Utc::now))}</span>
 
                     <Link<Route> to={Route::Incident { id: incident.id.to_string() }} classes="incident-link">
@@ -74,7 +74,7 @@ pub fn incident_summary(props: &IncidentSummaryProps) -> Html {
                 <span class={classes!("incident-streak", status_class)}>{status_text}</span>
             </div>
             if let Some(message) = latest_message {
-                <div class="incident-summary-message markdown">{ render_markdown(&message) }</div>
+                <div class="incident-summary__message markdown">{ render_markdown(&message) }</div>
             }
             <HorizontalTimeline incident={incident.clone()} />
         </div>
@@ -95,9 +95,9 @@ pub fn incident_block(props: &IncidentBlockProps) -> Html {
 
     html! {
         <article class="incident-block">
-            <div class="incident-block-header">
-                <div class="incident-block-heading">
-                    <h3 class="incident-block-title">
+            <div class="incident-block__header">
+                <div class="incident-block__heading">
+                    <h3 class="incident-block__title">
                         <span class="incident-summary__timestamp">{date_format(incident.started_at().unwrap_or_else(Utc::now))}</span>
 
                         <Link<Route> to={Route::Incident { id: incident.id.to_string() }} classes="incident-link">
@@ -150,8 +150,8 @@ mod tests {
             update(Impact::None, 200),
         ]))
         .await;
-        assert!(html.contains("timeline-circle error"), "offline circle: {html}");
-        assert!(html.contains("timeline-circle ok"), "resolving circle");
+        assert!(html.contains("incident-timeline__circle error"), "offline circle: {html}");
+        assert!(html.contains("incident-timeline__circle ok"), "resolving circle");
         assert!(html.contains("#1q-jg7") || html.contains("#"), "shows nice id");
         assert!(html.contains("/incidents/"), "links to detail");
         assert!(html.contains("Resolved"), "resolved status");

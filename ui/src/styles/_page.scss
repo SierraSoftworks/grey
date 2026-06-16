@@ -2,7 +2,7 @@
 
 // The full incidents page / per-incident page: lightweight and centred, with no inner card or
 // `.content` chrome of its own.
-.incidents-page {
+.page {
     max-width: 980px;
     width: 100%;
     margin: 2rem auto;
@@ -16,13 +16,13 @@
 }
 
 // Muted "nothing to show" text.
-.incidents-empty {
+.empty-state {
     color: $color-text-muted;
     margin: 0;
 }
 
 // Error text shown when a page fails to load.
-.incidents-error {
+.error-text {
     color: $color-status-error;
     margin: 0;
 }

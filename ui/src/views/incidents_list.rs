@@ -24,7 +24,7 @@ pub fn incidents_list() -> Html {
     let _ = &auth;
 
     html! {
-        <div class="incidents-page">
+        <div class="page">
             <h1>{"Incidents"}</h1>
             { incident_list_body(&incidents_ctx.incidents) }
         </div>
@@ -33,7 +33,7 @@ pub fn incidents_list() -> Html {
 
 fn incident_list_body(incidents: &[Incident]) -> Html {
     if incidents.is_empty() {
-        return html! { <p class="incidents-empty">{"No incidents have been reported."}</p> };
+        return html! { <p class="empty-state">{"No incidents have been reported."}</p> };
     }
     html! {
         { for incidents.iter().map(|incident| html! {
@@ -74,7 +74,7 @@ fn admin_incidents_list(props: &AdminIncidentsListProps) -> Html {
     }
 
     html! {
-        <div class="incidents-page">
+        <div class="page">
             <div class="incidents-list-header">
                 <h1>{"Incidents"}</h1>
                 <Link<Route> to={Route::NewIncident} classes="declare-incident">
@@ -83,7 +83,7 @@ fn admin_incidents_list(props: &AdminIncidentsListProps) -> Html {
                 </Link<Route>>
             </div>
             if let Some(err) = (*error).clone() {
-                <p class="incidents-error">{err}</p>
+                <p class="error-text">{err}</p>
             }
             { incident_list_body(&incidents) }
         </div>
