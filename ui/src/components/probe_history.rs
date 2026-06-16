@@ -99,7 +99,7 @@ pub fn probe_history(props: &ProbeHistoryProps) -> Html {
     };
 
     html! {
-        <div class="history">
+        <div class="probe-history">
             {for props.samples.iter().enumerate().map(|(index, sample)| {
                 // The most recent segment is rendered from the probe's current state — a
                 // segment that is failing right now is an error regardless of how well it
@@ -117,7 +117,7 @@ pub fn probe_history(props: &ProbeHistoryProps) -> Html {
 
                 html! {
                     <span
-                        class={format!("history-sample {} {}", sample_class, if is_tooltip_target { "tooltip-target" } else { "" })}
+                        class={format!("probe-history__sample {} {}", sample_class, if is_tooltip_target { "tooltip-target" } else { "" })}
                         data-probe-result={probe_result_json}
                         data-index={index.to_string()}
                         onmouseenter={on_mouse_enter.clone()}
@@ -129,9 +129,9 @@ pub fn probe_history(props: &ProbeHistoryProps) -> Html {
                             } else {
                                 // Fallback for SSR or when probe_result is None
                                 <Popover status_class="unknown" status="Loading...">
-                                    <div class="tooltip-details">
-                                        <div class="tooltip-row">
-                                            <span class="tooltip-label">{"Status:"}</span>
+                                    <div class="tooltip__details">
+                                        <div class="tooltip__row">
+                                            <span class="tooltip__label">{"Status:"}</span>
                                             <span>{"Details loading..."}</span>
                                         </div>
                                     </div>
@@ -182,74 +182,74 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::S
 
     html! {
         <Popover
-            class="history-popover"
+            class="popover--history"
             status_class={status_class}
             status={status_text}
             timestamp={timestamp}
         >
-            <div class="tooltip-details">
+            <div class="tooltip__details">
                 if !probe_result.message.is_empty() {
-                    <div class="tooltip-row">
+                    <div class="tooltip__row">
                         <span>{&probe_result.message}</span>
                     </div>
                 }
-                <div class="tooltip-row">
-                    <span class="tooltip-label">{"Latency:"}</span>
+                <div class="tooltip__row">
+                    <span class="tooltip__label">{"Latency:"}</span>
                     <span>{duration_text}</span>
                 </div>
-                <div class="tooltip-row">
-                    <span class="tooltip-label">{"Availability:"}</span>
+                <div class="tooltip__row">
+                    <span class="tooltip__label">{"Availability:"}</span>
                     <span>{format!("{} ± {:.1}%", availability(overall_stats.success_rate()), overall_stats.success_rate_error_margin())}</span>
                 </div>
                 
                 if overall_stats.total_retries > 0 {
-                    <div class="tooltip-row">
-                        <span class="tooltip-label">{"Retry Rate:"}</span>
+                    <div class="tooltip__row">
+                        <span class="tooltip__label">{"Retry Rate:"}</span>
                         <span>{format!("{:.1}%", overall_stats.retry_rate())}</span>
                     </div>
                 }
             </div>
 
             if !probe_result.validations.is_empty() || (probe_result.observations.len() > 1 && include_observers) {
-                <div class="tooltip-context">
+                <div class="tooltip__context">
                     if include_observers && probe_result.observations.len() > 1 {
-                        <div class="tooltip-section">
-                            <div class="tooltip-section-title">{"Observers"}</div>
+                        <div class="tooltip__section">
+                            <div class="tooltip__section-title">{"Observers"}</div>
                             {for relevant_observations.iter().map(|(name, observation)| {
                                 let validation_class = pass_class(observation.success_rate() > 99.0);
                                 html! {
-                                    <div class="tooltip-section-entry">
-                                        <div class="tooltip-section-entry-header">
+                                    <div class="tooltip__section-entry">
+                                        <div class="tooltip__section-entry-header">
                                             <StatusDot class={validation_class} />
-                                            <span class="tooltip-section-entry-name">{availability(observation.success_rate())}</span>
-                                            <span class="tooltip-section-entry-message">{*name}</span>
+                                            <span class="tooltip__section-entry-name">{availability(observation.success_rate())}</span>
+                                            <span class="tooltip__section-entry-message">{*name}</span>
                                         </div>
                                     </div>
                                 }
                             })}
 
                             if probe_result.observations.len() > relevant_observations.len() {
-                                <div class="tooltip-section-entry">
-                                    <span class="tooltip-section-entry-extra">{format!("and {} more...", probe_result.observations.len() - relevant_observations.len())}</span>
+                                <div class="tooltip__section-entry">
+                                    <span class="tooltip__section-entry-extra">{format!("and {} more...", probe_result.observations.len() - relevant_observations.len())}</span>
                                 </div>
                             }
                         </div>
                     }
 
                     if !probe_result.validations.is_empty() {
-                        <div class="tooltip-section">
-                            <div class="tooltip-section-title">{"Checks"}</div>
+                        <div class="tooltip__section">
+                            <div class="tooltip__section-title">{"Checks"}</div>
                             {for probe_result.validations.iter().map(|(name, validation)| {
                                 let validation_class = pass_class(validation.pass);
                                 html! {
-                                    <div class="tooltip-section-entry">
-                                        <div class="tooltip-section-entry-header">
+                                    <div class="tooltip__section-entry">
+                                        <div class="tooltip__section-entry-header">
                                             <StatusDot class={validation_class} />
-                                            <span class="tooltip-section-entry-name">{name}</span>
+                                            <span class="tooltip__section-entry-name">{name}</span>
                                         </div>
                                         if let Some(ref msg) = validation.message {
-                                            <div class="tooltip-section-entry-details">
-                                                <div class="tooltip-section-entry-extra">{msg}</div>
+                                            <div class="tooltip__section-entry-details">
+                                                <div class="tooltip__section-entry-extra">{msg}</div>
                                             </div>
                                         }
                                     </div>
@@ -299,7 +299,7 @@ mod tests {
         streak.observe(true, chrono::Utc::now() - chrono::Duration::days(5));
 
         let html = render(streak).await;
-        assert!(html.contains("popover-time"), "expected the bucket timestamp footer, got: {html}");
+        assert!(html.contains("popover__time"), "expected the bucket timestamp footer, got: {html}");
         assert!(html.contains("2023-11-14"), "expected the bucket timestamp value in the footer, got: {html}");
         assert!(html.contains("Passing"), "expected the streak status, got: {html}");
     }
@@ -307,6 +307,6 @@ mod tests {
     #[tokio::test]
     async fn test_tooltip_omits_streak_row_for_legacy_records() {
         let html = render(grey_api::Streak::default()).await;
-        assert!(html.contains("popover-time"), "expected the bucket timestamp footer, got: {html}");
+        assert!(html.contains("popover__time"), "expected the bucket timestamp footer, got: {html}");
     }
 }

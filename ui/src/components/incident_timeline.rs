@@ -32,7 +32,7 @@ pub fn horizontal_timeline(props: &HorizontalTimelineProps) -> Html {
     html! {
         <div class="incident-hbar">
             // The lead-in tail carries the first update's colour, fading in from the left.
-            <span class={classes!("hline", "lead-in", impact_class(updates[0].impact))}></span>
+            <span class={classes!("incident-hbar__line", "lead-in", impact_class(updates[0].impact))}></span>
             { for updates.iter().enumerate().map(|(i, update)| {
                 let dot_class = impact_class(update.impact);
                 let is_open = *active == Some(i);
@@ -44,14 +44,14 @@ pub fn horizontal_timeline(props: &HorizontalTimelineProps) -> Html {
                     <>
                         // The line before a marker carries the preceding marker's colour.
                         if i > 0 {
-                            <span class={classes!("hline", impact_class(updates[i - 1].impact))}></span>
+                            <span class={classes!("incident-hbar__line", impact_class(updates[i - 1].impact))}></span>
                         }
                         <div
-                            class={classes!("hdot-wrap", is_open.then_some("open"))}
+                            class={classes!("incident-hbar__dot-wrap", is_open.then_some("open"))}
                             onmouseenter={on_enter}
                             onmouseleave={on_leave}
                         >
-                            <span class={classes!("hdot", dot_class)}></span>
+                            <span class={classes!("incident-hbar__dot", dot_class)}></span>
                             if is_open {
                                 <Popover
                                     {align}
@@ -69,7 +69,7 @@ pub fn horizontal_timeline(props: &HorizontalTimelineProps) -> Html {
                 }
             }) }
             // The lead-out tail carries the last update's colour, fading off to the right.
-            <span class={classes!("hline", "lead-out", impact_class(updates[last].impact))}></span>
+            <span class={classes!("incident-hbar__line", "lead-out", impact_class(updates[last].impact))}></span>
         </div>
     }
 }
@@ -95,18 +95,18 @@ pub fn vertical_timeline(props: &VerticalTimelineProps) -> Html {
             { for updates.iter().map(|update| {
                 let class = impact_class(update.impact);
                 html! {
-                    <li class="timeline-item">
-                        <div class="timeline-rail">
-                            <span class={classes!("timeline-circle", class)}></span>
-                            <span class={classes!("timeline-tail", class)}></span>
+                    <li class="incident-timeline__item">
+                        <div class="incident-timeline__rail">
+                            <span class={classes!("incident-timeline__circle", class)}></span>
+                            <span class={classes!("incident-timeline__tail", class)}></span>
                         </div>
-                        <div class="timeline-body">
-                            <div class="timeline-time">
+                        <div class="incident-timeline__body">
+                            <div class="incident-timeline__time">
                                 <span class={classes!("incident-status-pill", class)}>{update.impact.label()}</span>
                                 {time_format(update.timestamp)}
                             </div>
-                            <div class={classes!("timeline-card", class)}>
-                                <div class="timeline-card-message markdown">{ render_markdown(&update.message) }</div>
+                            <div class={classes!("incident-timeline__card", class)}>
+                                <div class="incident-timeline__card-message markdown">{ render_markdown(&update.message) }</div>
                             </div>
                         </div>
                     </li>

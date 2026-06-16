@@ -38,7 +38,7 @@
     // Connecting segments grow to fill the bar; markers keep their intrinsic size. A lead-in tail
     // before the first marker and a lead-out tail after the last carry the nearest marker's colour
     // and fade outward, implying that time led up to — and continued past — the events.
-    .hline {
+    .incident-hbar__line {
         flex: 1;
         height: 2px;
         min-width: 1.5rem;
@@ -68,14 +68,14 @@
         }
     }
 
-    .hdot-wrap {
+    .incident-hbar__dot-wrap {
         position: relative;
         display: flex;
         align-items: center;
         flex: none;
     }
 
-    .hdot {
+    .incident-hbar__dot {
         width: 12px;
         height: 12px;
         border-radius: 50%;
@@ -102,17 +102,17 @@
     margin: 1.25rem 0 0 0;
     padding: 0;
 
-    .timeline-item {
+    .incident-timeline__item {
         display: flex;
         gap: 0.85rem;
         align-items: stretch;
 
         &:last-child {
-            .timeline-body {
+            .incident-timeline__body {
                 padding-bottom: 0;
             }
 
-            .timeline-tail {
+            .incident-timeline__tail {
                 &.ok {
                     background: linear-gradient( to bottom, $color-status-ok calc(100% - 2rem), $background-base);
                 }
@@ -128,13 +128,13 @@
         }
     }
 
-    .timeline-rail {
+    .incident-timeline__rail {
         position: relative;
         flex: none;
         width: 14px;
     }
 
-    .timeline-circle {
+    .incident-timeline__circle {
         position: absolute;
         top: 4px;
         left: 50%;
@@ -146,7 +146,7 @@
         z-index: 1;
     }
 
-    .timeline-tail {
+    .incident-timeline__tail {
         position: absolute;
         top: 6px;
         bottom: -0.4rem;
@@ -156,8 +156,8 @@
     }
 
     // Circle + connecting-line colours by impact; key dates use a neutral marker.
-    .timeline-circle,
-    .timeline-tail {
+    .incident-timeline__circle,
+    .incident-timeline__tail {
         background-color: $color-status-offline;
 
         &.ok {
@@ -171,26 +171,26 @@
         }
     }
 
-    .timeline-body {
+    .incident-timeline__body {
         flex: 1;
         min-width: 0;
         padding-bottom: 1.25rem;
     }
 
-    .timeline-time {
+    .incident-timeline__time {
         font-size: 0.78rem;
         color: $color-text-muted;
     }
 
-    .timeline-keydate {
+    .incident-timeline__keydate {
         font-weight: 600;
     }
 
-    .timeline-card {
+    .incident-timeline__card {
         margin-top: 0.35rem;
         padding: 0.75rem 1rem;
 
-        .timeline-card-message {
+        .incident-timeline__card-message {
             font-size: 0.9rem;
         }
     }

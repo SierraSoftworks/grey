@@ -29,18 +29,18 @@ pub fn probe(props: &ProbeProps) -> Html {
 
     html! {
         <div class="probe">
-            <div class="probe-title">
-                <div class="probe-name-section">
+            <div class="probe__title">
+                <div class="probe__name-section">
                     <StatusDot class={probe_class} active=true />
-                    <h3 class="probe-name">{&props.probe.name}</h3>
+                    <h3 class="probe__name">{&props.probe.name}</h3>
 
                     if !props.probe.tags.is_empty() {
-                        <div class="probe-tags">
+                        <div class="probe__tags">
                             {for props.probe.tags.iter().filter(|(name, _)| *name != "service").map(|(name, value)| {
                                 html! {
-                                    <div class="probe-tag">
-                                        <span class="tag-name">{name}{":"}</span>
-                                        <strong class="tag-value">{value}</strong>
+                                    <div class="probe__tag">
+                                        <span class="probe__tag-name">{name}{":"}</span>
+                                        <strong class="probe__tag-value">{value}</strong>
                                     </div>
                                 }
                             })}
@@ -49,9 +49,9 @@ pub fn probe(props: &ProbeProps) -> Html {
                 </div>
                 
                 if let Some(streak_text) = streak_text {
-                    <div class="probe-streak">{streak_text}</div>
+                    <div class="probe__streak">{streak_text}</div>
                 }
-                <div class="availability">{availability(props.probe.availability())}</div>
+                <div class="probe__availability">{availability(props.probe.availability())}</div>
             </div>
             <ProbeHistory samples={props.probe.history.clone()} streak={streak} />
         </div>
@@ -104,6 +104,6 @@ mod tests {
     async fn test_omits_streak_text_for_legacy_records() {
         // Records from older agents carry no streak observations at all.
         let html = render(Streak::default()).await;
-        assert!(!html.contains("probe-streak"), "expected no streak text, got: {html}");
+        assert!(!html.contains("probe__streak"), "expected no streak text, got: {html}");
     }
 }

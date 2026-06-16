@@ -272,7 +272,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                     <p class="incidents-error">{err}</p>
                 }
 
-                <ul class="incident-timeline editing">
+                <ul class="incident-timeline incident-timeline--editing">
                     { for (*updates).iter().enumerate().rev().map(|(i, update)| {
                         let class = impact_class(update.impact);
                         // An update is "posted" once it is part of the loaded incident: its impact then
@@ -281,16 +281,16 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                         let posted = current.updates.iter().any(|u| u.timestamp == update.timestamp);
                         let is_editing = *editing == Some(i);
                         html! {
-                            <li class="timeline-item">
-                                <div class="timeline-rail">
-                                    <span class={classes!("timeline-circle", class)}></span>
-                                    <span class={classes!("timeline-tail", class)}></span>
+                            <li class="incident-timeline__item">
+                                <div class="incident-timeline__rail">
+                                    <span class={classes!("incident-timeline__circle", class)}></span>
+                                    <span class={classes!("incident-timeline__tail", class)}></span>
                                 </div>
-                                <div class="timeline-body">
+                                <div class="incident-timeline__body">
                                     if posted {
-                                        <div class="timeline-time">{update.timestamp.format("%Y-%m-%d %H:%M UTC").to_string()}</div>
-                                        <div class={classes!("timeline-card", class)}>
-                                            <div class="timeline-card-head">
+                                        <div class="incident-timeline__time">{update.timestamp.format("%Y-%m-%d %H:%M UTC").to_string()}</div>
+                                        <div class={classes!("incident-timeline__card", class)}>
+                                            <div class="incident-timeline__card-head">
                                                 <span class={classes!("incident-status-pill", class)}>{update.impact.label()}</span>
                                                 if is_editing {
                                                     <button type="button" class="icon-button" title="Done editing"
@@ -306,27 +306,27 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                                             </div>
                                             if is_editing {
                                                 <textarea
-                                                    class="timeline-message-input"
+                                                    class="incident-timeline__message-input"
                                                     rows="3"
                                                     value={update.message.clone()}
                                                     oninput={on_update_message(i)}
                                                 />
                                             } else {
-                                                <div class="timeline-card-message markdown">{ render_markdown(&update.message) }</div>
+                                                <div class="incident-timeline__card-message markdown">{ render_markdown(&update.message) }</div>
                                             }
                                         </div>
                                     } else {
-                                        <div class="timeline-edit-row">
+                                        <div class="incident-timeline__edit-row">
                                             <select onchange={on_update_impact(i)}>
                                                 { for [Impact::Offline, Impact::Degraded, Impact::None, Impact::Hidden].into_iter().map(|opt| html! {
                                                     <option value={opt.as_str()} selected={opt == update.impact}>{opt.label()}</option>
                                                 }) }
                                             </select>
-                                            <span class="timeline-time">{update.timestamp.format("%Y-%m-%d %H:%M UTC").to_string()}</span>
+                                            <span class="incident-timeline__time">{update.timestamp.format("%Y-%m-%d %H:%M UTC").to_string()}</span>
                                             <button type="button" class="link-button danger" onclick={on_remove_update(i)}>{"Remove"}</button>
                                         </div>
                                         <textarea
-                                            class="timeline-message-input"
+                                            class="incident-timeline__message-input"
                                             rows="3"
                                             value={update.message.clone()}
                                             oninput={on_update_message(i)}

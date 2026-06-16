@@ -297,7 +297,7 @@
     }
 
     // A posted update's card header: the fixed impact pill, with the edit/done icon at the far right.
-    .timeline-card-head {
+    .incident-timeline__card-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -310,7 +310,7 @@
     }
 
     // Each new (unposted) update's controls: impact select + timestamp + remove, above its message.
-    .timeline-edit-row {
+    .incident-timeline__edit-row {
         display: flex;
         align-items: center;
         flex-wrap: wrap;
@@ -327,7 +327,7 @@
         }
     }
 
-    .timeline-message-input {
+    .incident-timeline__message-input {
         width: 100%;
         box-sizing: border-box;
         resize: vertical;

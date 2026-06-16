@@ -16,9 +16,9 @@ pub enum PopoverAlign {
 impl PopoverAlign {
     fn class_name(self) -> &'static str {
         match self {
-            PopoverAlign::Left => "align-left",
-            PopoverAlign::Center => "align-center",
-            PopoverAlign::Right => "align-right",
+            PopoverAlign::Left => "popover--align-left",
+            PopoverAlign::Center => "popover--align-center",
+            PopoverAlign::Right => "popover--align-right",
         }
     }
 }
@@ -53,15 +53,15 @@ pub struct PopoverProps {
 pub fn popover(props: &PopoverProps) -> Html {
     html! {
         <div class={classes!("popover", props.align.class_name(), props.class.clone())}>
-            <div class="popover-head">
+            <div class="popover__head">
                 <StatusDot class={props.status_class.clone()} />
-                <span class="popover-status">{&props.status}</span>
+                <span class="popover__status">{&props.status}</span>
             </div>
-            <div class="popover-body">
+            <div class="popover__body">
                 { props.children.clone() }
             </div>
             if let Some(timestamp) = &props.timestamp {
-                <div class="popover-time">{timestamp}</div>
+                <div class="popover__time">{timestamp}</div>
             }
         </div>
     }

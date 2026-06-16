@@ -12,7 +12,7 @@ pub fn timeline() -> Html {
 
     html! {
         <div class="notices-timeline">
-            <div class="timeline-line"></div>
+            <div class="notices-timeline__line"></div>
             {for notices_ctx.notices.iter().map(|notice| {
                 html! {
                     <Notice notice={notice.clone()} />
@@ -43,14 +43,14 @@ pub fn notice(props: &NoticeProps) -> Html {
     };
 
     html! {
-        <div class={format!("timeline-item {}", level_class)}>
-            <div class="timeline-dot-container">
-                <div class={format!("timeline-dot {}", level_class)}></div>
+        <div class={format!("notices-timeline__item {}", level_class)}>
+            <div class="notices-timeline__dot-container">
+                <div class={format!("notices-timeline__dot {}", level_class)}></div>
             </div>
-            <div class="timeline-content">
-                <div class="notice-header">
+            <div class="notices-timeline__content">
+                <div class="notices-timeline__header">
                     <h3>{&props.notice.title}</h3>
-                    <span class="notice-timestamp">{&timestamp_display}</span>
+                    <span class="notices-timeline__timestamp">{&timestamp_display}</span>
                 </div>
                 <p>{&props.notice.description}</p>
             </div>

@@ -10,13 +10,13 @@
     }
 }
 
-.probe-title {
+.probe__title {
     display: flex;
     flex-direction: row;
     justify-content: space-between;
 }
 
-.probe-name-section {
+.probe__name-section {
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -24,7 +24,7 @@
     margin-right: auto;
 }
 
-.probe-name {
+.probe__name {
     font-weight: inherit;
     margin: 0;
 }
@@ -48,7 +48,7 @@
     }
 }
 
-.service-group {
+.service {
     margin-bottom: 0;
 
     &:last-child {
@@ -56,7 +56,7 @@
     }
 }
 
-.service-title {
+.service__title {
     margin: 0;
     color: $color-text;
     display: flex;
@@ -64,13 +64,13 @@
     align-items: center;
 }
 
-.service-name {
+.service__name {
     margin: 0;
     font-size: 1.5rem;
     font-weight: 200;
 }
 
-.service-availability {
+.service__availability {
     font-weight: 100;
     font-size: 1.2rem;
 }
@@ -106,13 +106,13 @@
     /* Hidden for now */
 }
 
-.availability {
+.probe__availability {
     float: right;
     clear: both;
 }
 
 // How long the probe has held its current state, shown to the left of the availability %.
-.probe-streak {
+.probe__streak {
     align-self: center;
     font-size: 0.8rem;
     color: $color-text-muted;
@@ -121,7 +121,7 @@
 }
 
 // Probe tags
-.probe-tags {
+.probe__tags {
     display: inline-flex;
     flex-wrap: wrap;
     gap: 0.5rem;
@@ -129,7 +129,7 @@
     vertical-align: text-bottom;
 }
 
-.probe-tag {
+.probe__tag {
     display: flex;
     align-items: center;
     padding: 0.2rem 0.6rem;
@@ -141,11 +141,11 @@
     font-weight: 400;
     gap: 0.25rem;
 
-    .tag-name {
+    .probe__tag-name {
         color: $color-text-muted;
     }
 
-    .tag-value {
+    .probe__tag-value {
         font-weight: 600;
     }
 }

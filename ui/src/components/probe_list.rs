@@ -39,10 +39,10 @@ pub fn probe_list() -> Html {
                 let (service_health, service_availability) = calculate_service_health_and_availability(probes);
 
                 html! {
-                    <div class={format!("section service-group {}", service_health)}>
-                        <div class="service-title">
-                            <h2 class="service-name">{service_name}</h2>
-                            <span class="service-availability">{availability(service_availability)}</span>
+                    <div class={format!("section service {}", service_health)}>
+                        <div class="service__title">
+                            <h2 class="service__name">{service_name}</h2>
+                            <span class="service__availability">{availability(service_availability)}</span>
                         </div>
                         {for probes.iter().map(|probe| {
                             html! {
