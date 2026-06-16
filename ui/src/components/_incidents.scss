@@ -145,6 +145,19 @@
     }
 }
 
+.incident-summary__timestamp {
+    font-size: 0.8rem;
+    line-height: 1.25rem;
+    vertical-align: middle;
+    color: $color-text-muted;
+    font-weight: 100;
+
+    border-right: 1px solid $color-separator;
+    padding: 0.5rem;
+    padding-left: 0;
+    margin-right: 0.5rem;
+}
+
 // Horizontal event timeline (summary): impact-coloured dots on a connecting line, each revealing an
 // update popover on hover (like the probe history buckets). The line into a dot carries the
 // preceding dot's colour.

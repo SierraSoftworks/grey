@@ -68,6 +68,10 @@ pub fn worst_impact(incidents: &[Incident]) -> Option<Impact> {
         .max_by_key(|impact| impact.rank())
 }
 
+fn date_format(time: DateTime<Utc>) -> String {
+    time.format("%Y-%m-%d").to_string()
+}
+
 fn time_format(time: DateTime<Utc>) -> String {
     time.format("%Y-%m-%d %H:%M UTC").to_string()
 }
@@ -114,6 +118,8 @@ pub fn incident_summary(props: &IncidentSummaryProps) -> Html {
         <div class="incident-summary">
             <div class="incident-summary-header">
                 <h3 class="incident-summary-title">
+                    <span class="incident-summary__timestamp">{date_format(incident.started_at().unwrap_or_else(Utc::now))}</span>
+
                     <Link<Route> to={Route::Incident { id: incident.id.to_string() }} classes="incident-link">
                         {&incident.title}
                     </Link<Route>>
@@ -209,11 +215,13 @@ pub fn incident_block(props: &IncidentBlockProps) -> Html {
             <div class="incident-block-header">
                 <div class="incident-block-heading">
                     <h3 class="incident-block-title">
+                        <span class="incident-summary__timestamp">{date_format(incident.started_at().unwrap_or_else(Utc::now))}</span>
+
                         <Link<Route> to={Route::Incident { id: incident.id.to_string() }} classes="incident-link">
                             {&incident.title}
                         </Link<Route>>
                     </h3>
-                    <span class="incident-id">{format!("{}", incident.id)}</span>
+                    // <span class="incident-id">{format!("{}", incident.id)}</span>
                 </div>
                 <span class={classes!("incident-streak", status_class)}>{status_text}</span>
             </div>
