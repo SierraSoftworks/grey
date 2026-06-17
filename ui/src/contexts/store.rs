@@ -294,8 +294,10 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
 
     // Background polling for the public, live entities. Polling pauses while the page is unfocused
     // and resumes — with an immediate catch-up fetch — when focus returns, so a backgrounded tab
-    // doesn't keep hitting the agent (see [`focus::FocusTracker`]).
-    #[cfg(feature = "wasm")]
+    // doesn't keep hitting the agent (see [`focus::FocusTracker`]). Gated on the wasm32 target (not
+    // just the feature) because it touches browser globals at render time via `use_focus_tracker`,
+    // which would panic if compiled into a native test binary.
+    #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
     {
         let reload = props.config.reload_interval;
         let focus = use_focus_tracker();
@@ -415,7 +417,7 @@ pub fn use_store() -> Store {
 
 /// Provides a process-wide [`focus::FocusTracker`], created once and shared by every polling loop so
 /// they register a single pair of focus/blur listeners.
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 #[hook]
 fn use_focus_tracker() -> focus::FocusTracker {
     (*use_memo((), |_| focus::FocusTracker::new())).clone()
@@ -423,7 +425,7 @@ fn use_focus_tracker() -> focus::FocusTracker {
 
 // Background fetch helpers translate an API call into the action that folds its result into the
 // store, logging (and flagging) failures so a transient error doesn't wedge the polling loop.
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 async fn load_probes(client: &ApiClient) -> Action {
     match client.probes().await {
         Ok(probes) => Action::SetProbes(probes),
@@ -434,7 +436,7 @@ async fn load_probes(client: &ApiClient) -> Action {
     }
 }
 
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 async fn load_notices(client: &ApiClient) -> Action {
     match client.notices().await {
         Ok(notices) => Action::SetNotices(notices),
@@ -445,7 +447,7 @@ async fn load_notices(client: &ApiClient) -> Action {
     }
 }
 
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 async fn load_incidents(client: &ApiClient) -> Action {
     match client.incidents().await {
         Ok(incidents) => Action::SetIncidents(incidents),
@@ -458,7 +460,7 @@ async fn load_incidents(client: &ApiClient) -> Action {
 
 /// Cluster topology is operator-only, so it is fetched only when signed in; a revoked/expired
 /// session (or any error) is treated as "no peers" rather than spamming the error channel.
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 async fn load_peers(client: &ApiClient) -> Vec<Peer> {
     if crate::auth::stored_token().is_none() {
         return Vec::new();
@@ -467,7 +469,7 @@ async fn load_peers(client: &ApiClient) -> Vec<Peer> {
 }
 
 /// Page-focus tracking used to pause background polling while the user is away.
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 mod focus {
     use std::cell::RefCell;
     use std::future::Future;
