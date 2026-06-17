@@ -203,6 +203,13 @@ impl Store {
         self.state.dispatch(Action::RemoveIncident(id));
         Ok(())
     }
+
+    /// Surfaces an error in the shared banner. Used by the on-demand admin reads (hidden drafts)
+    /// that bypass the store's own mutations, so their failures reach the same banner as everything
+    /// else instead of being shown inline.
+    pub fn set_error(&self, error: ApiError) {
+        self.state.dispatch(Action::SetError(error));
+    }
 }
 
 #[derive(Properties, PartialEq)]

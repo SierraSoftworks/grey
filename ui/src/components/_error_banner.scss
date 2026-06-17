@@ -1,11 +1,18 @@
 @use '../styles/variables' as *;
 
-// A dismissible error banner pinned below the header. It mirrors the `.content` container's width so
-// it lines up with the page beneath it, and uses the shared error status colour.
+// A dismissible error banner for surfacing `ApiError`s. It floats over the page with `position:
+// fixed` (pinned to the bottom of the viewport) so showing or hiding it never reflows the content
+// beneath it. The card shows the error message, with the agent's advice as bullet points below.
 .error-banner {
-    width: 100%;
+    position: fixed;
+    left: 50%;
+    bottom: 1.5rem;
+    transform: translateX(-50%);
+    z-index: 1100; // above the sticky header (z-index: 1000)
+
+    box-sizing: border-box;
+    width: calc(100% - 2rem);
     max-width: $tablet;
-    margin: 1.5rem auto 0;
     display: flex;
     align-items: flex-start;
     gap: 0.75rem;
@@ -14,12 +21,15 @@
     border-left: 4px solid $color-status-error;
     background-color: $background-box;
     color: $color-box;
-    box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
 
-    @media screen and (max-width: $tablet) {
+    @media screen and (max-width: $mobile) {
+        left: 0;
+        right: 0;
+        bottom: 0;
+        transform: none;
+        width: 100%;
         border-radius: 0;
-        box-shadow: none;
-        margin-top: 0;
     }
 
     &__icon {
@@ -40,7 +50,7 @@
 
     &__message {
         margin: 0;
-        font-weight: 600;
+        font-weight: 400;
     }
 
     &__advice {

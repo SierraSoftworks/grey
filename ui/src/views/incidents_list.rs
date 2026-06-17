@@ -55,17 +55,16 @@ fn admin_incidents_list(props: &AdminIncidentsListProps) -> Html {
     // create/edit/delete), then fetch the full admin list in the background to include hidden drafts.
     let store = use_store();
     let incidents = use_state(|| store.incidents().to_vec());
-    let error = use_state(|| Option::<String>::None);
 
     {
         let client = store.client().clone();
         let incidents = incidents.clone();
-        let error = error.clone();
+        let store = store.clone();
         use_effect_with(props.token.clone(), move |_| {
             wasm_bindgen_futures::spawn_local(async move {
                 match client.admin_incidents().await {
                     Ok(list) => incidents.set(list),
-                    Err(e) => error.set(Some(e.to_string())),
+                    Err(e) => store.set_error(e),
                 }
             });
             || ()
@@ -81,9 +80,6 @@ fn admin_incidents_list(props: &AdminIncidentsListProps) -> Html {
                     <span>{"Declare Incident"}</span>
                 </Link<Route>>
             </div>
-            if let Some(err) = (*error).clone() {
-                <p class="error-text">{err}</p>
-            }
             { incident_list_body(&incidents) }
         </div>
     }

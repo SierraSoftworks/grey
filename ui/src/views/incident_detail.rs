@@ -65,7 +65,6 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
     let loaded = use_state(|| Option::<grey_api::Incident>::None);
     let title = use_state(String::new);
     let updates = use_state(Vec::<IncidentUpdate>::new);
-    let error = use_state(|| Option::<String>::None);
     let saving = use_state(|| false);
     // Which posted update (by index) currently has its message open in a textarea; the rest render
     // their message as markdown.
@@ -81,7 +80,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
         let loaded = loaded.clone();
         let title = title.clone();
         let updates = updates.clone();
-        let error = error.clone();
+        let store = store.clone();
         let client = client.clone();
         use_effect_with((props.token.clone(), props.id.clone()), move |_| {
             wasm_bindgen_futures::spawn_local(async move {
@@ -91,7 +90,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                         updates.set(incident.sorted_updates().into_iter().cloned().collect());
                         loaded.set(Some(incident));
                     }
-                    Err(e) => error.set(Some(e.to_string())),
+                    Err(e) => store.set_error(e),
                 }
             });
             || ()
@@ -101,11 +100,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
     let Some(current) = (*loaded).clone() else {
         return html! {
             <div class="page">
-                if let Some(err) = (*error).clone() {
-                    <p class="error-text">{err}</p>
-                } else {
-                    <p class="empty-state">{"Loading…"}</p>
-                }
+                <p class="empty-state">{"Loading\u{2026}"}</p>
             </div>
         };
     };
@@ -175,7 +170,6 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
         let title = title.clone();
         let updates = updates.clone();
         let loaded = loaded.clone();
-        let error = error.clone();
         let saving = saving.clone();
         let editing = editing.clone();
         let store = store.clone();
@@ -189,7 +183,6 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
             let loaded = loaded.clone();
             let title = title.clone();
             let updates = updates.clone();
-            let error = error.clone();
             let saving = saving.clone();
             let editing = editing.clone();
             let store = store.clone();
@@ -202,10 +195,9 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                         title.set(incident.title.clone());
                         updates.set(incident.sorted_updates().into_iter().cloned().collect());
                         loaded.set(Some(incident));
-                        error.set(None);
                         editing.set(None);
                     }
-                    Err(e) => error.set(Some(e.to_string())),
+                    Err(e) => store.set_error(e),
                 }
             });
         })
@@ -215,12 +207,10 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
         let token = props.token.clone();
         let id_value = current.id;
         let navigator = navigator.clone();
-        let error = error.clone();
         let store = store.clone();
         Callback::from(move |_| {
             let _ = &token;
             let navigator = navigator.clone();
-            let error = error.clone();
             let store = store.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 match store.delete_incident(id_value).await {
@@ -230,7 +220,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                             nav.push(&Route::Incidents);
                         }
                     }
-                    Err(e) => error.set(Some(e.to_string())),
+                    Err(e) => store.set_error(e),
                 }
             });
         })
@@ -262,10 +252,6 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                         </button>
                     }
                 </div>
-
-                if let Some(err) = (*error).clone() {
-                    <p class="error-text">{err}</p>
-                }
 
                 <ul class="incident-timeline incident-timeline--editing">
                     { for (*updates).iter().enumerate().rev().map(|(i, update)| {

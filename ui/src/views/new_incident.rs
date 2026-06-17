@@ -41,7 +41,6 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
     let title = use_state(String::new);
     let impact = use_state(|| "offline".to_string());
     let message = use_state(String::new);
-    let error = use_state(|| Option::<String>::None);
     let saving = use_state(|| false);
     let navigator = use_navigator();
     // The shared store, whose `create_incident` performs the API call and reflects the new incident
@@ -73,7 +72,6 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
     let onsubmit = {
         let token = props.token.clone();
         let (title, impact, message) = (title.clone(), impact.clone(), message.clone());
-        let error = error.clone();
         let saving = saving.clone();
         let navigator = navigator.clone();
         let store = store.clone();
@@ -82,7 +80,9 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
             let title_value = (*title).trim().to_string();
             let message_value = (*message).trim().to_string();
             if title_value.is_empty() || message_value.is_empty() {
-                error.set(Some("A title and an initial update message are required.".into()));
+                store.set_error(grey_api::ApiError::new(
+                    "A title and an initial update message are required.",
+                ));
                 return;
             }
             let input = grey_api::CreateIncident {
@@ -91,7 +91,6 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
                 message: message_value,
             };
             let _ = &token;
-            let error = error.clone();
             let saving = saving.clone();
             let navigator = navigator.clone();
             let store = store.clone();
@@ -105,7 +104,7 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
                     }
                     Err(e) => {
                         saving.set(false);
-                        error.set(Some(e.to_string()));
+                        store.set_error(e);
                     }
                 }
             });
@@ -116,9 +115,6 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
         <div class="page">
             <h1>{"New incident"}</h1>
             <form class="incident-form" onsubmit={onsubmit}>
-                if let Some(err) = (*error).clone() {
-                    <p class="error-text">{err}</p>
-                }
                 <label>{"Title"}
                     <input type="text" value={(*title).clone()} oninput={on_title} />
                 </label>

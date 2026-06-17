@@ -49,16 +49,50 @@ mod browser {
         format!("Bearer {token}")
     }
 
-    /// Wraps a transport-level failure (no HTTP response) as an [`ApiError`] with no status code.
+    /// The advice we fall back to when nothing more specific applies: reloading the page re-runs the
+    /// whole bootstrap (config, session, data) and clears most transient client-side faults.
+    const REFRESH_ADVICE: &str = "Refresh the page to try again.";
+
+    /// Guarantees an error carries at least one actionable suggestion, defaulting to a page refresh.
+    fn with_fallback_advice(mut error: ApiError) -> ApiError {
+        if error.advice.is_empty() {
+            error.advice.push(REFRESH_ADVICE.to_string());
+        }
+        error
+    }
+
+    /// Coerces a transport-level failure (a browser/JS error raised before any HTTP response) into a
+    /// friendly [`ApiError`] with tailored advice. These are the connectivity and serialization
+    /// faults the client can hit on the way to (or back from) the agent, none of which carry an HTTP
+    /// status of their own.
     fn net(err: gloo::net::Error) -> ApiError {
-        ApiError::new(format!("Network error: {err}"))
+        use gloo::net::Error;
+
+        match err {
+            // A `JsError` here almost always means the request never reached the server: the network
+            // dropped, the host is unreachable, or the browser aborted the fetch ("Failed to fetch"
+            // is the canonical message). Treat it as a connectivity problem.
+            Error::JsError(_) => ApiError::new("We couldn't reach the server.").with_advice_lines([
+                "Check that your device is still connected to the internet.",
+                "The service may be briefly unavailable — wait a moment, then refresh the page.",
+            ]),
+            // The server answered, but its body wasn't the JSON we expected — usually a transient
+            // proxy/error page or a version skew between the UI and the agent.
+            Error::SerdeError(_) => ApiError::new("The server returned an unexpected response.")
+                .with_advice(REFRESH_ADVICE),
+            // Anything else gloo surfaces; keep the detail but still point at a recovery step.
+            other => {
+                ApiError::new(format!("Something went wrong: {other}")).with_advice(REFRESH_ADVICE)
+            }
+        }
     }
 
     /// Builds an [`ApiError`] from a non-success response, preferring the agent's structured error
-    /// body and falling back to a generic message stamped with the HTTP status.
+    /// body and falling back to a generic message stamped with the HTTP status. Either way the
+    /// result is guaranteed to carry advice so the banner always has something actionable to show.
     async fn error_from(response: Response) -> ApiError {
         let status = response.status();
-        match response.json::<ApiError>().await {
+        let error = match response.json::<ApiError>().await {
             Ok(mut error) if !error.message.is_empty() => {
                 if error.code == 0 {
                     error.code = status;
@@ -66,7 +100,8 @@ mod browser {
                 error
             }
             _ => ApiError::new(format!("Request failed (HTTP {status}).")).with_code(status),
-        }
+        };
+        with_fallback_advice(error)
     }
 
     /// Decodes a JSON success body, or surfaces the structured error on a non-success response.
