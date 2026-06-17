@@ -30,8 +30,9 @@ mod browser {
     const STATE_KEY: &str = "grey.oidc.state";
     /// Short-lived `localStorage` slot the popup uses to hand tokens back to its opener.
     const POPUP_RESULT_KEY: &str = "grey.oidc.popup_result";
-    /// The OAuth redirect lands back at the app root; the SPA detects `?code&state` on load.
-    const CALLBACK_PATH: &str = "/";
+    /// The OAuth redirect lands on the dedicated callback route; the SPA detects `?code&state`
+    /// there and finishes the exchange (see [`crate::views::AuthCallback`]).
+    const CALLBACK_PATH: &str = "/auth/callback";
     /// How long the opener waits for the popup to complete before giving up.
     const POPUP_POLL_INTERVAL: Duration = Duration::from_millis(300);
     const POPUP_MAX_POLLS: u32 = 2_000; // ~10 minutes

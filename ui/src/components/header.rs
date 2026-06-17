@@ -50,12 +50,12 @@ pub fn header() -> Html {
                 }
 
                 if auth.is_authenticated() {
-                    // One control: shows the user, reveals a "Sign out" overlay on hover, and signs
-                    // out when clicked.
-                    <button class="user-chip" onclick={auth.logout.reform(|_| ())} title="Sign out">
+                    // One control: shows the user, reveals a "Sign out" overlay on hover, and links
+                    // to the logout route (which clears the session and returns home) when clicked.
+                    <Link<Route> to={Route::AuthLogout} classes="user-chip">
                         <span class="user-chip__name">{ user_display.clone() }</span>
                         <span class="user-chip__signout" aria-hidden="true">{"Sign out"}</span>
-                    </button>
+                    </Link<Route>>
                 } else if auth.configured {
                     <button class="auth-button" onclick={auth.login.reform(|_| ())}>{"Sign in"}</button>
                 }

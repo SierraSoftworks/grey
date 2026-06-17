@@ -83,6 +83,10 @@ pub fn create_app() -> App<
         // seed the router. New top-level SPA routes need a matching entry here.
         .route("/incidents", web::get().to(page::index))
         .route("/incidents/{id}", web::get().to(page::index))
+        // The OIDC login popup lands on the callback route, and an explicit sign-out link hits the
+        // logout route; both are SPA pages, so serve the rendered app and let the client finish up.
+        .route("/auth/callback", web::get().to(page::index))
+        .route("/auth/logout", web::get().to(page::index))
         .route("/api/v1/probes", web::get().to(probes::get_probes))
         .route("/api/v1/notices", web::get().to(notices::get_notices))
         .route("/api/v1/incidents", web::get().to(incidents::get_incidents))

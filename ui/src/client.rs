@@ -8,7 +8,9 @@ use crate::contexts::{
     UiConfigProvider,
 };
 use crate::routes::Route;
-use crate::views::{HomeView, IncidentDetail, IncidentsList, NewIncident};
+use crate::views::{
+    AuthCallback, AuthLogout, HomeView, IncidentDetail, IncidentsList, NewIncident,
+};
 
 use super::components::Header;
 
@@ -341,6 +343,8 @@ fn switch(route: Route) -> Html {
         Route::Incidents => html! { <IncidentsList /> },
         Route::NewIncident => html! { <NewIncident /> },
         Route::Incident { id } => html! { <IncidentDetail id={id} /> },
+        Route::AuthCallback => html! { <AuthCallback /> },
+        Route::AuthLogout => html! { <AuthLogout /> },
         Route::NotFound => html! { <yew_router::prelude::Redirect<Route> to={Route::Home} /> },
     }
 }

@@ -119,6 +119,9 @@
     border: 1px solid $color-separator;
     background-color: $background-box;
     color: $color-text;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
     border-radius: $border-radius-small;
     padding: 0.4rem 0.9rem;
     font: inherit;
