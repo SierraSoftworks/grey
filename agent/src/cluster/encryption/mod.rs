@@ -63,12 +63,14 @@ pub trait EncryptionProvider {
 }
 
 /// A simple `EncryptionKeyProvider` which always returns the same static key.
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct StaticKeyProvider<K: Sized + Clone> {
     key: Arc<K>,
 }
 
 impl<K: Sized + Clone> StaticKeyProvider<K> {
+    #[allow(dead_code)]
     pub fn new(key: K) -> Self {
         Self {
             key: Arc::new(key),

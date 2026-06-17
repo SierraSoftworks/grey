@@ -254,7 +254,8 @@ where
                         peer.id=%meta.from,
                         peer.addr=%addr
                     );
-                    span.set_parent(meta.trace_context());
+                    
+                    let _ = span.set_parent(meta.trace_context());
 
                     trace!(name: "gossip.receive", "Received gossip {} message from {}: {:?}", msg.kind(), addr, msg);
 

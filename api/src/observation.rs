@@ -48,6 +48,21 @@ impl Observation {
         100.0 * self.successful_samples as f64 / self.total_samples as f64
     }
 
+    /// Calculates the error margin for the success rate of this observation.
+    pub fn success_rate_error_margin(&self) -> f64 {
+        if self.total_samples == 0 {
+            return 0.0;
+        }
+
+        let p = self.success_rate() / 100.0;
+        let n = self.total_samples as f64;
+
+        let z = 1.96; // 95% confidence interval
+        let margin = z * (p * (1.0 - p) / n).sqrt();
+
+        margin * 100.0
+    }
+
     /// Calculates the retry rate for samples in this observation (as a percentage).
     pub fn retry_rate(&self) -> f64 {
         if self.total_samples == 0 {

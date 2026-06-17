@@ -4,14 +4,20 @@ use serde::{Deserialize, Serialize};
 pub struct UiConfig {
     #[serde(default = "default_ui_title")]
     pub title: String,
-    
+
     #[serde(default = "default_ui_logo")]
     pub logo: String,
-    
+
     pub links: Vec<UiLink>,
-    
+
     #[serde(default = "default_reload_interval")]
     pub reload_interval: std::time::Duration,
+
+    /// Public OIDC parameters the SPA needs to start a browser-side PKCE login. `None` when admin
+    /// authentication is not configured. Only public values are ever exposed here — never a client
+    /// secret or the admin access-control list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<UiAuthConfig>,
 }
 
 impl Default for UiConfig {
@@ -21,8 +27,22 @@ impl Default for UiConfig {
             logo: default_ui_logo(),
             links: Vec::new(),
             reload_interval: default_reload_interval(),
+            auth: None,
         }
     }
+}
+
+/// The public OIDC configuration handed to the browser so it can run the Authorization Code + PKCE
+/// flow as a public client. Deliberately carries no secret.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct UiAuthConfig {
+    /// The OIDC issuer / provider base URL used for discovery and the PKCE flow.
+    pub issuer: String,
+    /// The public OAuth2 client id registered for the SPA.
+    pub client_id: String,
+    /// Additional scopes to request beyond the implicit `openid`.
+    #[serde(default)]
+    pub scopes: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]

@@ -2,6 +2,7 @@ use std::error::Error;
 use super::EncryptionProvider;
 
 /// An `EncryptionProvider` which performs no encryption or decryption, returning the plaintext or ciphertext as-is.
+#[allow(dead_code)]
 pub struct Cleartext;
 
 impl EncryptionProvider for Cleartext {

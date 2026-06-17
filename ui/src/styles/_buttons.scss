@@ -1,0 +1,78 @@
+@use 'variables' as *;
+
+// Generic button treatments shared across views (auth actions, primary submit, the declare-incident
+// outline action and inline text-link buttons).
+.auth-button,
+.primary-button {
+    cursor: pointer;
+    border: 1px solid $color-separator;
+    background-color: $background-box;
+    color: $color-text;
+    border-radius: $border-radius-small;
+    padding: 0.4rem 0.9rem;
+    font-size: 0.85rem;
+
+    &:hover {
+        background-color: $color-separator;
+    }
+}
+
+.primary-button {
+    background-color: $color-status-unknown;
+    color: $color-status-text;
+    border-color: $color-status-unknown;
+
+    &:hover {
+        opacity: 0.9;
+        background-color: $color-status-unknown;
+    }
+
+    &:disabled {
+        opacity: 0.6;
+        cursor: default;
+    }
+}
+
+// The "Declare Incident" action: a clean, warning-coloured outline (triangle icon + label).
+.declare-incident {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    text-decoration: none;
+    font-size: 0.9rem;
+    color: $color-status-warn;
+    background: none;
+    border: 1px solid $color-status-warn;
+    border-radius: $border-radius-small;
+    padding: 0.4rem 0.85rem;
+
+    &:hover {
+        color: $color-status-text;
+        background-color: $color-status-warn;
+    }
+}
+
+// A button rendered as an inline text link (e.g. "Remove" on an update row).
+.link-button {
+    cursor: pointer;
+    border: none;
+    background: none;
+    padding: 0;
+    font: inherit;
+    font-size: 0.8rem;
+    color: $color-text-muted;
+    text-decoration: underline;
+
+    &:hover {
+        color: $color-text;
+    }
+
+    &.danger {
+        color: $color-status-error;
+
+        &:hover {
+            opacity: 0.8;
+            color: $color-status-error;
+        }
+    }
+}

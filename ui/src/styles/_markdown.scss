@@ -1,0 +1,23 @@
+@use 'variables' as *;
+
+// Tighten markdown output so it sits naturally inside blocks.
+.markdown {
+    line-height: 1.5;
+
+    p:first-child {
+        margin-top: 0;
+    }
+
+    p:last-child {
+        margin-bottom: 0;
+    }
+}
+
+// Inline SVG icons inherit the surrounding text colour and scale with the text.
+.icon {
+    width: 1.1rem;
+    height: 1.1rem;
+    flex: none;
+    display: inline-block;
+    vertical-align: middle;
+}

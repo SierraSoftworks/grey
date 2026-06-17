@@ -18,7 +18,10 @@ humantime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 yew = { workspace = true, features = ["ssr", "hydration"] }
+yew-router = { workspace = true }
+pulldown-cmark = { workspace = true }
 
+base64 = { workspace = true, optional = true }
 gloo = { workspace = true, optional = true }
 gloo-console = { workspace = true, optional = true }
 gloo-net = { workspace = true, optional = true }
@@ -26,7 +29,18 @@ gloo-timers = { workspace = true, features = ["futures"], optional = true }
 wasm-bindgen = { workspace = true, optional = true }
 wasm-bindgen-futures = { workspace = true, optional = true }
 wasm-logger = { workspace = true, optional = true }
-web-sys = { workspace = true, optional = true }
+web-sys = { workspace = true, optional = true, features = [
+  "Window",
+  "Document",
+  "Location",
+  "Storage",
+  "UrlSearchParams",
+  "History",
+  "Crypto",
+  "HtmlInputElement",
+  "HtmlTextAreaElement",
+  "HtmlSelectElement",
+] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
@@ -34,4 +48,4 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 [features]
 default = ["wasm"]
 ssr = []
-wasm = ["gloo", "gloo-console", "gloo-net", "gloo-timers", "wasm-bindgen", "wasm-bindgen-futures", "wasm-logger", "web-sys"]
+wasm = ["gloo", "gloo-console", "gloo-net", "gloo-timers", "wasm-bindgen", "wasm-bindgen-futures", "wasm-logger", "web-sys", "base64"]

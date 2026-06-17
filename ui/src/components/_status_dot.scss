@@ -1,0 +1,54 @@
+@use '../styles/variables' as *;
+
+// The canonical status dot used across the UI (probe headers, popovers, tooltips, inline status
+// hints). Colour comes from a modifier class (`ok`/`warn`/`error`/`unknown`/`draft`); the diameter
+// is set inline by the `StatusDot` component, and `.active` enables the pulse animation.
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+    background-color: $color-status-unknown;
+
+    &.active {
+        animation: pulse 2s infinite;
+    }
+
+    &.ok {
+        background-color: $color-status-ok;
+    }
+
+    &.warn {
+        background-color: $color-status-warn;
+    }
+
+    &.error {
+        background-color: $color-status-error;
+    }
+
+    &.unknown {
+        background-color: $color-status-unknown;
+    }
+
+    &.draft {
+        background-color: $color-status-offline;
+    }
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 0.7;
+        transform: scale(1.2);
+    }
+
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}

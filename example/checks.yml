@@ -7,6 +7,23 @@ ui:
   enabled: true
   listen: 127.0.0.1:3002
 
+  # Optionally enable UI-driven incident management. When configured, an
+  # administrator can sign in (OIDC Authorization Code flow) to create and manage
+  # incidents. Register a confidential web client: the agent holds the
+  # client_secret and exchanges the authorization code server-side, so the secret
+  # never reaches the browser and the provider needs no CORS exemption. The status
+  # page origin (with a trailing slash) must be a registered redirect URI. See
+  # docs/ui/incidents.md for details.
+  #
+  # admin:
+  #   # filt-rs expression over the signed-in user's claims; defaults to deny-all.
+  #   acl: 'claims.email == "you@example.com"'
+  #   oidc:
+  #     endpoint: https://auth.example.com
+  #     client_id: grey-status-page
+  #     client_secret: '00000000000000000000000000000000'
+  #     scopes: [profile, email]
+
 probes:
   # A probe validated entirely with checks.
   - name: example.checks

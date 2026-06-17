@@ -1,17 +1,17 @@
 use super::Probe as ProbeComponent;
-use crate::contexts::use_probes;
+use crate::contexts::use_store;
 use std::collections::HashMap;
 use yew::prelude::*;
 use crate::formatters::availability;
 
 #[function_component(ProbeList)]
 pub fn probe_list() -> Html {
-    let probes_ctx = use_probes();
+    let store = use_store();
 
     // Group probes by service tag
     let mut service_groups: HashMap<String, Vec<&grey_api::Probe>> = HashMap::new();
 
-    for probe in &probes_ctx.probes {
+    for probe in store.probes() {
         let service = probe
             .tags
             .get("service")
@@ -39,10 +39,10 @@ pub fn probe_list() -> Html {
                 let (service_health, service_availability) = calculate_service_health_and_availability(probes);
 
                 html! {
-                    <div class={format!("section service-group {}", service_health)}>
-                        <div class="service-title">
-                            <h2 class="service-name">{service_name}</h2>
-                            <span class="service-availability">{availability(service_availability)}</span>
+                    <div class={format!("section service {}", service_health)}>
+                        <div class="service__title">
+                            <h2 class="service__name">{service_name}</h2>
+                            <span class="service__availability">{availability(service_availability)}</span>
                         </div>
                         {for probes.iter().map(|probe| {
                             html! {

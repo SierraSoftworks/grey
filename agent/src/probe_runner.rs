@@ -5,7 +5,11 @@ use std::{
 };
 use tracing_batteries::prelude::{opentelemetry::trace::Status as OpenTelemetryStatus, *};
 
-use crate::{Probe, Validator, result::ProbeResult, state::State};
+use crate::{
+    Probe, Validator,
+    result::ProbeResult,
+    state::{ProbeStore, State},
+};
 
 const NO_PARENT: Option<tracing::Id> = None;
 
@@ -179,7 +183,6 @@ impl ProbeRunner {
         }
         .await;
 
-        sample.duration = chrono::Utc::now() - sample.start_time;
 
         Span::current().record("probe.attempts", sample.retries);
 
@@ -196,7 +199,7 @@ impl ProbeRunner {
         };
 
         self.state
-            .update_probe_state(self.name().as_str(), &sample)
+            .update_probe_state(self.name().as_str(), sample.finish())
             .await?;
         result
     }

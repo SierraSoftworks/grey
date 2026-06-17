@@ -1,18 +1,18 @@
 @use '../styles/variables' as *;
 
 // History and tooltip styles
-.history {
-    height: 1.2rem;
+.probe-history {
+    height: 0.6rem;
     display: flex;
     flex-direction: row;
     justify-content: flex-end;
     align-content: center;
-    margin-top: 1rem;
-    border-radius: 4px;
+    margin-top: 0.4rem;
+    border-radius: 3px;
     box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.5);
 }
 
-.history-sample {
+.probe-history__sample {
     flex: 1;
     position: relative;
     cursor: pointer;
@@ -28,87 +28,10 @@
         border-bottom-right-radius: $border-radius-small;
     }
 
-    &:hover {
-        border-left: 0.5px solid $color-separator;
-        border-right: 0.5px solid $color-separator;
-    }
-
-    &.ok {
-        background-color: $color-status-ok;
-    }
-
-    &.warn {
-        background-color: $color-status-warn;
-    }
-
-    &.error {
-        background-color: $color-status-error;
-    }
-
-    &.unknown {
-        background-color: $color-status-unknown;
-    }
-
-    &.tooltip-target .tooltip {
-        opacity: 1;
-        visibility: visible;
-    }
-}
-
-// Tooltip styles
-.tooltip {
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    background-color: $background-box;
-    color: $color-text;
-    padding: 0.75rem;
-    border-radius: $border-radius-medium;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    font-size: 0.75rem;
-    line-height: 1.4;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    z-index: 1000;
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.2s, visibility 0.2s;
-    border: 1px solid $color-separator;
-    min-width: 200px;
-    max-width: 40vw;
-    pointer-events: none;
-    margin-bottom: 8px;
-
-    &.visible {
-        opacity: 1;
-        visibility: visible;
-    }
-
-    &::after {
-        content: '';
-        position: absolute;
-        top: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        border: 6px solid transparent;
-        border-top-color: $background-box;
-    }
-}
-
-.tooltip-header {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
-    font-weight: 600;
-}
-
-.tooltip-status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
+    // &:hover {
+    //     border-left: 0.5px solid $color-separator;
+    //     border-right: 0.5px solid $color-separator;
+    // }
 
     &.ok {
         background-color: $color-status-ok;
@@ -127,13 +50,23 @@
     }
 }
 
-.tooltip-details {
+// The probe-history popover reuses the shared `.popover` component; its multi-column content
+// (observers and checks side by side) needs more room than the default narrow popover.
+.popover.popover--history {
+    max-width: min(40rem, 80vw);
+
+    .tooltip__details {
+        white-space: nowrap;
+    }
+}
+
+.tooltip__details {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
 }
 
-.tooltip-context {
+.tooltip__context {
     display: flex;
     flex-direction: row;
     gap: 1rem;
@@ -142,33 +75,33 @@
     border-top: 1px solid $color-separator;
 }
 
-.tooltip-row {
+.tooltip__row {
     display: flex;
     justify-content: space-between;
 
-    span:not(.tooltip-label) { 
+    span:not(.tooltip__label) { 
         overflow: hidden;
         white-space: pre;
         text-overflow: ellipsis;
     }
 }
 
-.tooltip-label {
+.tooltip__label {
     color: $color-text-muted;
 }
 
-.tooltip-section {
+.tooltip__section {
     flex: 1;
     min-width: 0; // Allow flex items to shrink below their content size
 }
 
-.tooltip-section-title {
+.tooltip__section-title {
     font-weight: 600;
     margin-bottom: 0.5rem;
     color: $color-text;
 }
 
-.tooltip-section-entry {
+.tooltip__section-entry {
     margin-bottom: 0.5rem;
 
     &:last-child {
@@ -176,20 +109,22 @@
     }
 }
 
-.tooltip-section-entry-header {
+.tooltip__section-entry-header {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     margin-bottom: 0.25rem;
 }
 
-.tooltip-section-entry-name {
-    font-weight: 600;
+.tooltip__section-entry-name {
     color: $color-text;
     font-size: 0.7rem;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
 }
 
-.tooltip-section-entry-message {
+.tooltip__section-entry-message {
     font-family: monospace;
     background-color: $background-base;
     padding: 0.1rem 0.3rem;
@@ -202,11 +137,11 @@
     white-space: pre;
 }
 
-.tooltip-section-entry-details {
+.tooltip__section-entry-details {
     margin-left: 1.3rem;
 }
 
-.tooltip-section-entry-extra {
+.tooltip__section-entry-extra {
     font-style: italic;
     color: $color-text-muted;
     font-size: 0.65rem;

@@ -1,4 +1,4 @@
-@use '../styles/variables' as *;
+@use 'variables' as *;
 
 // Status indicator and status dot styles
 .status-indicator {
@@ -28,46 +28,6 @@
 
     &.error .status-dot {
         background-color: $color-status-error;
-    }
-}
-
-.status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    animation: pulse 2s infinite;
-
-    &.ok {
-        background-color: $color-status-ok;
-    }
-
-    &.warn {
-        background-color: $color-status-warn;
-    }
-
-    &.error {
-        background-color: $color-status-error;
-    }
-
-    &.unknown {
-        background-color: $color-status-unknown;
-    }
-}
-
-@keyframes pulse {
-    0% {
-        opacity: 1;
-        transform: scale(1);
-    }
-
-    50% {
-        opacity: 0.7;
-        transform: scale(1.2);
-    }
-
-    100% {
-        opacity: 1;
-        transform: scale(1);
     }
 }
 

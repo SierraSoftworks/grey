@@ -1,0 +1,89 @@
+@use '../styles/variables' as *;
+
+// A dismissible error banner for surfacing `ApiError`s. It floats over the page with `position:
+// fixed` (pinned to the bottom of the viewport) so showing or hiding it never reflows the content
+// beneath it. The card shows the error message, with the agent's advice as bullet points below.
+.error-banner {
+    position: fixed;
+    left: 50%;
+    bottom: 1.5rem;
+    transform: translateX(-50%);
+    z-index: 1100; // above the sticky header (z-index: 1000)
+
+    box-sizing: border-box;
+    width: calc(100% - 2rem);
+    max-width: $tablet;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1rem 1.25rem;
+    border-radius: $border-radius;
+    border-left: 4px solid $color-status-error;
+    background-color: $background-box;
+    color: $color-box;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+
+    @media screen and (max-width: $mobile) {
+        left: 0;
+        right: 0;
+        bottom: 0;
+        transform: none;
+        width: 100%;
+        border-radius: 0;
+    }
+
+    &__icon {
+        flex: 0 0 auto;
+        display: flex;
+        color: $color-status-error;
+
+        .icon {
+            width: 1.25rem;
+            height: 1.25rem;
+        }
+    }
+
+    &__body {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    &__message {
+        margin: 0;
+        font-weight: 400;
+    }
+
+    &__advice {
+        margin: 0.5rem 0 0;
+        padding-left: 1.25rem;
+        color: $color-text-muted;
+
+        li {
+            margin: 0.15rem 0;
+        }
+    }
+
+    &__close {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.25rem;
+        border: none;
+        background: transparent;
+        color: $color-text-muted;
+        cursor: pointer;
+        border-radius: $border-radius-small;
+        transition: color 0.15s ease, background-color 0.15s ease;
+
+        &:hover {
+            color: $color-status-error;
+            background-color: rgba(0, 0, 0, 0.05);
+        }
+
+        .icon {
+            width: 1.1rem;
+            height: 1.1rem;
+        }
+    }
+}

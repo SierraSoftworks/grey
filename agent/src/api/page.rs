@@ -1,18 +1,19 @@
-use actix_web::{HttpResponse, Result, web};
+use actix_web::{HttpRequest, HttpResponse, Result, web};
 use grey_ui::{App, AppProps};
 use yew::ServerRenderer;
 
 use super::{ASSETS_DIR, AppState};
+use crate::state::{IncidentStore, ProbeStore};
 
-pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
+pub async fn index(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpResponse> {
     let probe_histories = data.state.get_probe_states().await?;
 
     let config = data.state.get_config();
     let mut probes: Vec<grey_api::Probe> = probe_histories.into_values().collect();
     probes.sort_by_key(|p| p.name.clone());
 
-    let mut peers = data.state.get_peers().await.unwrap_or_default();
-    peers.sort_by(|a, b| a.id.cmp(&b.id));
+    // Only the publicly visible incidents are server-rendered for unauthenticated viewers.
+    let incidents = data.state.list_incidents(false).await.unwrap_or_default();
 
     // Read the embedded HTML template
     let html_template = ASSETS_DIR
@@ -31,7 +32,11 @@ pub async fn index(data: web::Data<AppState>) -> Result<HttpResponse> {
         config: (&config.ui).into(),
         notices: config.ui.notices.clone(),
         probes,
-        peers,
+        // Cluster topology is operator-only: it is never part of the server-rendered payload and is
+        // fetched client-side once an administrator has signed in, so it can't leak to anonymous
+        // viewers via the page's hydration data.
+        incidents,
+        url: req.uri().path().to_string(),
     };
     let renderer = ServerRenderer::<App>::with_props(move || app_props).hydratable(true);
     let ssr_content = renderer.render().await;
@@ -59,7 +64,8 @@ mod tests {
         let temp_dir = tempdir().unwrap();
 
         let app_state = AppState::test(temp_dir.path().to_path_buf()).await;
-        let resp = index(web::Data::new(app_state)).await;
+        let req = actix_web::test::TestRequest::default().to_http_request();
+        let resp = index(req, web::Data::new(app_state)).await;
 
         let resp = resp.expect("Failed to render index");
         assert_eq!(resp.status(), StatusCode::OK);
@@ -72,5 +78,60 @@ mod tests {
         assert!(body.contains(r#"data-probes="[{&quot;"#), "Failed to find probes data in HTML body");
         assert!(body.contains(r#"data-config="{&quot;"#), "Failed to find config data in HTML body");
         assert!(body.trim().ends_with("</html>"), "Body did not end with the HTML closing tag");
+    }
+
+    /// The server-rendered page must never embed operator-only cluster topology: `data-peers` is not
+    /// part of the hydration payload, so an unauthenticated viewer can't read it from the HTML.
+    #[actix_web::test]
+    async fn test_index_omits_peers() {
+        let temp_dir = tempdir().unwrap();
+        let app_state = AppState::test(temp_dir.path().to_path_buf()).await;
+        let req = actix_web::test::TestRequest::default().to_http_request();
+        let resp = index(req, web::Data::new(app_state))
+            .await
+            .expect("Failed to render index");
+
+        let body_bytes = resp.into_body().try_into_bytes().unwrap();
+        let body = String::from_utf8_lossy(&body_bytes);
+        assert!(
+            !body.contains("data-peers"),
+            "the server-rendered page must not embed operator-only peer data"
+        );
+    }
+
+    /// A deep link to the `/incidents` route must server-render the incidents page (the router is
+    /// seeded from the request path) including any visible incidents.
+    #[actix_web::test]
+    async fn test_index_renders_incidents_route() {
+        let temp_dir = tempdir().unwrap();
+        let app_state = AppState::test(temp_dir.path().to_path_buf()).await;
+
+        app_state
+            .state
+            .create_incident(
+                "Database outage".into(),
+                grey_api::IncidentUpdate {
+                    impact: grey_api::Impact::Offline,
+                    timestamp: chrono::Utc::now(),
+                    message: String::new(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let req = actix_web::test::TestRequest::default()
+            .uri("/incidents")
+            .to_http_request();
+        let resp = index(req, web::Data::new(app_state))
+            .await
+            .expect("Failed to render /incidents");
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body_bytes = resp.into_body().try_into_bytes().unwrap();
+        let body = String::from_utf8_lossy(&body_bytes);
+        assert!(
+            body.contains("Database outage"),
+            "the /incidents route should server-render the seeded incident"
+        );
     }
 }

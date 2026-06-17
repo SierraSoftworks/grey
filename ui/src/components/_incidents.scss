@@ -1,0 +1,353 @@
+@use '../styles/variables' as *;
+
+.incidents-section {
+    max-width: 980px;
+    width: 100%;
+    margin: 2rem auto;
+    color: var(--color-box);
+
+    // The landing-page incidents section: a colour-coded header over compact summaries.
+    .incidents-section__summaries {
+        padding: 1.5rem;
+    }
+}
+
+// A title link reused by summaries and blocks.
+.incident-link {
+    color: inherit;
+    text-decoration: none;
+
+    &:hover {
+        text-decoration: underline;
+    }
+}
+
+.incident-id {
+    font-family: monospace;
+    font-size: 0.8rem;
+    margin-left: 0.5rem;
+    color: $color-text-muted;
+}
+
+// A single incident in full: flat, with no card chrome — cards are reserved for probes, signals and
+// the individual update entries. Successive blocks are separated by spacing and the header underline.
+.incident-block {
+    margin: 0 0 2.5rem 0;
+
+    &:last-child {
+        margin-bottom: 0;
+    }
+
+    .incident-block__header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 1rem 1.5rem;
+        flex-wrap: wrap;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid $color-separator;
+    }
+
+    // Title with the id stacked beneath it.
+    .incident-block__heading {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.15rem;
+
+        .incident-block__title {
+            margin: 0;
+            font-weight: 400;
+        }
+    }
+}
+
+// A compact incident summary (landing page): title, latest update, horizontal timeline.
+.incident-summary {
+    padding: 1rem 0;
+    border-bottom: 1px solid $color-separator;
+
+    &:first-child {
+        padding-top: 0;
+    }
+
+    &:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
+    }
+
+    .incident-summary__header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 1rem;
+        flex-wrap: wrap;
+
+        .incident-summary__title {
+            margin: 0;
+            font-weight: 400;
+        }
+    }
+
+    // The latest update's message, shown beneath the title as an at-a-glance status line.
+    .incident-summary__message {
+        margin: 0.4rem 0 0 0;
+        font-size: 0.9rem;
+        color: $color-text-muted;
+    }
+}
+
+.incident-summary__timestamp {
+    font-size: 0.8rem;
+    line-height: 1.25rem;
+    vertical-align: middle;
+    color: $color-text-muted;
+    font-weight: 100;
+
+    border-right: 1px solid $color-separator;
+    padding: 0.5rem;
+    padding-left: 0;
+    margin-right: 0.5rem;
+}
+
+// Header user chip: shows the signed-in user; hovering reveals a "Sign out" overlay; clicking signs
+// the user out.
+.user-chip {
+    position: relative;
+    cursor: pointer;
+    overflow: hidden;
+    border: 1px solid $color-separator;
+    background-color: $background-box;
+    color: $color-text;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    border-radius: $border-radius-small;
+    padding: 0.4rem 0.9rem;
+    font: inherit;
+    font-size: 0.85rem;
+    white-space: nowrap;
+
+    .user-chip__signout {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: $color-status-error;
+        color: $color-status-text;
+        font-weight: 600;
+        opacity: 0;
+        transform: translateY(100%);
+        transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+
+    &:hover .user-chip__signout,
+    &:focus-visible .user-chip__signout {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.incident-admin-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid $color-separator;
+
+    button {
+        cursor: pointer;
+        border: 1px solid $color-separator;
+        background-color: $background-base;
+        color: $color-text;
+        border-radius: $border-radius-small;
+        padding: 0.35rem 0.75rem;
+        font-size: 0.8rem;
+
+        &:hover {
+            background-color: $color-separator;
+        }
+
+        &.danger {
+            color: $color-status-error;
+            border-color: $color-status-error;
+        }
+    }
+}
+
+// Header status text on the right of an incident block (mirrors a probe's streak text).
+.incident-streak {
+    font-size: 0.85rem;
+    color: $color-text-muted;
+    white-space: nowrap;
+
+    &.error {
+        color: $color-status-error;
+    }
+    &.warn {
+        color: $color-status-warn;
+    }
+    &.ok {
+        color: $color-status-ok;
+    }
+    &.draft {
+        color: $color-status-offline;
+    }
+}
+
+// The admin incidents list: heading on the left, the "Declare Incident" action on the right.
+.incidents-list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.5rem;
+
+    h1 {
+        margin: 0;
+        font-weight: 200;
+    }
+}
+
+// Inline editing on a per-incident page: editable fields read as text until hovered/focused, and a
+// save control surfaces in the header (top-right) only once there are unsaved changes.
+.incident-edit {
+    // Title line and the save indicator should sit at the top of the header, not on its baseline.
+    .incident-block__header {
+        align-items: flex-start;
+    }
+
+    // Title with the id stacked beneath it, filling the header beside the save indicator.
+    .incident-edit__title-block {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.15rem;
+        flex: 1;
+        min-width: 0;
+    }
+
+    // The title behaves like its heading until you interact with it.
+    .incident-edit__title-input {
+        width: 100%;
+        box-sizing: border-box;
+        font: inherit;
+        font-size: 1.3rem;
+        font-weight: 400;
+        padding: 0;
+        color: $color-text;
+        background-color: transparent;
+        border: 0px solid transparent;
+        border-radius: $border-radius-small;
+
+        &:hover {
+            border-color: $color-separator;
+        }
+        &:focus {
+            outline: none;
+            border-color: $color-status-unknown;
+            background-color: $background-base;
+        }
+    }
+
+    // The save indicator: just the icon (no button chrome), shown only when there are changes.
+    .incident-edit__save-icon {
+        cursor: pointer;
+        border: none;
+        background: none;
+        padding: 0.1rem;
+        margin: 0.3rem 0 0 0.5rem;
+        color: $color-status-unknown;
+        display: inline-flex;
+        align-items: center;
+
+        .icon {
+            width: 1.35rem;
+            height: 1.35rem;
+        }
+
+        &:hover {
+            opacity: 0.8;
+        }
+        &.saving,
+        &:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
+    }
+
+    // Icon-only affordances inside a posted update's card (edit / done, toggling the message editor).
+    .incident-edit__icon-button {
+        cursor: pointer;
+        border: none;
+        background: none;
+        padding: 0;
+        color: $color-text-muted;
+        display: inline-flex;
+        align-items: center;
+
+        .icon {
+            width: 1rem;
+            height: 1rem;
+        }
+
+        &:hover {
+            color: $color-text;
+        }
+    }
+
+    // A posted update's card header: the fixed impact pill, with the edit/done icon at the far right.
+    .incident-timeline__card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        margin-bottom: 0.4rem;
+
+        .incident-status-pill {
+            margin-bottom: 0;
+        }
+    }
+
+    // Each new (unposted) update's controls: impact select + timestamp + remove, above its message.
+    .incident-timeline__edit-row {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        margin-bottom: 0.4rem;
+
+        select {
+            font: inherit;
+            padding: 0.3rem 0.5rem;
+            color: $color-text;
+            background-color: $background-base;
+            border: 1px solid $color-separator;
+            border-radius: $border-radius-small;
+        }
+    }
+
+    .incident-timeline__message-input {
+        width: 100%;
+        box-sizing: border-box;
+        resize: vertical;
+        font: inherit;
+        padding: 0.5rem;
+        color: $color-text;
+        background-color: $background-base;
+        border: 1px solid $color-separator;
+        border-radius: $border-radius-small;
+    }
+
+    .incident-edit__hint {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 1rem 0 0 0;
+        font-size: 0.8rem;
+        color: $color-text-muted;
+    }
+}

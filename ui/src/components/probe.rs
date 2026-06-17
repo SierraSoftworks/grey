@@ -1,5 +1,6 @@
-use super::History;
+use super::{ProbeHistory, StatusDot};
 use crate::formatters::{availability, compact_duration};
+use crate::styles::probe_class;
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
@@ -14,13 +15,7 @@ pub fn probe(props: &ProbeProps) -> Html {
 
     // Key the status off the currently observed state so a recovery is reflected
     // immediately, using the recent average only to grade how severe an ongoing failure is.
-    let probe_class = if props.probe.passing() {
-        "ok"
-    } else if recent_availability > 80.0 {
-        "warn"
-    } else {
-        "error"
-    };
+    let probe_class = probe_class(props.probe.passing(), recent_availability);
 
     // How long the probe has held its current state, e.g. "healthy for 5d" or "unhealthy for 17m".
     let streak_text = streak.since().map(|since| {
@@ -34,18 +29,18 @@ pub fn probe(props: &ProbeProps) -> Html {
 
     html! {
         <div class="probe">
-            <div class="probe-title">
-                <div class="probe-name-section">
-                    <div class={format!("status-dot {}", probe_class)}></div>
-                    <h3 class="probe-name">{&props.probe.name}</h3>
+            <div class="probe__title">
+                <div class="probe__name-section">
+                    <StatusDot class={probe_class} active=true />
+                    <h3 class="probe__name">{&props.probe.name}</h3>
 
                     if !props.probe.tags.is_empty() {
-                        <div class="probe-tags">
+                        <div class="probe__tags">
                             {for props.probe.tags.iter().filter(|(name, _)| *name != "service").map(|(name, value)| {
                                 html! {
-                                    <div class="probe-tag">
-                                        <span class="tag-name">{name}{":"}</span>
-                                        <strong class="tag-value">{value}</strong>
+                                    <div class="probe__tag">
+                                        <span class="probe__tag-name">{name}{":"}</span>
+                                        <strong class="probe__tag-value">{value}</strong>
                                     </div>
                                 }
                             })}
@@ -54,11 +49,11 @@ pub fn probe(props: &ProbeProps) -> Html {
                 </div>
                 
                 if let Some(streak_text) = streak_text {
-                    <div class="probe-streak">{streak_text}</div>
+                    <div class="probe__streak">{streak_text}</div>
                 }
-                <div class="availability">{availability(props.probe.availability())}</div>
+                <div class="probe__availability">{availability(props.probe.availability())}</div>
             </div>
-            <History samples={props.probe.history.clone()} streak={streak} />
+            <ProbeHistory samples={props.probe.history.clone()} streak={streak} />
         </div>
     }
 }
@@ -67,6 +62,21 @@ pub fn probe(props: &ProbeProps) -> Html {
 mod tests {
     use super::*;
     use grey_api::Streak;
+
+    #[derive(Properties, PartialEq)]
+    struct HarnessProps {
+        probe: grey_api::Probe,
+    }
+
+    /// Wraps `Probe` in a `StoreProvider`, which its `ProbeHistory` child requires for auth state.
+    #[function_component(Harness)]
+    fn harness(props: &HarnessProps) -> Html {
+        html! {
+            <crate::contexts::StoreProvider>
+                <Probe probe={props.probe.clone()} />
+            </crate::contexts::StoreProvider>
+        }
+    }
 
     async fn render(streak: Streak) -> String {
         let probe = grey_api::Probe {
@@ -77,7 +87,7 @@ mod tests {
             observations: Default::default(),
             streak,
         };
-        yew::ServerRenderer::<Probe>::with_props(move || ProbeProps { probe })
+        yew::ServerRenderer::<Harness>::with_props(move || HarnessProps { probe })
             .render()
             .await
     }
@@ -109,6 +119,6 @@ mod tests {
     async fn test_omits_streak_text_for_legacy_records() {
         // Records from older agents carry no streak observations at all.
         let html = render(Streak::default()).await;
-        assert!(!html.contains("probe-streak"), "expected no streak text, got: {html}");
+        assert!(!html.contains("probe__streak"), "expected no streak text, got: {html}");
     }
 }

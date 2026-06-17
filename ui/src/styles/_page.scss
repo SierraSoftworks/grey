@@ -1,0 +1,22 @@
+@use 'variables' as *;
+
+// The full incidents page / per-incident page: lightweight and centred, with no inner card or
+// `.content` chrome of its own.
+.page {
+    max-width: 980px;
+    width: 100%;
+    margin: 2rem auto;
+    padding: 1.5rem;
+    box-sizing: border-box;
+
+    > h1 {
+        font-weight: 200;
+        margin-top: 0;
+    }
+}
+
+// Muted "nothing to show" text.
+.empty-state {
+    color: $color-text-muted;
+    margin: 0;
+}

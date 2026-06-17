@@ -1,4 +1,5 @@
-use crate::contexts::use_peers;
+use crate::contexts::use_store;
+use crate::styles::cluster_class;
 use grey_api::{Peer, PeerHealth};
 use yew::prelude::*;
 
@@ -8,14 +9,14 @@ use yew::prelude::*;
 /// members are known (for example when talking to an older agent which doesn't report itself).
 #[function_component(ClusterStatus)]
 pub fn cluster_status() -> Html {
-    let peers_ctx = use_peers();
+    let store = use_store();
 
-    if peers_ctx.peers.is_empty() {
+    if store.peers().is_empty() {
         return html! {};
     }
 
     // Current node first, then healthiest, then by id for a stable order.
-    let mut members = peers_ctx.peers.clone();
+    let mut members = store.peers().to_vec();
     members.sort_by(|a, b| {
         b.current
             .cmp(&a.current)
@@ -28,26 +29,20 @@ pub fn cluster_status() -> Html {
         .filter(|p| p.health == PeerHealth::Online)
         .count();
 
-    let level_class = if members.iter().any(|p| p.health == PeerHealth::Offline) {
-        "error"
-    } else if members.iter().any(|p| p.health == PeerHealth::Suspect) {
-        "warning"
-    } else {
-        "good"
-    };
+    let level_class = cluster_class(&members);
 
     html! {
         // tabindex makes the chip focusable so the popover also opens via keyboard/touch
         // (the stylesheet shows it on :hover and :focus-within).
         <div class={format!("status-indicator cluster-status {level_class}")} tabindex="0">
-            <div class="status-dot"></div>
+            <div class="status-dot active"></div>
             <span class="status-text">{"Cluster"}</span>
 
             <div class="cluster-popover">
-                <div class="cluster-popover-content">
-                    <div class="cluster-popover-title">
+                <div class="cluster-popover__content">
+                    <div class="cluster-popover__title">
                         <span>{"Cluster Members"}</span>
-                        <span class="cluster-popover-summary">{format!("{online}/{} online", members.len())}</span>
+                        <span class="cluster-popover__summary">{format!("{online}/{} online", members.len())}</span>
                     </div>
                     {for members.iter().map(render_member)}
                 </div>
@@ -60,15 +55,15 @@ fn render_member(peer: &Peer) -> Html {
     let class = peer.health.as_str();
     html! {
         <div class="peer">
-            <div class="peer-identity">
-                <div class={format!("peer-status-dot {class}")}></div>
-                <span class="peer-id">{&peer.id}</span>
+            <div class="peer__identity">
+                <div class={format!("peer__status-dot {class}")}></div>
+                <span class="peer__id">{&peer.id}</span>
                 if peer.current {
-                    <span class="peer-current-tag">{"this node"}</span>
+                    <span class="peer__current-tag">{"this node"}</span>
                 }
             </div>
-            <span class={format!("peer-health {class}")}>{health_label(peer.health)}</span>
-            <span class="peer-last-seen">{relative_time(peer.last_seen)}</span>
+            <span class={format!("peer__health {class}")}>{health_label(peer.health)}</span>
+            <span class="peer__last-seen">{relative_time(peer.last_seen)}</span>
         </div>
     }
 }
@@ -107,20 +102,20 @@ fn relative_time(when: chrono::DateTime<chrono::Utc>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contexts::PeersProvider;
+    use crate::contexts::StoreProvider;
 
     #[derive(Properties, PartialEq)]
     struct HarnessProps {
         peers: Vec<Peer>,
     }
 
-    /// Wraps the component in the peers context it expects, mirroring the real app tree.
+    /// Wraps the component in the store it expects, seeded with the peers under test.
     #[function_component(Harness)]
     fn harness(props: &HarnessProps) -> Html {
         html! {
-            <PeersProvider peers={props.peers.clone()}>
+            <StoreProvider peers={props.peers.clone()}>
                 <ClusterStatus />
-            </PeersProvider>
+            </StoreProvider>
         }
     }
 

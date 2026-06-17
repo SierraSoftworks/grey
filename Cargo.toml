@@ -35,6 +35,9 @@ http = "1.4.2"
 humantime = "2.3.0"
 humantime-serde = "1.1.1"
 include_dir = "0.7"
+# Pure-Rust crypto backend (RSA + ECDSA) so admin token validation cross-compiles cleanly across the
+# CI matrix without a C toolchain/NASM (unlike the aws-lc-rs backend).
+jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto", "rsa", "p256", "p384", "use_pem"] }
 lazy_static = "1.5"
 openssl-sys = { version = "0.9", features = ["vendored"] }
 radix_fmt = "1.0.0"
@@ -66,6 +69,8 @@ tracing-batteries = { git = "https://github.com/sierrasoftworks/tracing-batterie
 ] }
 trust-dns-resolver = { version = "0.23", features = ["tokio-runtime"] }
 yew = { version = "0.23", features = ["ssr"] }
+yew-router = { version = "0.20" }
+pulldown-cmark = { version = "0.13" }
 
 gloo = { version = "0.12" }
 gloo-console = { version = "0.4" }

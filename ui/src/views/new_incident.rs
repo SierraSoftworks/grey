@@ -1,0 +1,140 @@
+use yew::prelude::*;
+
+use crate::contexts::use_store;
+
+/// The `/incidents/new` page (admin only): a title plus the incident's opening update (impact +
+/// message). Saving creates the incident and navigates to its page.
+#[function_component(NewIncident)]
+pub fn new_incident() -> Html {
+    let store = use_store();
+
+    if !store.is_authenticated() {
+        return html! {
+            <div class="page">
+                <h1>{"New incident"}</h1>
+                <p class="empty-state">{"Sign in as an administrator to create an incident."}</p>
+            </div>
+        };
+    }
+
+    #[cfg(feature = "wasm")]
+    if let Some(token) = store.token() {
+        return html! { <NewIncidentForm token={token} /> };
+    }
+
+    html! {}
+}
+
+#[cfg(feature = "wasm")]
+#[derive(Properties, PartialEq)]
+struct NewIncidentFormProps {
+    token: String,
+}
+
+#[cfg(feature = "wasm")]
+#[function_component(NewIncidentForm)]
+fn new_incident_form(props: &NewIncidentFormProps) -> Html {
+    use crate::routes::Route;
+    use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
+    use yew_router::prelude::*;
+
+    let title = use_state(String::new);
+    let impact = use_state(|| "offline".to_string());
+    let message = use_state(String::new);
+    let saving = use_state(|| false);
+    let navigator = use_navigator();
+    // The shared store, whose `create_incident` performs the API call and reflects the new incident
+    // in the in-memory list at once.
+    let store = use_store();
+
+    let on_title = {
+        let title = title.clone();
+        Callback::from(move |e: InputEvent| {
+            let el: HtmlInputElement = e.target_unchecked_into();
+            title.set(el.value());
+        })
+    };
+    let on_impact = {
+        let impact = impact.clone();
+        Callback::from(move |e: Event| {
+            let el: HtmlSelectElement = e.target_unchecked_into();
+            impact.set(el.value());
+        })
+    };
+    let on_message = {
+        let message = message.clone();
+        Callback::from(move |e: InputEvent| {
+            let el: HtmlTextAreaElement = e.target_unchecked_into();
+            message.set(el.value());
+        })
+    };
+
+    let onsubmit = {
+        let token = props.token.clone();
+        let (title, impact, message) = (title.clone(), impact.clone(), message.clone());
+        let saving = saving.clone();
+        let navigator = navigator.clone();
+        let store = store.clone();
+        Callback::from(move |e: SubmitEvent| {
+            e.prevent_default();
+            let title_value = (*title).trim().to_string();
+            let message_value = (*message).trim().to_string();
+            if title_value.is_empty() || message_value.is_empty() {
+                store.set_error(grey_api::ApiError::new(
+                    "A title and an initial update message are required.",
+                ));
+                return;
+            }
+            let input = grey_api::CreateIncident {
+                title: title_value,
+                impact: impact.parse().unwrap_or_default(),
+                message: message_value,
+            };
+            let _ = &token;
+            let saving = saving.clone();
+            let navigator = navigator.clone();
+            let store = store.clone();
+            saving.set(true);
+            wasm_bindgen_futures::spawn_local(async move {
+                match store.create_incident(input).await {
+                    Ok(created) => {
+                        if let Some(nav) = navigator {
+                            nav.push(&Route::Incident { id: created.id.to_string() });
+                        }
+                    }
+                    Err(e) => {
+                        saving.set(false);
+                        store.set_error(e);
+                    }
+                }
+            });
+        })
+    };
+
+    html! {
+        <div class="page">
+            <h1>{"New incident"}</h1>
+            <form class="incident-form" onsubmit={onsubmit}>
+                <label>{"Title"}
+                    <input type="text" value={(*title).clone()} oninput={on_title} />
+                </label>
+                <label>{"Initial impact"}
+                    <select onchange={on_impact}>
+                        <option value="offline" selected={*impact == "offline"}>{"Offline"}</option>
+                        <option value="degraded" selected={*impact == "degraded"}>{"Degraded"}</option>
+                        <option value="none" selected={*impact == "none"}>{"Operational (no impact)"}</option>
+                        <option value="hidden" selected={*impact == "hidden"}>{"Hidden (draft)"}</option>
+                    </select>
+                </label>
+                <label>{"Initial update"}
+                    <textarea rows="4" value={(*message).clone()} oninput={on_message} placeholder="Enter initial update in markdown form..." />
+                </label>
+                <div class="incident-form__actions">
+                    <button type="submit" class="primary-button" disabled={*saving}>
+                        { if *saving { "Creating…" } else { "Create incident" } }
+                    </button>
+                </div>
+            </form>
+        </div>
+    }
+}
