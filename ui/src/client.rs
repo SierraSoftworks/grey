@@ -407,10 +407,22 @@ impl App {
     }
 
     async fn fetch_peers() -> Result<Vec<grey_api::Peer>, Box<dyn std::error::Error>> {
-        let response = gloo::net::http::Request::get("/api/v1/cluster/peers")
+        // Cluster topology is operator-only, so it is fetched only when signed in and through the
+        // admin endpoint (with a bearer token). Unauthenticated viewers simply see no cluster panel.
+        let Some(token) = crate::auth::stored_token() else {
+            return Ok(Vec::new());
+        };
+
+        let response = gloo::net::http::Request::get("/api/v1/admin/cluster/peers")
+            .header("Authorization", &format!("Bearer {token}"))
             .send()
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
+        // A revoked/expired session shouldn't spam the error channel; treat it as "no peers".
+        if !response.ok() {
+            return Ok(Vec::new());
+        }
 
         let peers: Vec<grey_api::Peer> = response
             .json()

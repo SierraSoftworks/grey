@@ -82,7 +82,6 @@ pub fn create_app() -> App<
         .route("/api/v1/probes", web::get().to(api::get_probes))
         .route("/api/v1/notices", web::get().to(api::get_notices))
         .route("/api/v1/incidents", web::get().to(api::get_incidents))
-        .route("/api/v1/cluster/peers", web::get().to(api::get_peers))
         // Public login endpoints: the SPA fetches the provider's authorization endpoint, then hands
         // the resulting authorization code here for the agent to exchange with its client secret.
         .route("/api/v1/auth/metadata", web::get().to(auth::metadata))
@@ -92,6 +91,9 @@ pub fn create_app() -> App<
             web::scope("/api/v1/admin")
                 .wrap(from_fn(auth::require_admin))
                 .route("/me", web::get().to(admin::me))
+                // Cluster topology is operator-only: it exposes peer addresses and health, so it
+                // lives behind the admin gate rather than being surfaced to public viewers.
+                .route("/cluster/peers", web::get().to(api::get_peers))
                 .route("/incidents", web::get().to(admin::list_incidents))
                 .route("/incidents", web::post().to(admin::create_incident))
                 .route("/incidents/{id}", web::get().to(admin::get_incident))
@@ -147,6 +149,25 @@ mod tests {
         let app = test::init_service(create_app().app_data(web::Data::new(state))).await;
 
         let req = test::TestRequest::get().uri("/api/v1/admin/incidents").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::FORBIDDEN);
+    }
+
+    /// Cluster topology lives behind the admin gate: the old public route is gone (404) and the
+    /// admin route is closed (403) when no `admin` config is present.
+    #[actix_web::test]
+    async fn peers_endpoint_is_admin_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::test(dir.path().to_path_buf()).await;
+        let app = test::init_service(create_app().app_data(web::Data::new(state))).await;
+
+        // The former public endpoint no longer exists.
+        let req = test::TestRequest::get().uri("/api/v1/cluster/peers").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::NOT_FOUND);
+
+        // The peers endpoint now sits under the (unconfigured, hence closed) admin scope.
+        let req = test::TestRequest::get().uri("/api/v1/admin/cluster/peers").to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), actix_web::http::StatusCode::FORBIDDEN);
     }

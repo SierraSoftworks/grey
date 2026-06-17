@@ -30,7 +30,7 @@ impl PeerHealth {
     }
 }
 
-/// Information about cluster peers as returned by the /api/v1/cluster/peers endpoint
+/// Information about cluster peers as returned by the admin `/api/v1/admin/cluster/peers` endpoint.
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct Peer {
     pub id: String,

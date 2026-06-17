@@ -12,9 +12,6 @@ pub async fn index(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpRe
     let mut probes: Vec<grey_api::Probe> = probe_histories.into_values().collect();
     probes.sort_by_key(|p| p.name.clone());
 
-    let mut peers = data.state.get_peers().await.unwrap_or_default();
-    peers.sort_by(|a, b| a.id.cmp(&b.id));
-
     // Only the publicly visible incidents are server-rendered for unauthenticated viewers.
     let incidents = data.state.list_incidents(false).await.unwrap_or_default();
 
@@ -35,7 +32,9 @@ pub async fn index(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpRe
         config: (&config.ui).into(),
         notices: config.ui.notices.clone(),
         probes,
-        peers,
+        // Cluster topology is operator-only and fetched client-side once signed in, so it is never
+        // embedded in the server-rendered page exposed to unauthenticated viewers.
+        peers: Vec::new(),
         incidents,
         url: req.uri().path().to_string(),
     };
