@@ -32,7 +32,11 @@ pub fn incidents_list() -> Html {
 
 fn incident_list_body(incidents: &[Incident]) -> Html {
     if incidents.is_empty() {
-        return html! { <p class="empty-state">{"No incidents have been reported."}</p> };
+        return html! {
+            <crate::components::EmptyState title="No incidents reported">
+                {"Everything has been operating normally. Incidents will appear here if a problem is reported."}
+            </crate::components::EmptyState>
+        };
     }
     html! {
         { for incidents.iter().map(|incident| html! {
@@ -55,10 +59,14 @@ fn admin_incidents_list(props: &AdminIncidentsListProps) -> Html {
     // create/edit/delete), then fetch the full admin list in the background to include hidden drafts.
     let store = use_store();
     let incidents = use_state(|| store.incidents().to_vec());
+    // True until the admin fetch resolves; lets us defer the empty state until hidden drafts (which
+    // aren't in the SSR seed) have had a chance to load.
+    let loading = use_state(|| store.incidents().is_empty());
 
     {
         let client = store.client().clone();
         let incidents = incidents.clone();
+        let loading = loading.clone();
         let store = store.clone();
         use_effect_with(props.token.clone(), move |_| {
             wasm_bindgen_futures::spawn_local(async move {
@@ -66,6 +74,7 @@ fn admin_incidents_list(props: &AdminIncidentsListProps) -> Html {
                     Ok(list) => incidents.set(list),
                     Err(e) => store.set_error(e),
                 }
+                loading.set(false);
             });
             || ()
         });
@@ -80,7 +89,14 @@ fn admin_incidents_list(props: &AdminIncidentsListProps) -> Html {
                     <span>{"Declare Incident"}</span>
                 </Link<Route>>
             </div>
-            { incident_list_body(&incidents) }
+            if *loading && incidents.is_empty() {
+                // Seed was empty and the admin fetch (which adds hidden drafts) is still in flight;
+                // wait for it before deciding between the list and the empty state, so a drafts-only
+                // system doesn't briefly flash "no incidents".
+                <></>
+            } else {
+                { incident_list_body(&incidents) }
+            }
         </div>
     }
 }

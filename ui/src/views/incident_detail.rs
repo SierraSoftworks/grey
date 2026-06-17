@@ -33,10 +33,9 @@ pub fn incident_detail(props: &IncidentDetailProps) -> Html {
             if let Some(incident) = incident {
                 <IncidentBlock incident={incident} />
             } else {
-                <h1>{"Incident not found"}</h1>
-                <p class="empty-state">
+                <crate::components::EmptyState title="Incident not found">
                     {"This incident does not exist or is not publicly visible."}
-                </p>
+                </crate::components::EmptyState>
             }
         </div>
     }
@@ -100,7 +99,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
     let Some(current) = (*loaded).clone() else {
         return html! {
             <div class="page">
-                <p class="empty-state">{"Loading\u{2026}"}</p>
+                <crate::components::IncidentBlockSkeleton />
             </div>
         };
     };

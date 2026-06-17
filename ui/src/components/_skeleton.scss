@@ -1,0 +1,93 @@
+@use '../styles/variables' as *;
+
+// Skeleton loading placeholders (Element-Plus style): muted blocks that shimmer left-to-right while
+// content loads, laid out in the silhouette of the real data so nothing reflows when it arrives.
+
+// The travelling highlight. Defined once and shared by every shimmering element via `background`.
+@keyframes skeleton-shimmer {
+    0% {
+        background-position: -200% 0;
+    }
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+@mixin skeleton-shimmer {
+    background-color: $color-separator;
+    background-image: linear-gradient(
+        90deg,
+        rgba(0, 0, 0, 0) 0%,
+        rgba(0, 0, 0, 0.06) 50%,
+        rgba(0, 0, 0, 0) 100%
+    );
+    background-size: 200% 100%;
+    background-repeat: no-repeat;
+    animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+// A single placeholder bar.
+.skeleton__bar {
+    @include skeleton-shimmer;
+    display: block;
+    width: 100%;
+    height: 0.8rem;
+    margin: 0.35rem 0;
+    border-radius: $border-radius-small;
+}
+
+// The whole placeholder block fades gently so it reads as "pending" rather than real content.
+.incident-block.skeleton {
+    opacity: 0.85;
+
+    .skeleton__title-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        width: 100%;
+    }
+
+    // A taller bar for the incident title.
+    .skeleton__title {
+        height: 1.1rem;
+    }
+
+    .skeleton__timestamp {
+        height: 0.8rem;
+    }
+
+    // Rounded pill stand-in for the status streak.
+    .skeleton__pill {
+        height: 1.1rem;
+        border-radius: 999px;
+        flex: none;
+    }
+
+    .skeleton__time {
+        height: 0.7rem;
+        margin: 0 0 0.35rem 0;
+    }
+
+    // Neutral, un-coloured rail markers (no impact is known yet).
+    .skeleton__circle {
+        @include skeleton-shimmer;
+        background-color: $color-status-offline;
+    }
+
+    .skeleton__tail {
+        background-color: $color-separator;
+    }
+
+    .skeleton__card {
+        background-color: $background-box;
+        border-radius: $border-radius-small;
+    }
+}
+
+// Respect users who prefer reduced motion: keep the placeholder, drop the animation.
+@media (prefers-reduced-motion: reduce) {
+    .skeleton__bar,
+    .incident-block.skeleton .skeleton__circle {
+        animation: none;
+    }
+}
