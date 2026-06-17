@@ -1,3 +1,4 @@
+mod error;
 mod identifier;
 mod incident;
 mod probe;
@@ -8,6 +9,7 @@ mod ui;
 mod peer;
 mod observation;
 
+pub use error::*;
 pub use identifier::*;
 pub use incident::*;
 pub use observation::*;

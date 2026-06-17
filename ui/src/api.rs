@@ -58,10 +58,10 @@ mod browser {
             412 | 428 => ApiError::Conflict,
             status => {
                 let message = response
-                    .json::<serde_json::Value>()
+                    .json::<grey_api::ApiError>()
                     .await
                     .ok()
-                    .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
+                    .map(|error| error.message)
                     .unwrap_or_else(|| format!("Request failed (HTTP {status})."));
                 ApiError::Server(message)
             }

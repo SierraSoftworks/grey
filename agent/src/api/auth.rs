@@ -13,6 +13,7 @@ use actix_web::{
     web,
 };
 use filt_rs::{FilterValue, Filterable};
+use grey_api::ApiError;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, jwk::JwkSet};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -274,8 +275,8 @@ fn json_to_filter_value(value: &Value) -> FilterValue<'_> {
     }
 }
 
-fn json_error(status: StatusCode, message: &str) -> HttpResponse {
-    HttpResponse::build(status).json(serde_json::json!({ "error": message }))
+fn json_error(status: StatusCode, error: ApiError) -> HttpResponse {
+    HttpResponse::build(status).json(error)
 }
 
 /// Middleware guarding the admin API: it requires a valid OIDC bearer token whose claims satisfy the
@@ -288,7 +289,8 @@ pub async fn require_admin(
     let Some(data) = req.app_data::<web::Data<AppState>>().cloned() else {
         return Ok(req.into_response(json_error(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "Service context unavailable.",
+            ApiError::new("The service context was unavailable while handling your request.")
+                .with_advice("This is a server-side problem; please try again shortly."),
         )));
     };
 
@@ -296,7 +298,7 @@ pub async fn require_admin(
     let Some(admin) = config.ui.admin.as_ref() else {
         return Ok(req.into_response(json_error(
             StatusCode::FORBIDDEN,
-            "Administrative access is not configured.",
+            ApiError::new("Administrative access is not configured on this server."),
         )));
     };
 
@@ -314,7 +316,8 @@ pub async fn require_admin(
     let Some(token) = token else {
         return Ok(req.into_response(json_error(
             StatusCode::UNAUTHORIZED,
-            "Authentication is required to access this resource.",
+            ApiError::new("Authentication is required to access this resource.")
+                .with_advice("Sign in and try again."),
         )));
     };
 
@@ -324,7 +327,8 @@ pub async fn require_admin(
             info!("Rejected an admin request with an invalid bearer token: {e}");
             return Ok(req.into_response(json_error(
                 StatusCode::UNAUTHORIZED,
-                "Your session is invalid or has expired. Please sign in again.",
+                ApiError::new("Your session is invalid or has expired.")
+                    .with_advice("Sign in again to continue."),
             )));
         }
     };
@@ -342,7 +346,8 @@ pub async fn require_admin(
         // Authentication already succeeded, so a denial here is a permanent authorization failure.
         return Ok(req.into_response(json_error(
             StatusCode::FORBIDDEN,
-            "Your account is not permitted to perform this action.",
+            ApiError::new("Your account is not permitted to perform this action.")
+                .with_advice("Contact an administrator if you believe you should have access."),
         )));
     }
 
@@ -357,7 +362,7 @@ pub async fn metadata(data: web::Data<AppState>) -> actix_web::Result<HttpRespon
     let Some(admin) = config.ui.admin.as_ref() else {
         return Ok(json_error(
             StatusCode::NOT_FOUND,
-            "Administrative access is not configured.",
+            ApiError::new("Administrative access is not configured on this server."),
         ));
     };
 
@@ -369,7 +374,8 @@ pub async fn metadata(data: web::Data<AppState>) -> actix_web::Result<HttpRespon
             warn!("Failed to resolve the OIDC authorization endpoint: {e}");
             Ok(json_error(
                 StatusCode::BAD_GATEWAY,
-                "We could not reach the configured identity provider.",
+                ApiError::new("We could not reach the configured identity provider.")
+                    .with_advice("Please try again in a few moments."),
             ))
         }
     }
@@ -391,7 +397,7 @@ pub async fn exchange_token(
     let Some(admin) = config.ui.admin.as_ref() else {
         return Ok(json_error(
             StatusCode::NOT_FOUND,
-            "Administrative access is not configured.",
+            ApiError::new("Administrative access is not configured on this server."),
         ));
     };
 
@@ -406,7 +412,8 @@ pub async fn exchange_token(
             warn!("OIDC code exchange failed: {e}");
             Ok(json_error(
                 StatusCode::BAD_GATEWAY,
-                "The sign-in could not be completed. Please try again.",
+                ApiError::new("The sign-in could not be completed.")
+                    .with_advice("Please try signing in again."),
             ))
         }
     }

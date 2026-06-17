@@ -11,6 +11,7 @@ mod admin;
 mod api;
 mod auth;
 mod page;
+mod trace;
 
 // Embed the dist directory at compile time
 static ASSETS_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../ui/dist");
@@ -71,6 +72,8 @@ pub fn create_app() -> App<
     >,
 > {
     App::new()
+        // Surface a `traceparent` on every response so clients can correlate problems with traces.
+        .wrap(from_fn(trace::trace_requests))
         .route("/", web::get().to(page::index))
         // Client-routed pages are server-rendered by the same handler; it reads the request path to
         // seed the router. New top-level SPA routes need a matching entry here.
@@ -120,6 +123,20 @@ mod tests {
         let req = test::TestRequest::get().uri("/incidents").to_request();
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success(), "GET /incidents should be server-rendered");
+    }
+
+    /// The tracing middleware is wired in front of every route. It echoes a `traceparent` when a
+    /// telemetry pipeline is initialised; here we only assert it doesn't interfere with responses
+    /// (the test process has no OpenTelemetry runtime, so the global propagator is a no-op).
+    #[actix_web::test]
+    async fn tracing_middleware_does_not_break_responses() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::test(dir.path().to_path_buf()).await;
+        let app = test::init_service(create_app().app_data(web::Data::new(state))).await;
+
+        let req = test::TestRequest::get().uri("/api/v1/incidents").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success(), "the tracing middleware must pass requests through");
     }
 
     /// With no `admin` configuration, the admin scope is closed entirely (403, not a route 404).

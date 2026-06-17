@@ -1,6 +1,6 @@
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, Result, http::header, web};
 use chrono::Utc;
-use grey_api::{AdminUser, CreateIncident, Identifier, IncidentEdit, IncidentUpdate};
+use grey_api::{AdminUser, ApiError, CreateIncident, Identifier, IncidentEdit, IncidentUpdate};
 use serde_json::{Map, Value};
 use std::str::FromStr;
 
@@ -9,7 +9,12 @@ use super::auth::Authenticated;
 use crate::state::{CasOutcome, IncidentStore};
 
 fn not_found() -> HttpResponse {
-    HttpResponse::NotFound().json(serde_json::json!({ "error": "Incident not found." }))
+    HttpResponse::NotFound().json(
+        ApiError::new("The incident you requested could not be found.").with_advice_lines([
+            "Check that the incident ID in the address is correct.",
+            "It may have been deleted since you last loaded the page.",
+        ]),
+    )
 }
 
 /// The ETag for an incident is simply its version, quoted per RFC 7232.
@@ -102,8 +107,10 @@ pub async fn replace_incident(
         return Ok(not_found());
     };
     let Some(expected_version) = if_match_version(&req) else {
-        return Ok(HttpResponse::PreconditionRequired()
-            .json(serde_json::json!({ "error": "An If-Match version header is required." })));
+        return Ok(HttpResponse::PreconditionRequired().json(
+            ApiError::new("An If-Match version header is required to edit this incident.")
+                .with_advice("Reload the incident to obtain its current version, then retry."),
+        ));
     };
 
     match data.state.replace_incident(id, expected_version, body.into_inner()).await? {
@@ -112,10 +119,10 @@ pub async fn replace_incident(
             .json(incident)),
         CasOutcome::VersionMismatch(current) => Ok(HttpResponse::PreconditionFailed()
             .insert_header((header::ETAG, etag(current)))
-            .json(serde_json::json!({
-                "error": "The incident was modified by someone else. Reload and try again.",
-                "version": current,
-            }))),
+            .json(
+                ApiError::new("The incident was modified by someone else.")
+                    .with_advice("Reload the incident to see the latest version, then try again."),
+            )),
         CasOutcome::NotFound => Ok(not_found()),
     }
 }
