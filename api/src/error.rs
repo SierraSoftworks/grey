@@ -4,9 +4,15 @@ use serde::{Deserialize, Serialize};
 ///
 /// Every failure the API reports carries a human-readable [`message`](Self::message) describing what
 /// happened, plus a list of [`advice`](Self::advice) entries the caller can act on to resolve the
-/// problem themselves.
+/// problem themselves. The [`code`](Self::code) mirrors the HTTP status so clients can classify the
+/// failure without inspecting the response object separately.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApiError {
+    /// The HTTP status code associated with this error (e.g. `404`). Lets clients branch on the
+    /// failure class (auth, conflict, not-found, server) without re-reading the transport status.
+    #[serde(default)]
+    pub code: u16,
+
     /// A short, human-readable description of what went wrong (e.g. "The incident you requested
     /// could not be found.").
     pub message: String,
@@ -18,12 +24,19 @@ pub struct ApiError {
 }
 
 impl ApiError {
-    /// Creates an error with the given message and no advice.
+    /// Creates an error with the given message and no advice or status code.
     pub fn new(message: impl Into<String>) -> Self {
         Self {
+            code: 0,
             message: message.into(),
             advice: Vec::new(),
         }
+    }
+
+    /// Sets the HTTP status code, returning the error for chaining.
+    pub fn with_code(mut self, code: u16) -> Self {
+        self.code = code;
+        self
     }
 
     /// Appends a single piece of advice, returning the error for chaining.
@@ -59,7 +72,16 @@ mod tests {
     fn advice_is_omitted_when_empty() {
         let error = ApiError::new("Something went wrong.");
         let json = serde_json::to_value(&error).unwrap();
-        assert_eq!(json, serde_json::json!({ "message": "Something went wrong." }));
+        assert_eq!(json, serde_json::json!({ "code": 0, "message": "Something went wrong." }));
+    }
+
+    #[test]
+    fn code_round_trips() {
+        let error = ApiError::new("The incident you requested could not be found.").with_code(404);
+        let json = serde_json::to_string(&error).unwrap();
+        let parsed: ApiError = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, error);
+        assert_eq!(parsed.code, 404);
     }
 
     #[test]

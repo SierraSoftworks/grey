@@ -10,10 +10,12 @@ use crate::state::{CasOutcome, IncidentStore};
 
 fn not_found() -> HttpResponse {
     HttpResponse::NotFound().json(
-        ApiError::new("The incident you requested could not be found.").with_advice_lines([
-            "Check that the incident ID in the address is correct.",
-            "It may have been deleted since you last loaded the page.",
-        ]),
+        ApiError::new("The incident you requested could not be found.")
+            .with_code(404)
+            .with_advice_lines([
+                "Check that the incident ID in the address is correct.",
+                "It may have been deleted since you last loaded the page.",
+            ]),
     )
 }
 
@@ -109,6 +111,7 @@ pub async fn replace_incident(
     let Some(expected_version) = if_match_version(&req) else {
         return Ok(HttpResponse::PreconditionRequired().json(
             ApiError::new("An If-Match version header is required to edit this incident.")
+                .with_code(428)
                 .with_advice("Reload the incident to obtain its current version, then retry."),
         ));
     };
@@ -121,6 +124,7 @@ pub async fn replace_incident(
             .insert_header((header::ETAG, etag(current)))
             .json(
                 ApiError::new("The incident was modified by someone else.")
+                    .with_code(412)
                     .with_advice("Reload the incident to see the latest version, then try again."),
             )),
         CasOutcome::NotFound => Ok(not_found()),

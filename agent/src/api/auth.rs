@@ -139,30 +139,61 @@ impl OidcVerifier {
         Ok(self.discovery(&oidc.endpoint).await?.authorization_endpoint)
     }
 
-    /// Exchanges an authorization code for an ID token using the confidential client credentials.
-    /// The browser sends only the code; the secret stays here.
+    /// Exchanges an authorization code for tokens using the confidential client credentials. The
+    /// browser sends only the code; the secret stays here. Returns the `id_token` (used as the admin
+    /// bearer) alongside the provider's `refresh_token`, if one was issued.
     pub async fn exchange_code(
         &self,
         oidc: &OidcConfig,
         code: &str,
         redirect_uri: &str,
-    ) -> Result<String, Box<dyn Error>> {
+    ) -> Result<TokenSet, Box<dyn Error>> {
         let discovery = self.discovery(&oidc.endpoint).await?;
-        let body = [
+        let body = form_body(&[
             ("grant_type", "authorization_code"),
             ("code", code),
             ("redirect_uri", redirect_uri),
             ("client_id", oidc.client_id.as_str()),
             ("client_secret", oidc.client_secret.as_str()),
-        ]
-        .iter()
-        .map(|(k, v)| format!("{k}={}", form_encode(v)))
-        .collect::<Vec<_>>()
-        .join("&");
+        ]);
 
+        self.token_request(&discovery.token_endpoint, body).await
+    }
+
+    /// Renews a session from a previously issued refresh token, returning a fresh `id_token` (and a
+    /// rotated refresh token when the provider supplies one). Lets the SPA extend a session without
+    /// a new interactive login.
+    pub async fn refresh_tokens(
+        &self,
+        oidc: &OidcConfig,
+        refresh_token: &str,
+    ) -> Result<TokenSet, Box<dyn Error>> {
+        let discovery = self.discovery(&oidc.endpoint).await?;
+        let body = form_body(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+            ("client_id", oidc.client_id.as_str()),
+            ("client_secret", oidc.client_secret.as_str()),
+        ]);
+
+        let mut tokens = self.token_request(&discovery.token_endpoint, body).await?;
+        // Providers that don't rotate refresh tokens omit it from the response; keep using the one
+        // the caller already holds so the session can continue to be renewed.
+        if tokens.refresh_token.is_none() {
+            tokens.refresh_token = Some(refresh_token.to_string());
+        }
+        Ok(tokens)
+    }
+
+    /// POSTs a form-encoded grant to the provider's token endpoint and parses the issued tokens.
+    async fn token_request(
+        &self,
+        token_endpoint: &str,
+        body: String,
+    ) -> Result<TokenSet, Box<dyn Error>> {
         let tokens: Value = self
             .http
-            .post(&discovery.token_endpoint)
+            .post(token_endpoint)
             .header(
                 reqwest::header::CONTENT_TYPE,
                 "application/x-www-form-urlencoded",
@@ -174,12 +205,38 @@ impl OidcVerifier {
             .json()
             .await?;
 
-        tokens
+        let id_token = tokens
             .get("id_token")
             .and_then(Value::as_str)
             .map(str::to_string)
-            .ok_or_else(|| "the token response did not include an id_token".into())
+            .ok_or("the token response did not include an id_token")?;
+        let refresh_token = tokens
+            .get("refresh_token")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        Ok(TokenSet {
+            id_token,
+            refresh_token,
+        })
     }
+}
+
+/// Tokens issued by the OIDC token endpoint. `id_token` is the bearer the agent validates;
+/// `refresh_token` (when present) lets the SPA renew the session without re-authenticating.
+#[derive(Clone)]
+pub struct TokenSet {
+    pub id_token: String,
+    pub refresh_token: Option<String>,
+}
+
+/// Builds an `application/x-www-form-urlencoded` body from key/value pairs.
+fn form_body(fields: &[(&str, &str)]) -> String {
+    fields
+        .iter()
+        .map(|(k, v)| format!("{k}={}", form_encode(v)))
+        .collect::<Vec<_>>()
+        .join("&")
 }
 
 /// RFC 3986 percent-encoding for an `application/x-www-form-urlencoded` field value.
@@ -276,7 +333,9 @@ fn json_to_filter_value(value: &Value) -> FilterValue<'_> {
 }
 
 fn json_error(status: StatusCode, error: ApiError) -> HttpResponse {
-    HttpResponse::build(status).json(error)
+    // Stamp the HTTP status onto the body so clients can classify the failure from the error object
+    // alone (the SPA branches on this code without re-reading the transport status).
+    HttpResponse::build(status).json(error.with_code(status.as_u16()))
 }
 
 /// Middleware guarding the admin API: it requires a valid OIDC bearer token whose claims satisfy the
@@ -387,8 +446,9 @@ pub struct TokenExchangeRequest {
     pub redirect_uri: String,
 }
 
-/// `POST /api/v1/auth/token` — exchanges an authorization code for an ID token using the
-/// server-held client secret, returning the token to the SPA. Public (it is the login step).
+/// `POST /api/v1/auth/token` — exchanges an authorization code for tokens using the server-held
+/// client secret, returning the `id_token` (and refresh token, if issued) to the SPA. Public (it is
+/// the login step).
 pub async fn exchange_token(
     data: web::Data<AppState>,
     body: web::Json<TokenExchangeRequest>,
@@ -407,7 +467,7 @@ pub async fn exchange_token(
         .exchange_code(&admin.oidc, &body.code, &body.redirect_uri)
         .await
     {
-        Ok(token) => Ok(HttpResponse::Ok().json(serde_json::json!({ "token": token }))),
+        Ok(tokens) => Ok(HttpResponse::Ok().json(token_response(&tokens))),
         Err(e) => {
             warn!("OIDC code exchange failed: {e}");
             Ok(json_error(
@@ -417,6 +477,51 @@ pub async fn exchange_token(
             ))
         }
     }
+}
+
+#[derive(Deserialize)]
+pub struct TokenRefreshRequest {
+    pub refresh_token: String,
+}
+
+/// `POST /api/v1/auth/refresh` — renews a session from a refresh token, returning a fresh `id_token`
+/// (and rotated refresh token, when the provider issues one). Public (a refresh token is the only
+/// credential required, and the agent re-validates the resulting id_token on subsequent requests).
+pub async fn refresh_token(
+    data: web::Data<AppState>,
+    body: web::Json<TokenRefreshRequest>,
+) -> actix_web::Result<HttpResponse> {
+    let config = data.state.get_config();
+    let Some(admin) = config.ui.admin.as_ref() else {
+        return Ok(json_error(
+            StatusCode::NOT_FOUND,
+            ApiError::new("Administrative access is not configured on this server."),
+        ));
+    };
+
+    let body = body.into_inner();
+    match data.oidc.refresh_tokens(&admin.oidc, &body.refresh_token).await {
+        Ok(tokens) => Ok(HttpResponse::Ok().json(token_response(&tokens))),
+        Err(e) => {
+            warn!("OIDC token refresh failed: {e}");
+            Ok(json_error(
+                StatusCode::UNAUTHORIZED,
+                ApiError::new("Your session could not be renewed.")
+                    .with_advice("Please sign in again."),
+            ))
+        }
+    }
+}
+
+/// The JSON body returned for a successful token exchange or refresh. `refresh_token` is omitted when
+/// the provider did not issue one.
+fn token_response(tokens: &TokenSet) -> Value {
+    let mut body = serde_json::Map::new();
+    body.insert("token".into(), Value::String(tokens.id_token.clone()));
+    if let Some(refresh) = &tokens.refresh_token {
+        body.insert("refresh_token".into(), Value::String(refresh.clone()));
+    }
+    Value::Object(body)
 }
 
 #[cfg(test)]

@@ -8,9 +8,13 @@ use crate::state::State;
 use auth::OidcVerifier;
 
 mod admin;
-mod api;
 mod auth;
+mod cluster;
+mod config;
+mod incidents;
+mod notices;
 mod page;
+mod probes;
 mod trace;
 
 // Embed the dist directory at compile time
@@ -79,13 +83,14 @@ pub fn create_app() -> App<
         // seed the router. New top-level SPA routes need a matching entry here.
         .route("/incidents", web::get().to(page::index))
         .route("/incidents/{id}", web::get().to(page::index))
-        .route("/api/v1/probes", web::get().to(api::get_probes))
-        .route("/api/v1/notices", web::get().to(api::get_notices))
-        .route("/api/v1/incidents", web::get().to(api::get_incidents))
+        .route("/api/v1/probes", web::get().to(probes::get_probes))
+        .route("/api/v1/notices", web::get().to(notices::get_notices))
+        .route("/api/v1/incidents", web::get().to(incidents::get_incidents))
         // Public login endpoints: the SPA fetches the provider's authorization endpoint, then hands
         // the resulting authorization code here for the agent to exchange with its client secret.
         .route("/api/v1/auth/metadata", web::get().to(auth::metadata))
         .route("/api/v1/auth/token", web::post().to(auth::exchange_token))
+        .route("/api/v1/auth/refresh", web::post().to(auth::refresh_token))
         // Admin API: every route is guarded by OIDC bearer validation + the configured ACL.
         .service(
             web::scope("/api/v1/admin")
@@ -93,7 +98,7 @@ pub fn create_app() -> App<
                 .route("/me", web::get().to(admin::me))
                 // Cluster topology is operator-only: it exposes peer addresses and health, so it
                 // lives behind the admin gate rather than being surfaced to public viewers.
-                .route("/cluster/peers", web::get().to(api::get_peers))
+                .route("/cluster/peers", web::get().to(cluster::get_peers))
                 .route("/incidents", web::get().to(admin::list_incidents))
                 .route("/incidents", web::post().to(admin::create_incident))
                 .route("/incidents/{id}", web::get().to(admin::get_incident))
@@ -215,10 +220,10 @@ mod tests {
 
         Mock::given(method("POST"))
             .and(path("/token"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(serde_json::json!({ "id_token": "header.payload.sig" })),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id_token": "header.payload.sig",
+                "refresh_token": "refresh-123",
+            })))
             .mount(&server)
             .await;
 
@@ -252,6 +257,7 @@ mod tests {
         let body: serde_json::Value =
             serde_json::from_slice(&resp.into_body().try_into_bytes().unwrap()).unwrap();
         assert_eq!(body["token"], "header.payload.sig");
+        assert_eq!(body["refresh_token"], "refresh-123");
     }
 }
 
