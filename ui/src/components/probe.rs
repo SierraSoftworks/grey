@@ -63,6 +63,28 @@ mod tests {
     use super::*;
     use grey_api::Streak;
 
+    #[derive(Properties, PartialEq)]
+    struct HarnessProps {
+        probe: grey_api::Probe,
+    }
+
+    /// Wraps `Probe` in an `AuthContext` provider, which its `ProbeHistory` child requires.
+    #[function_component(Harness)]
+    fn harness(props: &HarnessProps) -> Html {
+        let context = crate::contexts::AuthContext {
+            user: None,
+            configured: false,
+            token: None,
+            login: Callback::noop(),
+            logout: Callback::noop(),
+        };
+        html! {
+            <ContextProvider<crate::contexts::AuthContext> {context}>
+                <Probe probe={props.probe.clone()} />
+            </ContextProvider<crate::contexts::AuthContext>>
+        }
+    }
+
     async fn render(streak: Streak) -> String {
         let probe = grey_api::Probe {
             name: "probe".into(),
@@ -72,7 +94,7 @@ mod tests {
             observations: Default::default(),
             streak,
         };
-        yew::ServerRenderer::<Probe>::with_props(move || ProbeProps { probe })
+        yew::ServerRenderer::<Harness>::with_props(move || HarnessProps { probe })
             .render()
             .await
     }
