@@ -1,5 +1,6 @@
 pub mod banner;
 pub mod cluster_status;
+pub mod error_banner;
 pub mod header;
 pub mod icons;
 pub mod incident_timeline;
@@ -14,6 +15,7 @@ pub mod timeline;
 
 pub use banner::{Banner, BannerKind};
 pub use cluster_status::ClusterStatus;
+pub use error_banner::ErrorBanner;
 pub use header::Header;
 pub use incidents::{IncidentBlock, IncidentsSection};
 pub use popover::{Popover, PopoverAlign};

@@ -1,19 +1,17 @@
 use super::cluster_status::ClusterStatus;
-use crate::contexts::{use_auth, use_ui_config};
+use crate::contexts::use_store;
 use crate::routes::Route;
 use yew::prelude::*;
 use yew_router::prelude::*;
 
 #[function_component(Header)]
 pub fn header() -> Html {
-    let config_ctx = use_ui_config();
-    let auth = use_auth();
+    let store = use_store();
     let menu_open = use_state(|| false);
 
     // Prefer the user's name, falling back to their email address.
-    let user_display = auth
-        .user
-        .as_ref()
+    let user_display = store
+        .user()
         .and_then(|u| u.name.clone().or_else(|| u.email.clone()))
         .unwrap_or_else(|| "Admin".to_string());
 
@@ -29,14 +27,14 @@ pub fn header() -> Html {
     html! {
         <header class={header_class}>
             <Link<Route> to={Route::Home} classes="header__brand">
-                <img src={config_ctx.config.logo.clone()} alt="The company logo." />
-                <span class="header__title">{&config_ctx.config.title}</span>
+                <img src={store.config().logo.clone()} alt="The company logo." />
+                <span class="header__title">{&store.config().title}</span>
             </Link<Route>>
 
             <nav class="header__nav">
                 <Link<Route> to={Route::Incidents} classes="header__nav-link">{"Incidents"}</Link<Route>>
                 {
-                    for config_ctx.config.links.iter().map(|link| {
+                    for store.config().links.iter().map(|link| {
                         html! {
                             <a href={link.url.clone()} class="header__nav-link" target="_blank" rel="noopener noreferrer">{&link.title}</a>
                         }
@@ -45,19 +43,19 @@ pub fn header() -> Html {
             </nav>
 
             <div class="header__controls">
-                if auth.is_authenticated() {
+                if store.is_authenticated() {
                     <ClusterStatus />
                 }
 
-                if auth.is_authenticated() {
+                if store.is_authenticated() {
                     // One control: shows the user, reveals a "Sign out" overlay on hover, and links
                     // to the logout route (which clears the session and returns home) when clicked.
                     <Link<Route> to={Route::AuthLogout} classes="user-chip">
                         <span class="user-chip__name">{ user_display.clone() }</span>
                         <span class="user-chip__signout" aria-hidden="true">{"Sign out"}</span>
                     </Link<Route>>
-                } else if auth.configured {
-                    <button class="auth-button" onclick={auth.login.reform(|_| ())}>{"Sign in"}</button>
+                } else if store.auth_configured() {
+                    <button class="auth-button" onclick={store.login.reform(|_| ())}>{"Sign in"}</button>
                 }
 
                 <button class="header__menu-toggle" onclick={toggle_menu}>

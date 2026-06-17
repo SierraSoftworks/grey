@@ -1,17 +1,17 @@
 use super::Probe as ProbeComponent;
-use crate::contexts::use_probes;
+use crate::contexts::use_store;
 use std::collections::HashMap;
 use yew::prelude::*;
 use crate::formatters::availability;
 
 #[function_component(ProbeList)]
 pub fn probe_list() -> Html {
-    let probes_ctx = use_probes();
+    let store = use_store();
 
     // Group probes by service tag
     let mut service_groups: HashMap<String, Vec<&grey_api::Probe>> = HashMap::new();
 
-    for probe in &probes_ctx.probes {
+    for probe in store.probes() {
         let service = probe
             .tags
             .get("service")

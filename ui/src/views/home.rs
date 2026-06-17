@@ -4,19 +4,18 @@ use yew::prelude::*;
 
 use crate::components::incidents::worst_impact;
 use crate::components::{Banner, BannerKind, IncidentsSection, ProbeList, Timeline};
-use crate::contexts::{use_incidents, use_probes};
+use crate::contexts::use_store;
 
 /// The status page: a top-line banner, the probe list, notices, and recent/active incidents. The
 /// top-line status reflects the worst active incident when there is one, otherwise it is derived
 /// from probe health.
 #[function_component(HomeView)]
 pub fn home_view() -> Html {
-    let probes_ctx = use_probes();
-    let incidents_ctx = use_incidents();
+    let store = use_store();
 
     // Probe-derived status, used when there are no active incidents.
-    let total = probes_ctx.probes.len();
-    let healthy = probes_ctx.probes.iter().filter(|p| p.passing()).count();
+    let total = store.probes().len();
+    let healthy = store.probes().iter().filter(|p| p.passing()).count();
     let probe_status = if total == 0 || healthy == total {
         (BannerKind::Ok, "All services operating normally")
     } else if healthy * 2 >= total {
@@ -26,7 +25,7 @@ pub fn home_view() -> Html {
     };
 
     // An active incident takes over the top-line status.
-    let (banner_kind, status_text) = match worst_impact(&incidents_ctx.incidents) {
+    let (banner_kind, status_text) = match worst_impact(store.incidents()) {
         Some(Impact::Offline) => (BannerKind::Error, "Major incident affecting service"),
         Some(Impact::Degraded) => (BannerKind::Warning, "Active incident affecting service"),
         _ => probe_status,
@@ -34,8 +33,8 @@ pub fn home_view() -> Html {
 
     // Show incidents that are active or were updated recently (the probe-history window).
     let cutoff = Utc::now() - chrono::Duration::days(14);
-    let recent_incidents: Vec<grey_api::Incident> = incidents_ctx
-        .incidents
+    let recent_incidents: Vec<grey_api::Incident> = store
+        .incidents()
         .iter()
         .filter(|incident| {
             incident.is_active() || incident.last_updated().map(|t| t >= cutoff).unwrap_or(false)

@@ -1,19 +1,19 @@
-use crate::contexts::use_notices;
+use crate::contexts::use_store;
 use grey_api::{NoticeLevel, UiNotice};
 use yew::prelude::*;
 
 #[function_component(Timeline)]
 pub fn timeline() -> Html {
-    let notices_ctx = use_notices();
+    let store = use_store();
 
-    if notices_ctx.notices.is_empty() {
+    if store.notices().is_empty() {
         return html! {};
     }
 
     html! {
         <div class="notices-timeline">
             <div class="notices-timeline__line"></div>
-            {for notices_ctx.notices.iter().map(|notice| {
+            {for store.notices().iter().map(|notice| {
                 html! {
                     <Notice notice={notice.clone()} />
                 }

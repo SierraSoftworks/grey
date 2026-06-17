@@ -3,7 +3,7 @@ use yew::prelude::*;
 use yew_router::prelude::*;
 
 use crate::components::IncidentBlock;
-use crate::contexts::{use_auth, use_incidents};
+use crate::contexts::use_store;
 use crate::routes::Route;
 
 /// The `/incidents` page: the full, read-only history of incidents and their updates. Editing and
@@ -11,22 +11,21 @@ use crate::routes::Route;
 /// hidden (draft) incidents and a button to start a new one.
 #[function_component(IncidentsList)]
 pub fn incidents_list() -> Html {
-    let auth = use_auth();
-    let incidents_ctx = use_incidents();
+    let store = use_store();
 
     #[cfg(feature = "wasm")]
-    if auth.is_authenticated() {
-        if let Some(token) = auth.token.clone() {
+    if store.is_authenticated() {
+        if let Some(token) = store.token() {
             return html! { <AdminIncidentsList token={token} /> };
         }
     }
     #[cfg(not(feature = "wasm"))]
-    let _ = &auth;
+    let _ = &store;
 
     html! {
         <div class="page">
             <h1>{"Incidents"}</h1>
-            { incident_list_body(&incidents_ctx.incidents) }
+            { incident_list_body(store.incidents()) }
         </div>
     }
 }
@@ -54,12 +53,12 @@ struct AdminIncidentsListProps {
 fn admin_incidents_list(props: &AdminIncidentsListProps) -> Html {
     // Seed from the shared in-memory list so the page shows immediately (reflecting any just-made
     // create/edit/delete), then fetch the full admin list in the background to include hidden drafts.
-    let ctx = use_incidents();
-    let incidents = use_state(|| ctx.incidents.clone());
+    let store = use_store();
+    let incidents = use_state(|| store.incidents().to_vec());
     let error = use_state(|| Option::<String>::None);
 
     {
-        let client = use_auth().client;
+        let client = store.client().clone();
         let incidents = incidents.clone();
         let error = error.clone();
         use_effect_with(props.token.clone(), move |_| {

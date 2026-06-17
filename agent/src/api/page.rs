@@ -32,9 +32,9 @@ pub async fn index(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpRe
         config: (&config.ui).into(),
         notices: config.ui.notices.clone(),
         probes,
-        // Cluster topology is operator-only and fetched client-side once signed in, so it is never
-        // embedded in the server-rendered page exposed to unauthenticated viewers.
-        peers: Vec::new(),
+        // Cluster topology is operator-only: it is never part of the server-rendered payload and is
+        // fetched client-side once an administrator has signed in, so it can't leak to anonymous
+        // viewers via the page's hydration data.
         incidents,
         url: req.uri().path().to_string(),
     };
@@ -78,6 +78,25 @@ mod tests {
         assert!(body.contains(r#"data-probes="[{&quot;"#), "Failed to find probes data in HTML body");
         assert!(body.contains(r#"data-config="{&quot;"#), "Failed to find config data in HTML body");
         assert!(body.trim().ends_with("</html>"), "Body did not end with the HTML closing tag");
+    }
+
+    /// The server-rendered page must never embed operator-only cluster topology: `data-peers` is not
+    /// part of the hydration payload, so an unauthenticated viewer can't read it from the HTML.
+    #[actix_web::test]
+    async fn test_index_omits_peers() {
+        let temp_dir = tempdir().unwrap();
+        let app_state = AppState::test(temp_dir.path().to_path_buf()).await;
+        let req = actix_web::test::TestRequest::default().to_http_request();
+        let resp = index(req, web::Data::new(app_state))
+            .await
+            .expect("Failed to render index");
+
+        let body_bytes = resp.into_body().try_into_bytes().unwrap();
+        let body = String::from_utf8_lossy(&body_bytes);
+        assert!(
+            !body.contains("data-peers"),
+            "the server-rendered page must not embed operator-only peer data"
+        );
     }
 
     /// A deep link to the `/incidents` route must server-render the incidents page (the router is

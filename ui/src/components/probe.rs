@@ -68,21 +68,13 @@ mod tests {
         probe: grey_api::Probe,
     }
 
-    /// Wraps `Probe` in an `AuthContext` provider, which its `ProbeHistory` child requires.
+    /// Wraps `Probe` in a `StoreProvider`, which its `ProbeHistory` child requires for auth state.
     #[function_component(Harness)]
     fn harness(props: &HarnessProps) -> Html {
-        let context = crate::contexts::AuthContext {
-            user: None,
-            configured: false,
-            token: None,
-            client: crate::api::ApiClient::new(None),
-            login: Callback::noop(),
-            logout: Callback::noop(),
-        };
         html! {
-            <ContextProvider<crate::contexts::AuthContext> {context}>
+            <crate::contexts::StoreProvider>
                 <Probe probe={props.probe.clone()} />
-            </ContextProvider<crate::contexts::AuthContext>>
+            </crate::contexts::StoreProvider>
         }
     }
 

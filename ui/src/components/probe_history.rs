@@ -34,7 +34,7 @@ struct TooltipData {
 
 #[function_component(ProbeHistory)]
 pub fn probe_history(props: &ProbeHistoryProps) -> Html {
-    let auth_data = use_context::<crate::contexts::AuthContext>().expect("AuthContext not found");
+    let auth_data = use_context::<crate::contexts::Store>().expect("Store not found");
     let tooltip_data = use_state(TooltipData::default);
 
     #[cfg(feature = "wasm")]
