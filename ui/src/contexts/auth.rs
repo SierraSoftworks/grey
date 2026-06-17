@@ -1,6 +1,7 @@
 use grey_api::AdminUser;
 use yew::prelude::*;
 
+use crate::api::ApiClient;
 use crate::contexts::use_ui_config;
 
 /// Authentication state shared with the component tree. `user` is `Some` when an administrator is
@@ -10,6 +11,8 @@ pub struct AuthContext {
     pub user: Option<AdminUser>,
     pub configured: bool,
     pub token: Option<String>,
+    /// A ready-to-use API client (with session renewal wired in) for descendants to make calls.
+    pub client: ApiClient,
     pub login: Callback<()>,
     pub logout: Callback<()>,
 }
@@ -29,6 +32,7 @@ pub struct AuthProviderProps {
 pub fn auth_provider(props: &AuthProviderProps) -> Html {
     let config_ctx = use_ui_config();
     let auth_cfg = config_ctx.config.auth.clone();
+    let client = ApiClient::new(auth_cfg.clone());
     let user = use_state(|| Option::<AdminUser>::None);
     let token = use_state(|| Option::<String>::None);
 
@@ -36,6 +40,7 @@ pub fn auth_provider(props: &AuthProviderProps) -> Html {
         let user = user.clone();
         let token = token.clone();
         let auth_cfg = auth_cfg.clone();
+        let client = client.clone();
         // On mount, finish any pending OIDC callback, then validate the stored token by fetching the
         // current user. Effects only run client-side, so this never executes during SSR.
         use_effect_with((), move |_| {
@@ -52,10 +57,12 @@ pub fn auth_provider(props: &AuthProviderProps) -> Html {
                             }
                         }
                     }
-                    if let Some(t) = current {
-                        match crate::api::fetch_me(&t).await {
+                    if current.is_some() {
+                        // `me` transparently renews an expired token before failing, so a successful
+                        // result means the session is valid.
+                        match client.me().await {
                             Ok(u) => {
-                                token.set(Some(t));
+                                token.set(crate::auth::stored_token());
                                 user.set(Some(u));
                             }
                             // The stored token is no longer accepted; drop it.
@@ -65,22 +72,41 @@ pub fn auth_provider(props: &AuthProviderProps) -> Html {
                 });
             }
             #[cfg(not(feature = "wasm"))]
-            let _ = (&user, &token, &auth_cfg);
+            let _ = (&user, &token, &auth_cfg, &client);
             || ()
         });
     }
 
     let login = {
         let auth_cfg = auth_cfg.clone();
+        let user = user.clone();
+        let token = token.clone();
+        let client = client.clone();
         Callback::from(move |_| {
             #[cfg(feature = "wasm")]
             if let Some(cfg) = auth_cfg.clone() {
+                let user = user.clone();
+                let token = token.clone();
+                let client = client.clone();
                 wasm_bindgen_futures::spawn_local(async move {
-                    crate::auth::begin_login(&cfg).await;
+                    match crate::auth::begin_login(&cfg).await {
+                        Ok(Some(_)) => match client.me().await {
+                            Ok(u) => {
+                                token.set(crate::auth::stored_token());
+                                user.set(Some(u));
+                            }
+                            Err(err) => {
+                                gloo::console::error!(format!("Sign-in validation failed: {err}"));
+                                crate::auth::clear_token();
+                            }
+                        },
+                        Ok(None) => {}
+                        Err(err) => gloo::console::error!(format!("Sign-in failed: {err}")),
+                    }
                 });
             }
             #[cfg(not(feature = "wasm"))]
-            let _ = &auth_cfg;
+            let _ = (&auth_cfg, &user, &token, &client);
         })
     };
 
@@ -98,6 +124,7 @@ pub fn auth_provider(props: &AuthProviderProps) -> Html {
         user: (*user).clone(),
         configured: auth_cfg.is_some(),
         token: (*token).clone(),
+        client,
         login,
         logout,
     };

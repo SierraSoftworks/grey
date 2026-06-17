@@ -74,18 +74,19 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
     let navigator = use_navigator();
     // The shared in-memory list, so saves/deletes are reflected everywhere without a refetch.
     let incidents = crate::contexts::use_incidents();
+    let client = use_auth().client;
 
     // Load the incident (including hidden) once.
     {
-        let token = props.token.clone();
         let id = props.id.clone();
         let loaded = loaded.clone();
         let title = title.clone();
         let updates = updates.clone();
         let error = error.clone();
+        let client = client.clone();
         use_effect_with((props.token.clone(), props.id.clone()), move |_| {
             wasm_bindgen_futures::spawn_local(async move {
-                match crate::api::get_incident(&token, &id).await {
+                match client.incident(&id).await {
                     Ok(incident) => {
                         title.set(incident.title.clone());
                         updates.set(incident.sorted_updates().into_iter().cloned().collect());
@@ -178,13 +179,14 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
         let error = error.clone();
         let saving = saving.clone();
         let editing = editing.clone();
+        let client = client.clone();
         let upsert = incidents.upsert.clone();
         Callback::from(move |_| {
             let edit = IncidentEdit {
                 title: (*title).trim().to_string(),
                 updates: (*updates).clone(),
             };
-            let token = token.clone();
+            let _ = &token;
             let id = id.clone();
             let loaded = loaded.clone();
             let title = title.clone();
@@ -192,10 +194,11 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
             let error = error.clone();
             let saving = saving.clone();
             let editing = editing.clone();
+            let client = client.clone();
             let upsert = upsert.clone();
             saving.set(true);
             wasm_bindgen_futures::spawn_local(async move {
-                let result = crate::api::replace_incident(&token, &id, version, &edit).await;
+                let result = client.replace_incident(&id, version, &edit).await;
                 saving.set(false);
                 match result {
                     Ok(incident) => {
@@ -219,15 +222,17 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
         let id_value = current.id;
         let navigator = navigator.clone();
         let error = error.clone();
+        let client = client.clone();
         let remove = incidents.remove.clone();
         Callback::from(move |_| {
-            let token = token.clone();
+            let _ = &token;
             let id = id.clone();
             let navigator = navigator.clone();
             let error = error.clone();
+            let client = client.clone();
             let remove = remove.clone();
             wasm_bindgen_futures::spawn_local(async move {
-                match crate::api::delete_incident(&token, &id).await {
+                match client.delete_incident(&id).await {
                     Ok(()) => {
                         // Drop it from the shared list before leaving the page.
                         remove.emit(id_value);

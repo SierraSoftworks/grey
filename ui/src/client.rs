@@ -190,8 +190,9 @@ impl Component for App {
 
             // Peers change frequently and are cheap to fetch, so always refresh them on mount; the
             // polling loop is then driven from the update handler.
+            let auth = ctx.props().config.auth.clone();
             ctx.link()
-                .send_future(async move { Self::fetch_peers_as_client_msg().await });
+                .send_future(async move { Self::fetch_peers_as_client_msg(auth).await });
         }
 
         app
@@ -378,14 +379,15 @@ impl App {
 
     fn schedule_next_peers_poll(ctx: &Context<Self>) {
         let reload_interval = ctx.props().config.reload_interval;
+        let auth = ctx.props().config.auth.clone();
         ctx.link().send_future(async move {
             gloo::timers::future::sleep(reload_interval).await;
-            Self::fetch_peers_as_client_msg().await
+            Self::fetch_peers_as_client_msg(auth).await
         });
     }
 
-    async fn fetch_peers_as_client_msg() -> ClientMsg {
-        match Self::fetch_peers().await {
+    async fn fetch_peers_as_client_msg(auth: Option<grey_api::UiAuthConfig>) -> ClientMsg {
+        match Self::fetch_peers(auth).await {
             Ok(peers) => ClientMsg::UpdatePeers(peers),
             Err(err) => ClientMsg::Error(format!("Failed to fetch peers: {}", err)),
         }
@@ -406,67 +408,31 @@ impl App {
         }
     }
 
-    async fn fetch_peers() -> Result<Vec<grey_api::Peer>, Box<dyn std::error::Error>> {
-        // Cluster topology is operator-only, so it is fetched only when signed in and through the
-        // admin endpoint (with a bearer token). Unauthenticated viewers simply see no cluster panel.
-        let Some(token) = crate::auth::stored_token() else {
-            return Ok(Vec::new());
-        };
-
-        let response = gloo::net::http::Request::get("/api/v1/admin/cluster/peers")
-            .header("Authorization", &format!("Bearer {token}"))
-            .send()
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-
-        // A revoked/expired session shouldn't spam the error channel; treat it as "no peers".
-        if !response.ok() {
+    async fn fetch_peers(
+        auth: Option<grey_api::UiAuthConfig>,
+    ) -> Result<Vec<grey_api::Peer>, grey_api::ApiError> {
+        // Cluster topology is operator-only, so it is fetched only when signed in. Unauthenticated
+        // viewers simply see no cluster panel.
+        if crate::auth::stored_token().is_none() {
             return Ok(Vec::new());
         }
 
-        let peers: Vec<grey_api::Peer> = response
-            .json()
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-        Ok(peers)
+        // A revoked/expired session shouldn't spam the error channel; treat it as "no peers".
+        match crate::api::ApiClient::new(auth).peers().await {
+            Ok(peers) => Ok(peers),
+            Err(_) => Ok(Vec::new()),
+        }
     }
 
-    async fn fetch_notices() -> Result<Vec<grey_api::UiNotice>, Box<dyn std::error::Error>> {
-        let response = gloo::net::http::Request::get("/api/v1/notices")
-            .send()
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-
-        let notices: Vec<grey_api::UiNotice> = response
-            .json()
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-        Ok(notices)
+    async fn fetch_notices() -> Result<Vec<grey_api::UiNotice>, grey_api::ApiError> {
+        crate::api::ApiClient::new(None).notices().await
     }
 
-    async fn fetch_probes() -> Result<Vec<grey_api::Probe>, Box<dyn std::error::Error>> {
-        let response = gloo::net::http::Request::get("/api/v1/probes")
-            .send()
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-
-        let probes: Vec<grey_api::Probe> = response
-            .json()
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-        Ok(probes)
+    async fn fetch_probes() -> Result<Vec<grey_api::Probe>, grey_api::ApiError> {
+        crate::api::ApiClient::new(None).probes().await
     }
 
-    async fn fetch_incidents() -> Result<Vec<grey_api::Incident>, Box<dyn std::error::Error>> {
-        let response = gloo::net::http::Request::get("/api/v1/incidents")
-            .send()
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-
-        let incidents: Vec<grey_api::Incident> = response
-            .json()
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-        Ok(incidents)
+    async fn fetch_incidents() -> Result<Vec<grey_api::Incident>, grey_api::ApiError> {
+        crate::api::ApiClient::new(None).incidents().await
     }
 }

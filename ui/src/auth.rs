@@ -1,10 +1,17 @@
-//! Browser-side OIDC Authorization Code login (without PKCE).
+//! Browser-side OIDC Authorization Code login (without PKCE), via a popup.
 //!
 //! The provider does not support PKCE, and a public browser client must never hold the client
 //! secret, so the agent performs the confidential code exchange on the SPA's behalf: the browser
-//! runs the authorization redirect, then POSTs the resulting `code` to the agent, which exchanges it
-//! (using its server-held secret) and returns the ID token. The SPA stores that token in
-//! `sessionStorage` and sends it as an `Authorization: Bearer` header (see [`crate::api`]).
+//! runs the authorization request in a popup, the popup POSTs the resulting `code` to the agent,
+//! which exchanges it (using its server-held secret) and returns an ID token plus a refresh token.
+//!
+//! Sign-in uses a popup so the main page is never navigated away from: [`begin_login`] opens the
+//! authorization URL in a popup and waits for it to report success. The popup loads the SPA at the
+//! callback URL, [`complete_callback`] exchanges the code and hands the tokens back to the opener
+//! through a short-lived `localStorage` slot (popups don't share `sessionStorage` with their
+//! opener), then closes. The opener stores the tokens in `sessionStorage` and sends the ID token as
+//! an `Authorization: Bearer` header (see [`crate::api`]). The refresh token lets [`refresh_session`]
+//! renew an expired ID token without another interactive login.
 //!
 //! Everything the browser calls is same-origin (the agent), so the provider never needs to permit
 //! cross-origin requests. Browser-only; the SSR build gets inert stubs.
@@ -15,31 +22,51 @@ use grey_api::UiAuthConfig;
 mod browser {
     use super::UiAuthConfig;
     use base64::prelude::*;
+    use std::time::Duration;
     use web_sys::window;
 
     const TOKEN_KEY: &str = "grey.admin.token";
+    const REFRESH_KEY: &str = "grey.admin.refresh";
     const STATE_KEY: &str = "grey.oidc.state";
-    const RETURN_KEY: &str = "grey.oidc.return_to";
+    /// Short-lived `localStorage` slot the popup uses to hand tokens back to its opener.
+    const POPUP_RESULT_KEY: &str = "grey.oidc.popup_result";
     /// The OAuth redirect lands back at the app root; the SPA detects `?code&state` on load.
     const CALLBACK_PATH: &str = "/";
+    /// How long the opener waits for the popup to complete before giving up.
+    const POPUP_POLL_INTERVAL: Duration = Duration::from_millis(300);
+    const POPUP_MAX_POLLS: u32 = 2_000; // ~10 minutes
 
     fn session() -> Option<web_sys::Storage> {
         window()?.session_storage().ok().flatten()
+    }
+
+    fn local() -> Option<web_sys::Storage> {
+        window()?.local_storage().ok().flatten()
     }
 
     pub fn stored_token() -> Option<String> {
         session()?.get_item(TOKEN_KEY).ok().flatten()
     }
 
-    fn store_token(token: &str) {
+    fn stored_refresh_token() -> Option<String> {
+        session()?.get_item(REFRESH_KEY).ok().flatten()
+    }
+
+    /// Persists the ID token, and the refresh token when one was issued (providers that don't rotate
+    /// refresh tokens omit it, so we keep any one we already hold).
+    fn store_tokens(token: &str, refresh: Option<&str>) {
         if let Some(storage) = session() {
             let _ = storage.set_item(TOKEN_KEY, token);
+            if let Some(refresh) = refresh {
+                let _ = storage.set_item(REFRESH_KEY, refresh);
+            }
         }
     }
 
     pub fn clear_token() {
         if let Some(storage) = session() {
             let _ = storage.remove_item(TOKEN_KEY);
+            let _ = storage.remove_item(REFRESH_KEY);
         }
     }
 
@@ -75,6 +102,14 @@ mod browser {
         format!("{}{CALLBACK_PATH}", origin())
     }
 
+    /// Whether this window was opened as a login popup (it has an opener). Used to decide whether
+    /// [`complete_callback`] should hand tokens back and close, or store them and stay.
+    fn is_popup() -> bool {
+        window()
+            .and_then(|w| w.opener().ok())
+            .is_some_and(|opener| !opener.is_null() && !opener.is_undefined())
+    }
+
     /// Fetches the provider's authorization endpoint from the agent (same-origin), so the browser
     /// never has to read the provider's discovery document cross-origin.
     async fn authorization_endpoint() -> Result<String, String> {
@@ -95,6 +130,19 @@ mod browser {
             .ok_or_else(|| "the agent did not return an authorization endpoint".to_string())
     }
 
+    fn build_authorize_url(authorize: &str, config: &UiAuthConfig, state: &str) -> String {
+        let mut scopes = vec!["openid".to_string()];
+        scopes.extend(config.scopes.iter().filter(|s| *s != "openid").cloned());
+        let scope = scopes.join(" ");
+        format!(
+            "{authorize}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}",
+            enc(&config.client_id),
+            enc(&redirect_uri()),
+            enc(&scope),
+            enc(state),
+        )
+    }
+
     fn callback_params() -> Option<(String, String)> {
         let search = window()?.location().search().ok()?;
         let params = web_sys::UrlSearchParams::new_with_str(&search).ok()?;
@@ -105,44 +153,58 @@ mod browser {
         callback_params().is_some()
     }
 
-    /// Begins login: stash a CSRF `state`, then navigate to the provider's authorization endpoint.
-    pub async fn begin_login(config: &UiAuthConfig) {
+    /// Begins an interactive sign-in: opens the provider's authorization URL in a popup and waits for
+    /// it to report success, returning the new ID token. Returns `Ok(None)` if the popup is dismissed
+    /// without completing. Must be called from a user gesture so the popup isn't blocked.
+    pub async fn begin_login(config: &UiAuthConfig) -> Result<Option<String>, String> {
         let state = random_token(24);
-
         if let Some(storage) = session() {
             let _ = storage.set_item(STATE_KEY, &state);
-            if let Some(path) = window().and_then(|w| w.location().pathname().ok()) {
-                let _ = storage.set_item(RETURN_KEY, &path);
-            }
+        }
+        // Clear any stale handoff from a previous attempt before opening the popup.
+        if let Some(storage) = local() {
+            let _ = storage.remove_item(POPUP_RESULT_KEY);
         }
 
-        let authorize = match authorization_endpoint().await {
-            Ok(url) => url,
-            Err(err) => {
-                gloo::console::error!(format!("Failed to start sign-in: {err}"));
-                return;
-            }
+        let authorize = authorization_endpoint().await?;
+        let url = build_authorize_url(&authorize, config, &state);
+
+        let window = window().ok_or("no window is available")?;
+        let popup = window
+            .open_with_url_and_target_and_features(&url, "grey-login", "popup,width=480,height=720")
+            .map_err(|_| "the browser blocked the sign-in popup".to_string())?;
+
+        let Some(popup) = popup else {
+            return Err("the browser blocked the sign-in popup".to_string());
         };
 
-        let mut scopes = vec!["openid".to_string()];
-        scopes.extend(config.scopes.iter().filter(|s| *s != "openid").cloned());
-        let scope = scopes.join(" ");
-
-        let url = format!(
-            "{authorize}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}",
-            enc(&config.client_id),
-            enc(&redirect_uri()),
-            enc(&scope),
-            enc(&state),
-        );
-
-        if let Some(w) = window() {
-            let _ = w.location().set_href(&url);
+        // Poll the handoff slot until the popup reports tokens or is closed.
+        for _ in 0..POPUP_MAX_POLLS {
+            if let Some(result) = local().and_then(|s| s.get_item(POPUP_RESULT_KEY).ok().flatten()) {
+                if let Some(storage) = local() {
+                    let _ = storage.remove_item(POPUP_RESULT_KEY);
+                }
+                let tokens: serde_json::Value =
+                    serde_json::from_str(&result).map_err(|e| e.to_string())?;
+                let token = tokens["token"]
+                    .as_str()
+                    .ok_or("the sign-in response did not include a token")?
+                    .to_string();
+                store_tokens(&token, tokens["refresh_token"].as_str());
+                return Ok(Some(token));
+            }
+            if popup.closed().unwrap_or(false) {
+                return Ok(None);
+            }
+            gloo::timers::future::sleep(POPUP_POLL_INTERVAL).await;
         }
+        Err("the sign-in popup did not complete in time".to_string())
     }
 
-    /// If the current URL is an OIDC callback, hand the code to the agent to exchange and store the
-    /// returned token. Returns the token on success, `None` when there is no callback to process.
+    /// If the current URL is an OIDC callback, exchange the code for tokens. In a popup, the tokens
+    /// are handed back to the opener and the popup closes (returning `None`); otherwise (a direct
+    /// navigation) the tokens are stored and the new ID token is returned. `None` means there was no
+    /// callback to process or the work was delegated to the opener.
     pub async fn complete_callback(_config: &UiAuthConfig) -> Result<Option<String>, String> {
         let Some((code, state)) = callback_params() else {
             return Ok(None);
@@ -156,7 +218,7 @@ mod browser {
             );
         }
 
-        // The agent exchanges the code with its client secret and returns the token.
+        // The agent exchanges the code with its client secret and returns the tokens.
         let request = serde_json::json!({ "code": code, "redirect_uri": redirect_uri() }).to_string();
         let response = gloo::net::http::Request::post("/api/v1/auth/token")
             .header("Content-Type", "application/json")
@@ -179,28 +241,70 @@ mod browser {
             .ok_or("the sign-in response did not include a token")?
             .to_string();
 
-        store_token(&token);
-
-        // Clear the one-time state and scrub the code/state from the address bar.
         let _ = storage.remove_item(STATE_KEY);
-        let return_to = storage
-            .get_item(RETURN_KEY)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "/".to_string());
-        let _ = storage.remove_item(RETURN_KEY);
 
+        if is_popup() {
+            // Hand the tokens back to the opener through localStorage, then close. The opener picks
+            // them up in `begin_login` and stores them in its own sessionStorage.
+            if let Some(local) = local() {
+                let _ = local.set_item(POPUP_RESULT_KEY, &tokens.to_string());
+            }
+            if let Some(w) = window() {
+                let _ = w.close();
+            }
+            return Ok(None);
+        }
+
+        // Direct navigation (popup was blocked and we fell back, or the user opened the link): store
+        // the tokens and scrub the code/state from the address bar.
+        store_tokens(&token, tokens["refresh_token"].as_str());
         if let Some(history) = window().and_then(|w| w.history().ok()) {
-            let _ =
-                history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&return_to));
+            let _ = history.replace_state_with_url(
+                &wasm_bindgen::JsValue::NULL,
+                "",
+                Some(CALLBACK_PATH),
+            );
         }
 
         Ok(Some(token))
     }
+
+    /// Renews the session from the stored refresh token, returning a fresh ID token. The agent uses
+    /// its server-held secret to perform the refresh, so the browser only supplies the refresh token.
+    /// On failure the stored session is dropped so the UI can prompt for an interactive sign-in.
+    pub async fn refresh_session() -> Result<String, String> {
+        let refresh = stored_refresh_token().ok_or("no refresh token is available")?;
+        let request = serde_json::json!({ "refresh_token": refresh }).to_string();
+        let response = gloo::net::http::Request::post("/api/v1/auth/refresh")
+            .header("Content-Type", "application/json")
+            .body(request)
+            .map_err(|e| e.to_string())?
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !response.ok() {
+            clear_token();
+            return Err(format!(
+                "the session could not be renewed (HTTP {})",
+                response.status()
+            ));
+        }
+
+        let tokens: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+        let token = tokens["token"]
+            .as_str()
+            .ok_or("the refresh response did not include a token")?
+            .to_string();
+        store_tokens(&token, tokens["refresh_token"].as_str());
+        Ok(token)
+    }
 }
 
 #[cfg(feature = "wasm")]
-pub use browser::{begin_login, clear_token, complete_callback, has_pending_callback, stored_token};
+pub use browser::{
+    begin_login, clear_token, complete_callback, has_pending_callback, refresh_session, stored_token,
+};
 
 // Inert SSR stubs so the shared component tree compiles without the browser-only dependencies.
 #[cfg(not(feature = "wasm"))]
@@ -214,11 +318,18 @@ mod stub {
     pub fn has_pending_callback() -> bool {
         false
     }
-    pub async fn begin_login(_config: &UiAuthConfig) {}
+    pub async fn begin_login(_config: &UiAuthConfig) -> Result<Option<String>, String> {
+        Ok(None)
+    }
     pub async fn complete_callback(_config: &UiAuthConfig) -> Result<Option<String>, String> {
         Ok(None)
+    }
+    pub async fn refresh_session() -> Result<String, String> {
+        Err("session renewal is unavailable during server rendering".into())
     }
 }
 
 #[cfg(not(feature = "wasm"))]
-pub use stub::{begin_login, clear_token, complete_callback, has_pending_callback, stored_token};
+pub use stub::{
+    begin_login, clear_token, complete_callback, has_pending_callback, refresh_session, stored_token,
+};

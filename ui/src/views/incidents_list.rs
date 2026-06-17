@@ -59,12 +59,12 @@ fn admin_incidents_list(props: &AdminIncidentsListProps) -> Html {
     let error = use_state(|| Option::<String>::None);
 
     {
-        let token = props.token.clone();
+        let client = use_auth().client;
         let incidents = incidents.clone();
         let error = error.clone();
         use_effect_with(props.token.clone(), move |_| {
             wasm_bindgen_futures::spawn_local(async move {
-                match crate::api::list_incidents(&token).await {
+                match client.admin_incidents().await {
                     Ok(list) => incidents.set(list),
                     Err(e) => error.set(Some(e.to_string())),
                 }

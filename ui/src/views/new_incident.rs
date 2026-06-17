@@ -44,6 +44,7 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
     let error = use_state(|| Option::<String>::None);
     let saving = use_state(|| false);
     let navigator = use_navigator();
+    let client = use_auth().client;
     // The shared in-memory list, so a newly created incident shows up at once.
     let incidents = crate::contexts::use_incidents();
 
@@ -75,6 +76,7 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
         let error = error.clone();
         let saving = saving.clone();
         let navigator = navigator.clone();
+        let client = client.clone();
         let upsert = incidents.upsert.clone();
         Callback::from(move |e: SubmitEvent| {
             e.prevent_default();
@@ -89,14 +91,15 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
                 impact: impact.parse().unwrap_or_default(),
                 message: message_value,
             };
-            let token = token.clone();
+            let _ = &token;
             let error = error.clone();
             let saving = saving.clone();
             let navigator = navigator.clone();
+            let client = client.clone();
             let upsert = upsert.clone();
             saving.set(true);
             wasm_bindgen_futures::spawn_local(async move {
-                match crate::api::create_incident(&token, &input).await {
+                match client.create_incident(&input).await {
                     Ok(created) => {
                         // Reflect the new incident in the shared list before navigating to it.
                         upsert.emit(created.clone());
