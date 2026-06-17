@@ -75,6 +75,7 @@ mod tests {
             user: None,
             configured: false,
             token: None,
+            client: crate::api::ApiClient::new(None),
             login: Callback::noop(),
             logout: Callback::noop(),
         };
