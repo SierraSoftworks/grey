@@ -8,6 +8,21 @@ use crate::cluster::transport::encryption::{EncryptionKeyProvider, EncryptionPro
 /// header). Used to size the receive buffer; the per-message send limit is configurable.
 const MAX_DATAGRAM_SIZE: usize = 65507;
 
+/// Grey's gossip magic, a throwback to the `#888` brand colour. It occupies the upper 10 bits of a
+/// 2-byte protocol header; the lower 6 bits carry the protocol version (0–63). Every Grey 2.0
+/// datagram is prefixed with this header (unencrypted) so a receiver can cheaply reject traffic that
+/// is not Grey, or is a different protocol version, before attempting to decrypt it.
+const GREY_MAGIC: u16 = 888;
+/// The wire protocol version. Incrementing this is a deliberate, cluster-wide breaking change.
+const PROTOCOL_VERSION: u8 = 1;
+/// Length, in bytes, of the protocol header prefixed to every datagram.
+const PROTOCOL_HEADER_LEN: usize = 2;
+
+/// The 2-byte big-endian protocol header: `(888 << 6) | version` (e.g. `0xDE01` for version 1).
+const fn protocol_header() -> [u8; 2] {
+    (((GREY_MAGIC << 6) | PROTOCOL_VERSION as u16)).to_be_bytes()
+}
+
 pub struct UdpGossipTransport<E, K>
 where
     E: EncryptionProvider,
@@ -76,16 +91,21 @@ where
         address: Self::Address,
         msg: Message<P, T>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let header = protocol_header();
         let mut msg = msg;
         loop {
             let data = rmp_serde::to_vec(&msg)?;
             let encrypted = self.encryption_provider.encrypt(&self.key_provider, &data)?;
 
-            // Send once the encrypted datagram fits the frame, or once the message has been reduced
-            // to its digest and cannot be partitioned further. The latter is best effort: `send_to`
-            // surfaces any oversize error (e.g. a digest larger than the frame) to the caller.
-            if encrypted.len() <= self.message_mtu || msg.is_empty() {
-                self.socket.send_to(&encrypted, address).await?;
+            // Send once the encrypted datagram (plus the protocol header) fits the frame, or once the
+            // message has been reduced to its digest and cannot be partitioned further. The latter is
+            // best effort: `send_to` surfaces any oversize error (e.g. a digest larger than the
+            // frame) to the caller.
+            if encrypted.len() + PROTOCOL_HEADER_LEN <= self.message_mtu || msg.is_empty() {
+                let mut datagram = Vec::with_capacity(PROTOCOL_HEADER_LEN + encrypted.len());
+                datagram.extend_from_slice(&header);
+                datagram.extend_from_slice(&encrypted);
+                self.socket.send_to(&datagram, address).await?;
                 return Ok(());
             }
 
@@ -93,9 +113,10 @@ where
             // Integer division undershoots, which we prefer: gossip is frequent, so sending a few
             // fewer entries now is cheaper than extra serialization passes chasing the exact
             // maximum. Re-measuring each pass lets the estimate self-correct for fixed overhead
-            // (metadata, digest) so it converges in one or two iterations.
+            // (header, metadata, digest) so it converges in one or two iterations.
             let items = msg.len();
-            let keep = (items.saturating_mul(self.message_mtu) / encrypted.len()).min(items - 1);
+            let budget = self.message_mtu.saturating_sub(PROTOCOL_HEADER_LEN);
+            let keep = (items.saturating_mul(budget) / encrypted.len()).min(items - 1);
             msg = msg.partition(keep);
         }
     }
@@ -108,7 +129,30 @@ where
         // Await the next datagram rather than polling with `try_recv_from`; this removes the
         // ~100 wakeups/s-per-node busy-poll and the up-to-10ms hop latency it incurred.
         let (size, addr) = self.socket.recv_from(&mut buf).await?;
-        let decrypted_data = self.encryption_provider.decrypt(&self.key_provider, &buf[..size])?;
+
+        // Reject anything that is not a Grey datagram of our protocol version before spending effort
+        // on decryption. A datagram with no (or a wrong) magic is silently dropped: it is most likely
+        // a port scan, stray traffic, or a pre-2.0 Grey peer whose ciphertext won't carry our magic.
+        if size < PROTOCOL_HEADER_LEN {
+            return Ok(None);
+        }
+        let header = u16::from_be_bytes([buf[0], buf[1]]);
+        if (header >> 6) != GREY_MAGIC {
+            return Ok(None);
+        }
+        let version = (header & 0x3F) as u8;
+        if version != PROTOCOL_VERSION {
+            tracing::trace!(
+                peer.version = version,
+                local.version = PROTOCOL_VERSION,
+                "Dropping gossip datagram from an incompatible Grey protocol version"
+            );
+            return Ok(None);
+        }
+
+        let decrypted_data = self
+            .encryption_provider
+            .decrypt(&self.key_provider, &buf[PROTOCOL_HEADER_LEN..size])?;
         let msg: Message<P, T> = rmp_serde::from_slice(&decrypted_data)?;
         Ok(Some((addr, msg)))
     }
@@ -329,5 +373,37 @@ mod tests {
             Ok(Ok(())) => panic!("unexpectedly decrypted message with wrong secret"),
             Err(_) => panic!("timed out waiting for decryption error"),
         }
+    }
+
+    #[test]
+    fn protocol_header_packs_magic_and_version() {
+        let bytes = protocol_header();
+        let header = u16::from_be_bytes(bytes);
+        assert_eq!(header >> 6, GREY_MAGIC, "upper 10 bits carry the #888 magic");
+        assert_eq!((header & 0x3F) as u8, PROTOCOL_VERSION, "lower 6 bits carry the version");
+        // 888 << 6 == 0xDE00, so every datagram begins with 0xDE.
+        assert_eq!(bytes[0], 0xDE);
+    }
+
+    #[tokio::test]
+    async fn try_receive_drops_foreign_datagrams() {
+        let key_provider = StaticKeyProvider::new([5u8; 32]);
+        // A fixed port outside the 30000–60000 range the other tests randomise within, so this
+        // socket can't collide with them when the suite runs in parallel.
+        let addr_str = "127.0.0.1:28321".to_string();
+        let addr: SocketAddr = addr_str.parse().unwrap();
+        let receiver = UdpGossipTransport::new(&addr_str, Aes256Gcm, key_provider).await.unwrap();
+
+        // A datagram whose first two bytes are not the #888 magic (e.g. a port scan or a pre-2.0
+        // peer's ciphertext) must be dropped, not surfaced as an error or a message.
+        let raw = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        raw.send_to(&[0x00, 0x00, 0x01, 0x02, 0x03], addr).await.unwrap();
+
+        let received: Option<(SocketAddr, Message<TestPeer, LastWriteWinsValue<i32>>)> =
+            timeout(Duration::from_millis(250), receiver.try_receive())
+                .await
+                .expect("try_receive should return promptly")
+                .expect("a dropped datagram is not an error");
+        assert!(received.is_none(), "a non-Grey datagram must be dropped");
     }
 }

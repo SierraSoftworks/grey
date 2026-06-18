@@ -3,7 +3,7 @@ use grey_api::Impact;
 use yew::prelude::*;
 
 use crate::components::incidents::worst_impact;
-use crate::components::{Banner, BannerKind, IncidentsSection, ProbeList, Timeline};
+use crate::components::{Banner, BannerKind, IncidentsSection, ServiceList, Timeline};
 use crate::contexts::use_store;
 
 /// The status page: a top-line banner, the probe list, notices, and recent/active incidents. The
@@ -46,7 +46,7 @@ pub fn home_view() -> Html {
         <>
             <div class="content">
                 <Banner kind={banner_kind} text={status_text.to_string()} />
-                <ProbeList />
+                <ServiceList />
             </div>
 
             <Timeline />

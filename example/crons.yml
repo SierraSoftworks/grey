@@ -1,0 +1,40 @@
+---
+# This example demonstrates `crons`: passive "deadman's switch" monitors for scheduled jobs.
+# Instead of Grey actively probing a service, the job itself checks in over HTTP on its
+# expected cadence:
+#
+#   # report a run starting, succeeding, or failing (POST with a JSON body)
+#   curl -X POST http://127.0.0.1:3002/api/v1/cron/backup.nightly/check-in -d '{"status":"running"}'
+#   curl -X POST http://127.0.0.1:3002/api/v1/cron/backup.nightly/check-in -d '{"status":"succeeded","message":"42GB"}'
+#
+#   # the same, as a GET with query parameters (handy for restricted cron environments)
+#   curl 'http://127.0.0.1:3002/api/v1/cron/backup.nightly/check-in?status=succeeded&token=s3cr3t'
+#
+# Grey detects problems deterministically against each cron's declared schedule: a run is
+# *missing* once the next-due time plus `grace` passes without a check-in, and *overrunning*
+# once an in-flight run exceeds its `max_duration`. A missed or hung run surfaces on the
+# status page like a failing probe.
+ui:
+  enabled: true
+  listen: 127.0.0.1:3002
+
+crons:
+  # A nightly backup scheduled with a crontab expression (evaluated in UTC). Reporting
+  # `running` then `succeeded` lets the completion detector flag a hung run via max_duration.
+  - name: backup.nightly
+    schedule: '0 2 * * *'  # standard 5-field crontab: 02:00 every day (UTC)
+    max_duration: 30m      # a run still in flight after 30m reads as overrunning
+    grace: 1h              # slack after 02:00 before a no-show reads as missing
+    tags:
+      service: Backups
+
+  # A simple "every N" job that only reports on completion. With no `running` phase the
+  # completion detector stays dormant; only the schedule (missed-run) detector applies.
+  - name: sync.hourly
+    interval: 1h           # the simple fixed-cadence form
+    grace: 10m             # default would be interval/10 (6m); be a little more lenient
+    # An optional shared secret: when set, callers must supply it via the `X-Cron-Token`
+    # header or a `token` query parameter.
+    token: 'change-me'
+    tags:
+      service: Sync

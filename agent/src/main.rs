@@ -8,6 +8,7 @@ use clap::Parser;
 
 mod cluster;
 mod config;
+mod cron;
 mod engine;
 mod js;
 #[macro_use]

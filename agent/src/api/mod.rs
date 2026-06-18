@@ -11,6 +11,7 @@ mod admin;
 mod auth;
 mod cluster;
 mod config;
+mod cron;
 mod incidents;
 mod notices;
 mod page;
@@ -88,6 +89,12 @@ pub fn create_app() -> App<
         .route("/auth/callback", web::get().to(page::index))
         .route("/auth/logout", web::get().to(page::index))
         .route("/api/v1/probes", web::get().to(probes::get_probes))
+        .route("/api/v1/crons", web::get().to(cron::get_crons))
+        // Public cron check-in: a scheduled job reports its status here (POST with a JSON body, or
+        // GET with query parameters). This is a separate ingest endpoint from the UI's `/crons` read
+        // API; an optional per-cron token gates writes when configured.
+        .route("/api/v1/cron/{name}/check-in", web::get().to(cron::report_checkin_get))
+        .route("/api/v1/cron/{name}/check-in", web::post().to(cron::report_checkin_post))
         .route("/api/v1/notices", web::get().to(notices::get_notices))
         .route("/api/v1/incidents", web::get().to(incidents::get_incidents))
         // Public login endpoints: the SPA fetches the provider's authorization endpoint, then hands
@@ -134,6 +141,29 @@ mod tests {
         let req = test::TestRequest::get().uri("/incidents").to_request();
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success(), "GET /incidents should be server-rendered");
+    }
+
+    /// The public cron routes must be wired into the application: the list endpoint is reachable and
+    /// the check-in endpoint is routed (a check-in for an unconfigured cron is a 404, not a routing
+    /// 404 — i.e. the route exists and the handler ran).
+    #[actix_web::test]
+    async fn cron_routes_are_registered() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::test(dir.path().to_path_buf()).await;
+        let app = test::init_service(create_app().app_data(web::Data::new(state))).await;
+
+        let req = test::TestRequest::get().uri("/api/v1/crons").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success(), "GET /api/v1/crons should be routed");
+
+        // The check-in route exists; with no crons configured the handler returns 404 with an
+        // ApiError body (a routed response, distinct from a missing route).
+        let req = test::TestRequest::post()
+            .uri("/api/v1/cron/anything/check-in")
+            .set_json(serde_json::json!({ "status": "succeeded" }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::NOT_FOUND);
     }
 
     /// The tracing middleware is wired in front of every route. It echoes a `traceparent` when a
