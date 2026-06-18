@@ -54,28 +54,16 @@ impl CronSchedule {
 
 /// The status a job reports for a run: it is `Running` while in flight and transitions to one of the
 /// two terminal states when it finishes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// The variants are declared in **merge-precedence order** (`Running < Succeeded < Failed`), so the
+/// derived [`Ord`] gives exactly the precedence run-set merging needs: a terminal status supersedes
+/// `Running`, and a failure observed by any node supersedes a success.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CronStatus {
     Running,
     Succeeded,
     Failed,
-}
-
-impl CronStatus {
-    pub fn is_terminal(self) -> bool {
-        matches!(self, CronStatus::Succeeded | CronStatus::Failed)
-    }
-
-    /// Precedence used when two records of the same run are merged: a terminal status supersedes
-    /// `Running`, and a failure supersedes a success (so a failure observed by any node wins).
-    fn rank(self) -> u8 {
-        match self {
-            CronStatus::Running => 0,
-            CronStatus::Succeeded => 1,
-            CronStatus::Failed => 2,
-        }
-    }
 }
 
 /// The derived, displayed health of a cron — what the UI renders "as if it were an active probe".
@@ -226,7 +214,27 @@ impl Cron {
         }
     }
 
-    // --- Merge (CRDT) ----------------------------------------------------------------------------
+    // --- Run-list maintenance --------------------------------------------------------------------
+
+    /// Appends a run, keeping `runs` sorted oldest-first and bounded to the most recent [`MAX_RUNS`].
+    /// The agent's check-in folding (`CronCheckin::apply`) decides *when* to open a run; this owns the
+    /// "how the list is bounded" invariant alongside [`Cron::merge`].
+    pub fn push_run(&mut self, run: CronRun) {
+        self.runs.push(run);
+        self.trim_runs();
+    }
+
+    /// Whether the most recent run is still in flight (reported `running`, with no terminal status
+    /// yet) — i.e. a further `running` check-in is a heartbeat rather than a new run.
+    pub fn has_in_flight(&self) -> bool {
+        self.runs.last().map(CronRun::is_in_flight).unwrap_or(false)
+    }
+
+    /// A mutable reference to the in-flight run (the latest run, while it is still running), for a
+    /// terminal check-in to close out with its status and duration.
+    pub fn in_flight_mut(&mut self) -> Option<&mut CronRun> {
+        self.runs.last_mut().filter(|run| run.is_in_flight())
+    }
 
     /// Keeps `runs` sorted oldest-first and bounded to the most recent [`MAX_RUNS`].
     fn trim_runs(&mut self) {
@@ -247,10 +255,10 @@ impl Cron {
                 .iter_mut()
                 .find(|r| r.started_at == run.started_at)
             {
-                if run.status.rank() > existing.status.rank() {
+                if run.status > existing.status {
                     existing.status = run.status;
                     existing.duration = run.duration.or(existing.duration);
-                } else if run.status.rank() == existing.status.rank() {
+                } else if run.status == existing.status {
                     existing.duration = existing.duration.or(run.duration);
                 }
             } else {
@@ -336,10 +344,11 @@ impl Cron {
         self.health(now).passing()
     }
 
-    /// When the current health state was entered — computed analytically so there is no need for a
-    /// sampling loop or a separate streak register.
-    pub fn since(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
-        match self.health(now) {
+    /// When the current health state was entered, computed analytically (no sampling loop or streak
+    /// register). Takes the already-computed [`Cron::health`] so the state machine — and any crontab
+    /// parse it performs — isn't evaluated a second time.
+    pub fn since(&self, health: CronHealth) -> Option<DateTime<Utc>> {
+        match health {
             CronHealth::Pending => None,
             CronHealth::Failed => self.runs.last().map(|run| {
                 run.started_at
@@ -411,7 +420,7 @@ mod tests {
         assert!(c.passing(ts(10_000)));
         assert!(!c.schedule_overdue(ts(10_000)));
         assert!(!c.completion_overdue(ts(10_000)));
-        assert_eq!(c.since(ts(10_000)), None);
+        assert_eq!(c.since(c.health(ts(10_000))), None);
     }
 
     #[test]
@@ -484,7 +493,7 @@ mod tests {
         let now = ts(2_000);
         assert_eq!(c.health(now), CronHealth::Missing);
         // last_start + interval + grace = 1000 + 60 + 6.
-        assert_eq!(c.since(now), Some(ts(1_066)));
+        assert_eq!(c.since(c.health(now)), Some(ts(1_066)));
     }
 
     #[test]

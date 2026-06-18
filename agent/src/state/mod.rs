@@ -296,10 +296,76 @@ impl cluster::EncryptionKeyProvider for State {
     }
 }
 
-// Gossip field keys are namespaced by entity type so that a probe and a cron sharing a name (or any
-// future entity overlap) cannot collide within a peer's `(field -> diff)` map.
-const PROBE_FIELD_PREFIX: &str = "probe:";
-const CRON_FIELD_PREFIX: &str = "cron:";
+/// The redb value type shared by every entity table: `(version, msgpack snapshot)`.
+type FieldValue = (u64, &'static [u8]);
+
+/// Folds an incoming entity diff into `table` at `(node_id, name)` — merging it into the existing
+/// record via [`Versioned::apply`] when one is present, or inserting it fresh otherwise. Shared by
+/// the probe and cron arms of [`GossipStore::apply`] so the redb upsert plumbing lives in one place.
+fn merge_into_table<T>(
+    table: &mut redb::Table<(u128, String), FieldValue>,
+    node_id: u128,
+    name: &str,
+    incoming: &T,
+) -> Result<(), Box<dyn Error>>
+where
+    T: Versioned<Diff = T> + serde::Serialize + serde::de::DeserializeOwned,
+{
+    if let Ok(Some(mut existing)) = table.get_mut((node_id, name.to_string())) {
+        let (_version, data) = existing.value();
+        let mut current: T = rmp_serde::from_slice(data)
+            .map_err(|e| format!("Failed to parse existing state for update: {e:?}"))?;
+        current.apply(incoming);
+        let bytes = rmp_serde::to_vec_named(&current)
+            .map_err(|e| format!("Failed to serialize state for update: {e:?}"))?;
+        existing
+            .insert((current.version(), bytes.as_slice()))
+            .map_err(|e| format!("Failed to store updated state: {e:?}"))?;
+    } else {
+        let bytes = rmp_serde::to_vec_named(incoming)
+            .map_err(|e| format!("Failed to serialize state for insertion: {e:?}"))?;
+        table
+            .insert((node_id, name.to_string()), (incoming.version(), bytes.as_slice()))
+            .map_err(|e| format!("Failed to store new state: {e:?}"))?;
+    }
+    Ok(())
+}
+
+/// Emits the per-`(node, field)` diffs for one entity table into `delta`: every record newer than the
+/// peer's advertised version, wrapped into a [`ReplicatedEntity`] (the variant identifies the entity
+/// type, so the field key is just the bare entity name). Shared by the probe and cron passes of
+/// [`GossipStore::diff`].
+fn emit_table_diffs<T>(
+    txn: &redb::ReadTransaction,
+    table_def: TableDefinition<(u128, String), FieldValue>,
+    digest: &ClusterStateDigest<NodeID>,
+    delta: &mut cluster::ClusterStateDiff<NodeID, ReplicatedEntity>,
+    wrap: impl Fn(T) -> ReplicatedEntity,
+) -> Result<(), Box<dyn Error>>
+where
+    T: Versioned<Diff = T> + serde::de::DeserializeOwned,
+{
+    let Ok(table) = txn.open_table(table_def) else {
+        return Ok(());
+    };
+    for (key, value) in table.iter()?.filter_map(|r| r.ok()) {
+        let (node_id, name) = key.value();
+        let (version, data) = value.value();
+
+        let peer: NodeID = node_id.into();
+        let remote_version = digest.get_max_version(&peer).unwrap_or_default();
+        if version <= remote_version {
+            continue;
+        }
+
+        let data: T = rmp_serde::from_slice(data)
+            .map_err(|e| format!("Failed to parse state for diff: {e:?}"))?;
+        if let Some(diff) = data.diff(remote_version) {
+            delta.update(peer, name.to_string(), wrap(diff));
+        }
+    }
+    Ok(())
+}
 
 impl GossipStore for State {
     type Id = NodeID;
@@ -342,44 +408,8 @@ impl GossipStore for State {
         let mut delta = cluster::ClusterStateDiff::new();
 
         let txn = self.database.begin_read()?;
-
-        if let Ok(table) = txn.open_table(CLUSTER_FIELDS_TABLE) {
-            for (key, value) in table.iter()?.filter_map(|r| r.ok()) {
-                let (node_id, probe) = key.value();
-                let (version, data) = value.value();
-
-                let peer: Self::Id = node_id.into();
-                let remote_version = digest.get_max_version(&peer).unwrap_or_default();
-                if version <= remote_version {
-                    continue;
-                }
-
-                let data: Probe = rmp_serde::from_slice(data)
-                    .map_err(|e| format!("Failed to parse probe state for diff: {e:?}"))?;
-                if let Some(diff) = data.diff(remote_version) {
-                    delta.update(peer, format!("{PROBE_FIELD_PREFIX}{probe}"), ReplicatedEntity::Probe(diff));
-                }
-            }
-        }
-
-        if let Ok(table) = txn.open_table(CRON_FIELDS_TABLE) {
-            for (key, value) in table.iter()?.filter_map(|r| r.ok()) {
-                let (node_id, cron) = key.value();
-                let (version, data) = value.value();
-
-                let peer: Self::Id = node_id.into();
-                let remote_version = digest.get_max_version(&peer).unwrap_or_default();
-                if version <= remote_version {
-                    continue;
-                }
-
-                let data: Cron = rmp_serde::from_slice(data)
-                    .map_err(|e| format!("Failed to parse cron state for diff: {e:?}"))?;
-                if let Some(diff) = data.diff(remote_version) {
-                    delta.update(peer, format!("{CRON_FIELD_PREFIX}{cron}"), ReplicatedEntity::Cron(diff));
-                }
-            }
-        }
+        emit_table_diffs::<Probe>(&txn, CLUSTER_FIELDS_TABLE, &digest, &mut delta, ReplicatedEntity::Probe)?;
+        emit_table_diffs::<Cron>(&txn, CRON_FIELDS_TABLE, &digest, &mut delta, ReplicatedEntity::Cron)?;
 
         trace!(name: "state.diff", { host.node_id = %self.node_id, digest = %digest, delta = ?delta }, "Composed new cluster state diff.");
 
@@ -402,33 +432,12 @@ impl GossipStore for State {
                 let peer_id: u128 = peer.into();
 
                 for (field, entity) in node_diff {
+                    // The `ReplicatedEntity` variant routes the update to the right table; the field
+                    // key is just the bare entity name (probe and cron names are kept distinct by
+                    // config validation, so there is no cross-table collision to disambiguate).
                     match entity {
                         ReplicatedEntity::Probe(incoming) => {
-                            let probe_name = field
-                                .strip_prefix(PROBE_FIELD_PREFIX)
-                                .unwrap_or(&field)
-                                .to_string();
-
-                            if let Ok(Some(mut existing)) = probe_table.get_mut((peer_id, probe_name.clone())) {
-                                let (_version, data) = existing.value();
-
-                                let mut current: ProbeState = rmp_serde::from_slice(data)
-                                    .map_err(|e| format!("Failed to parse existing probe state for update: {e:?}"))?;
-                                current.apply(&incoming);
-                                existing.insert((current.version(), rmp_serde::to_vec_named(&current)
-                                    .map_err(|e| format!("Failed to serialize new probe state for update: {e:?}"))?.as_slice()))
-                                    .map_err(|e| format!("Failed to store new probe state: {e:?}"))?;
-                            } else {
-                                probe_table.insert(
-                                    (peer_id, probe_name.clone()),
-                                    (
-                                        incoming.version(),
-                                        rmp_serde::to_vec_named(&incoming)
-                                            .map_err(|e| format!("Failed to serialize new probe state for insertion: {e:?}"))?.as_slice(),
-                                    ),
-                                )
-                                    .map_err(|e| format!("Failed to store new probe state: {e:?}"))?;
-                            }
+                            merge_into_table(&mut probe_table, peer_id, &field, &incoming)?;
 
                             // Fold the cluster's streak into this node's own record as it arrives,
                             // so the converged "passing since" history survives the eventual garbage
@@ -438,7 +447,7 @@ impl GossipStore for State {
                             // the inherited streak rides along on the node's next sampled update.
                             if peer_id != own_id
                                 && !incoming.streak.is_empty()
-                                && let Ok(Some(mut own)) = probe_table.get_mut((own_id, probe_name.clone()))
+                                && let Ok(Some(mut own)) = probe_table.get_mut((own_id, field.clone()))
                             {
                                 let (version, data) = own.value();
                                 let mut own_state: ProbeState = rmp_serde::from_slice(data)
@@ -453,31 +462,7 @@ impl GossipStore for State {
                             }
                         }
                         ReplicatedEntity::Cron(incoming) => {
-                            let cron_name = field
-                                .strip_prefix(CRON_FIELD_PREFIX)
-                                .unwrap_or(&field)
-                                .to_string();
-
-                            if let Ok(Some(mut existing)) = cron_table.get_mut((peer_id, cron_name.clone())) {
-                                let (_version, data) = existing.value();
-
-                                let mut current: Cron = rmp_serde::from_slice(data)
-                                    .map_err(|e| format!("Failed to parse existing cron state for update: {e:?}"))?;
-                                current.apply(&incoming);
-                                existing.insert((current.version(), rmp_serde::to_vec_named(&current)
-                                    .map_err(|e| format!("Failed to serialize new cron state for update: {e:?}"))?.as_slice()))
-                                    .map_err(|e| format!("Failed to store new cron state: {e:?}"))?;
-                            } else {
-                                cron_table.insert(
-                                    (peer_id, cron_name.clone()),
-                                    (
-                                        incoming.version(),
-                                        rmp_serde::to_vec_named(&incoming)
-                                            .map_err(|e| format!("Failed to serialize new cron state for insertion: {e:?}"))?.as_slice(),
-                                    ),
-                                )
-                                    .map_err(|e| format!("Failed to store new cron state: {e:?}"))?;
-                            }
+                            merge_into_table(&mut cron_table, peer_id, &field, &incoming)?;
                         }
                     }
                 }
@@ -531,7 +516,7 @@ mod tests {
         // Deliver the peer's record through the normal gossip apply path. This stores the
         // peer's record and folds its streak into this node's own record in one step.
         let mut diff = cluster::ClusterStateDiff::new();
-        diff.update(peer, format!("{PROBE_FIELD_PREFIX}{}", probe.name), ReplicatedEntity::Probe(peer_record));
+        diff.update(peer, probe.name.clone(), ReplicatedEntity::Probe(peer_record));
         state.apply(diff).await.unwrap();
 
         let pooled = state.get_probe_states().await.unwrap();

@@ -219,7 +219,7 @@ mod tests {
 
         let peer = NodeID::new();
         let mut diff = ClusterStateDiff::new();
-        diff.update(peer, "cron:backup".to_string(), ReplicatedEntity::Cron(peer_cron));
+        diff.update(peer, "backup".to_string(), ReplicatedEntity::Cron(peer_cron));
         state.apply(diff).await.unwrap();
 
         let pooled = state.get_cron_states().await.unwrap();

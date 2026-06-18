@@ -5,7 +5,7 @@
 //! probe sample to a `grey_api::Probe`.
 
 use chrono::{DateTime, Utc};
-use grey_api::{CheckIn, Cron, CronRun, CronStatus, MAX_RUNS};
+use grey_api::{CheckIn, Cron, CronRun, CronStatus};
 
 /// A check-in reported by a scheduled job: the status it is reporting, an optional message, and the
 /// (server-stamped) time it was received.
@@ -36,33 +36,27 @@ impl CronCheckin {
 
         match self.status {
             CronStatus::Running => {
-                if !has_in_flight(cron) {
-                    push_run(
-                        cron,
-                        CronRun {
-                            started_at: at,
-                            status: CronStatus::Running,
-                            duration: None,
-                        },
-                    );
+                if !cron.has_in_flight() {
+                    cron.push_run(CronRun {
+                        started_at: at,
+                        status: CronStatus::Running,
+                        duration: None,
+                    });
                 }
                 // Otherwise this is a heartbeat for the run already in flight: it advances
                 // `last_checkin` without opening a new run.
             }
             CronStatus::Succeeded | CronStatus::Failed => {
-                if let Some(run) = in_flight_mut(cron) {
+                if let Some(run) = cron.in_flight_mut() {
                     let duration = (at - run.started_at).to_std().unwrap_or_default();
                     run.status = self.status;
                     run.duration = Some(duration);
                 } else {
-                    push_run(
-                        cron,
-                        CronRun {
-                            started_at: at,
-                            status: self.status,
-                            duration: None,
-                        },
-                    );
+                    cron.push_run(CronRun {
+                        started_at: at,
+                        status: self.status,
+                        duration: None,
+                    });
                 }
             }
         }
@@ -76,28 +70,10 @@ impl CronCheckin {
     }
 }
 
-fn has_in_flight(cron: &Cron) -> bool {
-    cron.runs.last().map(CronRun::is_in_flight).unwrap_or(false)
-}
-
-fn in_flight_mut(cron: &mut Cron) -> Option<&mut CronRun> {
-    cron.runs.last_mut().filter(|run| run.is_in_flight())
-}
-
-/// Appends a run, keeping `runs` sorted oldest-first and bounded to the most recent [`MAX_RUNS`].
-fn push_run(cron: &mut Cron, run: CronRun) {
-    cron.runs.push(run);
-    cron.runs.sort_by_key(|r| r.started_at);
-    if cron.runs.len() > MAX_RUNS {
-        let excess = cron.runs.len() - MAX_RUNS;
-        cron.runs.drain(0..excess);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use grey_api::CronSchedule;
+    use grey_api::{CronSchedule, MAX_RUNS};
     use std::collections::HashMap;
     use std::time::Duration;
 

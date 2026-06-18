@@ -120,10 +120,21 @@ impl Config {
         Ok(config)
     }
 
-    /// Validates that each cron declares exactly one of `interval` / `schedule`, and that any crontab
-    /// expression parses — so a misconfiguration fails the load rather than silently misbehaving.
+    /// Validates that each cron declares exactly one of `interval` / `schedule`, that any crontab
+    /// expression parses, and that no cron shares a name with a probe — so a misconfiguration fails
+    /// the load rather than silently misbehaving. The name check is what lets gossip key replicated
+    /// state by the bare entity name (the `ReplicatedEntity` variant carries the type); without it a
+    /// same-named probe and cron would collide in a peer's per-node diff map.
     fn validate_crons(&self) -> Result<(), Box<dyn std::error::Error>> {
         for cron in &self.crons {
+            if self.probes.iter().any(|probe| probe.name == cron.name) {
+                return Err(format!(
+                    "Cron '{}' has the same name as a probe; names must be unique across probes and crons.",
+                    cron.name
+                )
+                .into());
+            }
+
             match (&cron.schedule, cron.interval) {
                 (Some(_), Some(_)) => {
                     return Err(format!(
@@ -444,6 +455,28 @@ mod tests {
         // A well-formed crontab cron loads.
         let ok = dir.path().join("ok.yml");
         tokio::fs::write(&ok, "crons:\n  - name: good\n    schedule: '*/5 * * * *'\n")
+            .await
+            .unwrap();
+        assert!(Config::load_from_path(&ok).await.is_ok());
+    }
+
+    /// A cron may not share a name with a probe: gossip keys replicated state by the bare entity
+    /// name (the type is carried by the `ReplicatedEntity` variant), so a clash must be rejected at
+    /// load rather than colliding on the wire.
+    #[tokio::test]
+    async fn rejects_cron_sharing_a_probe_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let probe = "probes:\n  - name: backup\n    policy: { interval: 5s, timeout: 2s }\n    target: !Http\n      url: https://example.com\n";
+
+        let clash = dir.path().join("clash.yml");
+        tokio::fs::write(&clash, format!("{probe}crons:\n  - name: backup\n    interval: 1h\n"))
+            .await
+            .unwrap();
+        assert!(Config::load_from_path(&clash).await.is_err(), "a cron named like a probe must be rejected");
+
+        // Distinct names load fine.
+        let ok = dir.path().join("ok.yml");
+        tokio::fs::write(&ok, format!("{probe}crons:\n  - name: backup.cron\n    interval: 1h\n"))
             .await
             .unwrap();
         assert!(Config::load_from_path(&ok).await.is_ok());

@@ -24,7 +24,7 @@ pub fn cron(props: &CronProps) -> Html {
 
     // "healthy for 5d" / "missed run for 2h" — how long the cron has held its current state.
     let state_text = cron
-        .since(now)
+        .since(health)
         .map(|since| {
             let held = compact_duration(now.signed_duration_since(since));
             if health.passing() {
