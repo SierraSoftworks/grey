@@ -541,7 +541,7 @@ dependencies = [
 [[package]]
 name = "boa_ast"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#ffec9244d4267406d66aef8b3c8a1d89730df5b4"
+source = "git+https://github.com/boa-dev/boa#de2221a09c132951c2ebad36e62ecd20b9987215"
 dependencies = [
  "bitflags",
  "boa_interner",
@@ -556,7 +556,7 @@ dependencies = [
 [[package]]
 name = "boa_engine"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#ffec9244d4267406d66aef8b3c8a1d89730df5b4"
+source = "git+https://github.com/boa-dev/boa#de2221a09c132951c2ebad36e62ecd20b9987215"
 dependencies = [
  "aligned-vec",
  "arrayvec",
@@ -612,7 +612,7 @@ dependencies = [
 [[package]]
 name = "boa_gc"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#ffec9244d4267406d66aef8b3c8a1d89730df5b4"
+source = "git+https://github.com/boa-dev/boa#de2221a09c132951c2ebad36e62ecd20b9987215"
 dependencies = [
  "arrayvec",
  "boa_macros",
@@ -625,7 +625,7 @@ dependencies = [
 [[package]]
 name = "boa_interner"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#ffec9244d4267406d66aef8b3c8a1d89730df5b4"
+source = "git+https://github.com/boa-dev/boa#de2221a09c132951c2ebad36e62ecd20b9987215"
 dependencies = [
  "boa_gc",
  "boa_macros",
@@ -640,7 +640,7 @@ dependencies = [
 [[package]]
 name = "boa_macros"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#ffec9244d4267406d66aef8b3c8a1d89730df5b4"
+source = "git+https://github.com/boa-dev/boa#de2221a09c132951c2ebad36e62ecd20b9987215"
 dependencies = [
  "cfg-if",
  "cow-utils",
@@ -653,7 +653,7 @@ dependencies = [
 [[package]]
 name = "boa_parser"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#ffec9244d4267406d66aef8b3c8a1d89730df5b4"
+source = "git+https://github.com/boa-dev/boa#de2221a09c132951c2ebad36e62ecd20b9987215"
 dependencies = [
  "bitflags",
  "boa_ast",
@@ -670,7 +670,7 @@ dependencies = [
 [[package]]
 name = "boa_runtime"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#ffec9244d4267406d66aef8b3c8a1d89730df5b4"
+source = "git+https://github.com/boa-dev/boa#de2221a09c132951c2ebad36e62ecd20b9987215"
 dependencies = [
  "base64",
  "boa_engine",
@@ -689,7 +689,7 @@ dependencies = [
 [[package]]
 name = "boa_string"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#ffec9244d4267406d66aef8b3c8a1d89730df5b4"
+source = "git+https://github.com/boa-dev/boa#de2221a09c132951c2ebad36e62ecd20b9987215"
 dependencies = [
  "fast-float2",
  "itoa",
@@ -1546,9 +1546,9 @@ checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
 name = "filt-rs"
-version = "1.1.0"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6b2137f98f1cdb6e92f000d78ff8a094f12d66d0acda26c239d59a2c9675155"
+checksum = "86a4344f519a4f7640ff26c4d4bb1b34ae1ebf54e37ccd1ec443225f0bae3d4b"
 dependencies = [
  "chrono",
  "human-errors",
@@ -4646,7 +4646,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 [[package]]
 name = "small_btree"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#ffec9244d4267406d66aef8b3c8a1d89730df5b4"
+source = "git+https://github.com/boa-dev/boa#de2221a09c132951c2ebad36e62ecd20b9987215"
 dependencies = [
  "arrayvec",
 ]
@@ -4854,7 +4854,7 @@ dependencies = [
 [[package]]
 name = "tag_ptr"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#ffec9244d4267406d66aef8b3c8a1d89730df5b4"
+source = "git+https://github.com/boa-dev/boa#de2221a09c132951c2ebad36e62ecd20b9987215"
 
 [[package]]
 name = "tap"
