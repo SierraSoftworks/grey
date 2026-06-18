@@ -497,6 +497,57 @@ mod tests {
     }
 
     #[test]
+    fn since_reports_failure_and_stuck_onsets() {
+        // A failed terminal run reads as failing since the run finished (start + duration).
+        let c = cron_with(every(60), vec![run(1_000, CronStatus::Failed, Some(5))], None, None);
+        assert_eq!(c.health(ts(1_006)), CronHealth::Failed);
+        assert_eq!(c.since(c.health(ts(1_006))), Some(ts(1_005)));
+
+        // A stuck in-flight run reads as overrunning since start + max_duration.
+        let c = cron_with(
+            every(3600),
+            vec![run(1_000, CronStatus::Running, None)],
+            Some(Duration::from_secs(60)),
+            None,
+        );
+        let now = ts(2_000);
+        assert_eq!(c.health(now), CronHealth::Stuck);
+        assert_eq!(c.since(c.health(now)), Some(ts(1_060)));
+    }
+
+    #[test]
+    fn next_due_is_one_interval_after_the_last_run() {
+        let c = cron_with(every(60), vec![run(1_000, CronStatus::Succeeded, Some(5))], None, None);
+        assert_eq!(c.next_due(), Some(ts(1_060)));
+
+        // With no runs there is no next-due time.
+        let empty = Cron::from_config("c", HashMap::new(), every(60), None, None);
+        assert_eq!(empty.next_due(), None);
+    }
+
+    #[test]
+    fn cron_health_labels_and_tokens_cover_every_variant() {
+        let all = [
+            CronHealth::Pending,
+            CronHealth::Running,
+            CronHealth::Succeeded,
+            CronHealth::Failed,
+            CronHealth::Missing,
+            CronHealth::Stuck,
+        ];
+        for health in all {
+            assert!(!health.label().is_empty());
+            assert!(!health.as_str().is_empty());
+        }
+        assert!(CronHealth::Pending.passing());
+        assert!(CronHealth::Running.passing());
+        assert!(!CronHealth::Missing.passing());
+        assert!(!CronHealth::Stuck.passing());
+        assert_eq!(CronHealth::Stuck.label(), "Overrunning");
+        assert_eq!(CronHealth::Missing.as_str(), "missing");
+    }
+
+    #[test]
     fn crontab_schedule_detects_a_missed_minute() {
         // "every minute"; default grace for a crontab is 5 minutes.
         let start = DateTime::parse_from_rfc3339("2026-01-01T12:00:00Z").unwrap().with_timezone(&Utc);

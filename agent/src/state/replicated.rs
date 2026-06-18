@@ -49,3 +49,66 @@ impl Versioned for ReplicatedEntity {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    fn at(secs: i64) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from_timestamp(secs, 0).unwrap()
+    }
+
+    fn probe(updated: i64) -> Probe {
+        Probe {
+            name: "p".into(),
+            tags: HashMap::new(),
+            last_updated: at(updated),
+            history: vec![],
+            observations: HashMap::new(),
+            streak: Default::default(),
+        }
+    }
+
+    fn cron(updated: i64) -> Cron {
+        let mut c = Cron::from_config(
+            "c",
+            HashMap::new(),
+            grey_api::CronSchedule::Every(Duration::from_secs(60)),
+            None,
+            None,
+        );
+        c.last_updated = at(updated);
+        c
+    }
+
+    #[test]
+    fn version_and_diff_delegate_to_the_inner_entity() {
+        let p = ReplicatedEntity::Probe(probe(1_700));
+        assert_eq!(p.version(), probe(1_700).version());
+        assert!(matches!(p.diff(0), Some(ReplicatedEntity::Probe(_))));
+        assert!(p.diff(p.version()).is_none(), "no diff when not newer than the request");
+
+        let c = ReplicatedEntity::Cron(cron(1_700));
+        assert_eq!(c.version(), cron(1_700).version());
+        assert!(matches!(c.diff(0), Some(ReplicatedEntity::Cron(_))));
+    }
+
+    #[test]
+    fn apply_merges_matching_variants_and_ignores_mismatches() {
+        // Matching variants merge (a newer record advances `last_updated`).
+        let mut p = ReplicatedEntity::Probe(probe(1_000));
+        p.apply(&ReplicatedEntity::Probe(probe(2_000)));
+        assert_eq!(p.version(), probe(2_000).version());
+
+        let mut c = ReplicatedEntity::Cron(cron(1_000));
+        c.apply(&ReplicatedEntity::Cron(cron(2_000)));
+        assert_eq!(c.version(), cron(2_000).version());
+
+        // A mismatched pair is a defensive no-op: a cron diff never touches a probe.
+        let mut p = ReplicatedEntity::Probe(probe(1_000));
+        p.apply(&ReplicatedEntity::Cron(cron(9_999)));
+        assert_eq!(p.version(), probe(1_000).version());
+    }
+}

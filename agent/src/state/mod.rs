@@ -535,6 +535,56 @@ mod tests {
         assert_eq!(own_record.streak.covered_since, Some(streak_start));
     }
 
+    /// `digest` summarises both entity tables, and `diff` against an empty digest emits this node's
+    /// probe *and* cron records — exercising the gossip read path for both entity types.
+    #[tokio::test]
+    async fn digest_and_diff_cover_both_probe_and_cron_tables() {
+        use crate::config::CronConfig;
+        use crate::cron::CronCheckin;
+        use grey_api::CronStatus;
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let state = State::test(dir.path().to_path_buf()).await;
+
+        // `State::test` already recorded a probe sample for this node; add a configured cron + a
+        // check-in so both tables hold state for the local node.
+        let mut config = Config::test(&dir.path().to_path_buf());
+        config.crons = vec![CronConfig {
+            name: "backup".into(),
+            interval: Some(std::time::Duration::from_secs(60)),
+            schedule: None,
+            max_duration: None,
+            grace: None,
+            token: None,
+            tags: HashMap::new(),
+        }];
+        *state.config.write().unwrap() = Arc::new(config);
+        state
+            .record_cron_checkin(
+                "backup",
+                CronCheckin::new(CronStatus::Succeeded, "ok".into(), chrono::Utc::now()),
+            )
+            .await
+            .unwrap();
+
+        // The digest summarises this node with a non-zero max version (across both tables).
+        let digest = state.digest().await.unwrap();
+        assert!(digest.get_max_version(&state.node_id).unwrap_or(0) > 0);
+
+        // Diffing against an empty digest emits both the probe and the cron record for this node.
+        let mut delta = state.diff(ClusterStateDigest::new()).await.unwrap().into_inner();
+        let node_diff = delta.remove(&state.node_id).expect("our node's state in the diff");
+        assert!(
+            node_diff.values().any(|e| matches!(e, ReplicatedEntity::Probe(_))),
+            "the probe diff should be emitted"
+        );
+        assert!(
+            node_diff.values().any(|e| matches!(e, ReplicatedEntity::Cron(_))),
+            "the cron diff should be emitted"
+        );
+    }
+
     fn b64_key(byte: u8) -> String {
         BASE64_STANDARD.encode([byte; 32])
     }
