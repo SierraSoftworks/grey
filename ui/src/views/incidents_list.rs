@@ -1,4 +1,4 @@
-use grey_api::Incident;
+use grey_api::IncidentView;
 use yew::prelude::*;
 use yew_router::prelude::*;
 
@@ -30,7 +30,7 @@ pub fn incidents_list() -> Html {
     }
 }
 
-fn incident_list_body(incidents: &[Incident]) -> Html {
+fn incident_list_body(incidents: &[IncidentView]) -> Html {
     if incidents.is_empty() {
         return html! {
             <crate::components::EmptyState title="No incidents reported">
@@ -40,7 +40,7 @@ fn incident_list_body(incidents: &[Incident]) -> Html {
     }
     html! {
         { for incidents.iter().map(|incident| html! {
-            <IncidentBlock key={incident.id.to_string()} incident={incident.clone()} />
+            <IncidentBlock key={incident.id().to_string()} incident={incident.clone()} />
         }) }
     }
 }

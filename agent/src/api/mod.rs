@@ -113,8 +113,11 @@ pub fn create_app() -> App<
                 .route("/incidents", web::get().to(admin::list_incidents))
                 .route("/incidents", web::post().to(admin::create_incident))
                 .route("/incidents/{id}", web::get().to(admin::get_incident))
-                .route("/incidents/{id}", web::put().to(admin::replace_incident))
-                .route("/incidents/{id}", web::delete().to(admin::delete_incident)),
+                .route("/incidents/{id}", web::put().to(admin::put_incident))
+                .route("/incidents/{id}", web::delete().to(admin::delete_incident))
+                .route("/incidents/{id}/updates", web::post().to(admin::create_update))
+                .route("/incidents/{id}/updates/{uid}", web::put().to(admin::put_update))
+                .route("/incidents/{id}/updates/{uid}", web::delete().to(admin::delete_update)),
         )
         .route("/static/{filename:.*}", web::get().to(serve_static))
 }

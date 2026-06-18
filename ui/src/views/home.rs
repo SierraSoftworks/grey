@@ -33,7 +33,7 @@ pub fn home_view() -> Html {
 
     // Show incidents that are active or were updated recently (the probe-history window).
     let cutoff = Utc::now() - chrono::Duration::days(14);
-    let recent_incidents: Vec<grey_api::Incident> = store
+    let recent_incidents: Vec<grey_api::IncidentView> = store
         .incidents()
         .iter()
         .filter(|incident| {

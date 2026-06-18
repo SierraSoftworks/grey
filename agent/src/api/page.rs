@@ -21,8 +21,14 @@ pub async fn index(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpRe
         .collect();
     crons.sort_by_key(|c| c.name.clone());
 
-    // Only the publicly visible incidents are server-rendered for unauthenticated viewers.
-    let incidents = data.state.list_incidents(false).await.unwrap_or_default();
+    // Only the first page of publicly visible incidents is server-rendered for unauthenticated
+    // viewers; the client paginates for older ones.
+    let incidents = data
+        .state
+        .list_incidents(false, crate::state::DEFAULT_INCIDENT_PAGE, None)
+        .await
+        .map(|page| page.incidents)
+        .unwrap_or_default();
 
     // Read the embedded HTML template
     let html_template = ASSETS_DIR
@@ -120,11 +126,8 @@ mod tests {
             .state
             .create_incident(
                 "Database outage".into(),
-                grey_api::IncidentUpdate {
-                    impact: grey_api::Impact::Offline,
-                    timestamp: chrono::Utc::now(),
-                    message: String::new(),
-                },
+                grey_api::Impact::Offline,
+                "Investigating".into(),
             )
             .await
             .unwrap();

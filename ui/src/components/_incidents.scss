@@ -284,7 +284,7 @@
         cursor: pointer;
         border: none;
         background: none;
-        padding: 0;
+        padding: 0.2rem;
         color: $color-text-muted;
         display: inline-flex;
         align-items: center;
@@ -296,6 +296,10 @@
 
         &:hover {
             color: $color-text;
+        }
+
+        &.danger:hover {
+            color: $color-status-error;
         }
     }
 
@@ -313,9 +317,9 @@
     }
 
     // Each new (unposted) update's controls: impact select + timestamp + remove, above its message.
-    .incident-timeline__edit-row {
+    .incident-timeline__item--new .incident-timeline__time {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         flex-wrap: wrap;
         gap: 0.6rem;
         margin-bottom: 0.4rem;

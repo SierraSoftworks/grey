@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::Identifier;
+use crate::{Identifier, IncidentUpdateId};
 
 /// The impact an incident update reports. An incident's current impact is that of its most recent
 /// update (defaulting to `Hidden` when it has none). `Hidden` keeps the incident from unauthenticated
@@ -69,20 +69,38 @@ impl std::str::FromStr for Impact {
     }
 }
 
-/// A single update posted against an incident, identified by its position in the incident's `updates`
-/// list. `message` is markdown; `impact` drives the incident's status from this point on the timeline.
+/// A single update posted against an incident — a **standalone, gossip-replicated entity** in its own
+/// right (so adding/editing different updates never conflicts across the cluster). `message` is
+/// markdown; `impact` drives the incident's status from this update's `timestamp` onward and is fixed
+/// once posted. `version` is the wall-clock last-modified time in milliseconds — the gossip LWW clock
+/// and the HTTP ETag — and `deleted` is a propagating tombstone (filtered from API responses).
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct IncidentUpdate {
+    pub id: IncidentUpdateId,
     pub impact: Impact,
     #[serde(with = "chrono::serde::ts_seconds")]
     pub timestamp: DateTime<Utc>,
     pub message: String,
+    /// Last-modified wall-clock time in milliseconds: the gossip version and the HTTP ETag.
+    #[serde(default)]
+    pub version: u64,
+    /// A propagating delete tombstone. Tombstoned updates are filtered from API responses and reaped
+    /// by GC once aged out.
+    #[serde(default)]
+    pub deleted: bool,
 }
 
-/// An operator-recorded incident/event. Everything beyond its `id`, `title` and `version` is derived
-/// from its `updates`: the start/end times, the current impact, and the created/updated times. The
-/// `version` is a monotonically increasing counter used for optimistic concurrency (check-and-set via
-/// the API's `If-Match`/`ETag`).
+impl IncidentUpdate {
+    /// The parent incident this update belongs to (the high bits of its id).
+    pub fn incident_id(&self) -> Identifier {
+        self.id.incident_id()
+    }
+}
+
+/// An operator-recorded incident/event header — a **standalone, gossip-replicated entity** holding
+/// only its own mutable fields (`title`, the `deleted` tombstone). Its updates are separate entities
+/// joined into an [`IncidentView`] for display. `version` is the wall-clock last-modified time in
+/// milliseconds: the gossip LWW clock and the HTTP ETag.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Incident {
     pub id: Identifier,
@@ -90,23 +108,43 @@ pub struct Incident {
     #[serde(default)]
     pub version: u64,
     #[serde(default)]
+    pub deleted: bool,
+}
+
+/// An incident joined with its (visible, sorted-oldest-first) updates — the shape the API returns and
+/// the UI renders. Everything beyond the incident's `id`/`title` is derived from `updates`.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct IncidentView {
+    #[serde(flatten)]
+    pub incident: Incident,
+    #[serde(default)]
     pub updates: Vec<IncidentUpdate>,
 }
 
-impl Incident {
-    /// The updates sorted oldest-first by timestamp.
-    pub fn sorted_updates(&self) -> Vec<&IncidentUpdate> {
-        let mut updates: Vec<&IncidentUpdate> = self.updates.iter().collect();
-        updates.sort_by_key(|u| u.timestamp);
-        updates
+impl IncidentView {
+    pub fn new(incident: Incident, mut updates: Vec<IncidentUpdate>) -> Self {
+        updates.sort_by_key(|u| (u.timestamp, u.id));
+        Self { incident, updates }
     }
 
-    /// The incident's current impact: that of its most recent update, or `Hidden` when it has no
-    /// updates (a freshly created, not-yet-published incident).
+    pub fn id(&self) -> Identifier {
+        self.incident.id
+    }
+
+    pub fn title(&self) -> &str {
+        &self.incident.title
+    }
+
+    /// The updates sorted oldest-first (already maintained by [`IncidentView::new`]).
+    pub fn sorted_updates(&self) -> &[IncidentUpdate] {
+        &self.updates
+    }
+
+    /// The incident's current impact: that of its most recent update, or `Hidden` when it has none.
     pub fn current_impact(&self) -> Impact {
         self.updates
             .iter()
-            .max_by_key(|u| u.timestamp)
+            .max_by_key(|u| (u.timestamp, u.id))
             .map(|u| u.impact)
             .unwrap_or(Impact::Hidden)
     }
@@ -146,7 +184,7 @@ impl Incident {
     pub fn impact_since(&self) -> Option<DateTime<Utc>> {
         let current = self.current_impact();
         let mut since = None;
-        for update in self.sorted_updates().into_iter().rev() {
+        for update in self.updates.iter().rev() {
             if update.impact == current {
                 since = Some(update.timestamp);
             } else {
@@ -158,7 +196,7 @@ impl Incident {
 }
 
 /// The body for creating an incident: a title plus its first update (impact + markdown message). The
-/// server assigns the id, the update's timestamp, and the initial version.
+/// server assigns the ids and timestamps.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct CreateIncident {
     pub title: String,
@@ -166,14 +204,34 @@ pub struct CreateIncident {
     pub message: String,
 }
 
-/// The body for replacing an incident (title + the full updates list). Applied as a check-and-set
-/// against the incident's current `version` (sent as an `If-Match` header), so concurrent edits don't
-/// silently clobber one another.
+/// The body for replacing an incident's editable header fields (its title). Applied as a check-and-set
+/// against the incident's `version` (sent as an `If-Match` header).
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct IncidentEdit {
+pub struct PutIncident {
     pub title: String,
-    #[serde(default)]
-    pub updates: Vec<IncidentUpdate>,
+}
+
+/// The body for adding a new update to an incident (the server assigns the id and timestamp).
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct CreateUpdate {
+    pub impact: Impact,
+    pub message: String,
+}
+
+/// The body for replacing an existing update's editable field (its message). Applied as a
+/// check-and-set against the update's `version`; the `impact` is fixed once posted.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct PutUpdate {
+    pub message: String,
+}
+
+/// A page of incidents, newest-first, each carrying its updates. `next_cursor` is the id to pass as
+/// `?cursor=` for the following page, or `None` when the last page has been returned.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct IncidentsPage {
+    pub incidents: Vec<IncidentView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<Identifier>,
 }
 
 /// The signed-in administrator, derived from validated token claims, returned by `/api/v1/admin/me`.
@@ -194,21 +252,22 @@ mod tests {
         DateTime::from_timestamp(secs, 0).unwrap()
     }
 
-    fn update(impact: Impact, secs: i64) -> IncidentUpdate {
+    fn update(incident: Identifier, snow: u64, impact: Impact, secs: i64) -> IncidentUpdate {
         IncidentUpdate {
+            id: IncidentUpdateId::compose(incident, snow),
             impact,
             timestamp: ts(secs),
             message: format!("update at {secs}"),
+            version: (secs * 1000) as u64,
+            deleted: false,
         }
     }
 
-    fn sample(updates: Vec<IncidentUpdate>) -> Incident {
-        Incident {
-            id: Identifier::from(1_234_567u64),
-            title: "Database outage".into(),
-            version: 1,
+    fn view(updates: Vec<IncidentUpdate>) -> IncidentView {
+        IncidentView::new(
+            Incident { id: Identifier::from(1_234_567u64), title: "Database outage".into(), version: 1, deleted: false },
             updates,
-        }
+        )
     }
 
     #[test]
@@ -222,57 +281,56 @@ mod tests {
     }
 
     #[test]
-    fn incident_round_trips_with_id_as_string_and_epoch_updates() {
-        let incident = sample(vec![update(Impact::Offline, 1_700_000_100)]);
-        let json = serde_json::to_value(&incident).unwrap();
-        // id serializes as a grouped base36 string; updates carry epoch-second timestamps.
-        assert_eq!(json["id"], serde_json::Value::String(incident.id.to_string()));
-        assert_eq!(json["version"], 1);
+    fn view_flattens_incident_and_carries_updates() {
+        let id = Identifier::from(1_234_567u64);
+        let v = view(vec![update(id, 1, Impact::Offline, 1_700_000_100)]);
+        let json = serde_json::to_value(&v).unwrap();
+        // The incident fields are flattened alongside the updates array.
+        assert_eq!(json["id"], serde_json::Value::String(id.to_string()));
+        assert_eq!(json["title"], "Database outage");
         assert_eq!(json["updates"][0]["impact"], "offline");
         assert_eq!(json["updates"][0]["timestamp"], 1_700_000_100);
-        // No removed fields linger.
-        assert!(json.get("description").is_none());
-        assert!(json.get("start_time").is_none());
-        assert!(json.get("affected_services").is_none());
 
-        let decoded: Incident = serde_json::from_value(json).unwrap();
-        assert_eq!(decoded, incident);
+        let decoded: IncidentView = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, v);
     }
 
     #[test]
     fn derived_times_and_impact_follow_updates() {
-        let incident = sample(vec![
-            update(Impact::Offline, 1_700_000_100),
-            update(Impact::None, 1_700_000_500),
+        let id = Identifier::from(1_234_567u64);
+        let v = view(vec![
+            update(id, 1, Impact::Offline, 1_700_000_100),
+            update(id, 2, Impact::None, 1_700_000_500),
         ]);
-        assert_eq!(incident.current_impact(), Impact::None);
-        assert_eq!(incident.started_at(), Some(ts(1_700_000_100)));
-        assert_eq!(incident.last_updated(), Some(ts(1_700_000_500)));
-        assert_eq!(incident.ended_at(), Some(ts(1_700_000_500)), "a 'none' impact resolves it");
-        assert!(incident.is_public());
-        assert!(!incident.is_active());
+        assert_eq!(v.current_impact(), Impact::None);
+        assert_eq!(v.started_at(), Some(ts(1_700_000_100)));
+        assert_eq!(v.last_updated(), Some(ts(1_700_000_500)));
+        assert_eq!(v.ended_at(), Some(ts(1_700_000_500)), "a 'none' impact resolves it");
+        assert!(v.is_public());
+        assert!(!v.is_active());
     }
 
     #[test]
     fn no_updates_means_hidden_and_inactive() {
-        let incident = sample(vec![]);
-        assert_eq!(incident.current_impact(), Impact::Hidden);
-        assert!(!incident.is_public(), "an incident with no updates is a hidden draft");
-        assert!(!incident.is_active());
-        assert_eq!(incident.started_at(), None);
-        assert_eq!(incident.ended_at(), None);
-        assert_eq!(incident.impact_since(), None);
+        let v = view(vec![]);
+        assert_eq!(v.current_impact(), Impact::Hidden);
+        assert!(!v.is_public(), "an incident with no updates is a hidden draft");
+        assert!(!v.is_active());
+        assert_eq!(v.started_at(), None);
+        assert_eq!(v.ended_at(), None);
+        assert_eq!(v.impact_since(), None);
     }
 
     #[test]
     fn impact_since_is_the_start_of_the_trailing_run() {
-        let incident = sample(vec![
-            update(Impact::Offline, 100),
-            update(Impact::Offline, 200),
-            update(Impact::Degraded, 300),
+        let id = Identifier::from(1_234_567u64);
+        let v = view(vec![
+            update(id, 1, Impact::Offline, 100),
+            update(id, 2, Impact::Offline, 200),
+            update(id, 3, Impact::Degraded, 300),
         ]);
-        assert_eq!(incident.current_impact(), Impact::Degraded);
-        assert_eq!(incident.impact_since(), Some(ts(300)));
-        assert!(incident.is_active());
+        assert_eq!(v.current_impact(), Impact::Degraded);
+        assert_eq!(v.impact_since(), Some(ts(300)));
+        assert!(v.is_active());
     }
 }

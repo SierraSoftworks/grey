@@ -7,7 +7,7 @@ use crate::components::markdown::render_markdown;
 use crate::components::{Popover, PopoverAlign};
 use crate::formatters::time_format;
 use crate::styles::impact_class;
-use grey_api::{Incident, IncidentUpdate};
+use grey_api::{IncidentUpdate, IncidentView};
 use yew::prelude::*;
 
 /// The horizontal timeline used in summaries: a lead-in tail in the first update's colour runs in
@@ -17,7 +17,7 @@ use yew::prelude::*;
 /// on-screen.
 #[derive(Properties, PartialEq)]
 pub struct HorizontalTimelineProps {
-    pub incident: Incident,
+    pub incident: IncidentView,
 }
 
 #[function_component(HorizontalTimeline)]
@@ -103,7 +103,7 @@ pub fn vertical_timeline(props: &VerticalTimelineProps) -> Html {
                         <div class="incident-timeline__body">
                             <div class="incident-timeline__time">
                                 <span class={classes!("incident-status-pill", class)}>{update.impact.label()}</span>
-                                {time_format(update.timestamp)}
+                                <time datetime={update.timestamp.to_rfc3339()}>{time_format(update.timestamp)}</time>
                             </div>
                             <div class={classes!("incident-timeline__card", class)}>
                                 <div class="incident-timeline__card-message markdown">{ render_markdown(&update.message) }</div>

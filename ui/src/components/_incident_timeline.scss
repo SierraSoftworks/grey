@@ -24,6 +24,7 @@
     background-color: $color-status-offline;
     white-space: nowrap;
     margin: 0 0.5rem;
+    vertical-align: text-bottom;
 }
 
 // Horizontal event timeline (summary): impact-coloured dots on a connecting line, each revealing an
@@ -178,8 +179,13 @@
     }
 
     .incident-timeline__time {
-        font-size: 0.78rem;
+        font-size: 0.8rem;
         color: $color-text-muted;
+
+        time {
+            vertical-align: text-bottom;
+            line-height: 1.25rem;
+        }
     }
 
     .incident-timeline__keydate {

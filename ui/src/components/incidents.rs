@@ -10,12 +10,12 @@ use crate::components::markdown::render_markdown;
 use crate::formatters::{date_format, incident_status};
 use crate::routes::Route;
 use chrono::Utc;
-use grey_api::{Impact, Incident};
+use grey_api::{Impact, IncidentView};
 use yew::prelude::*;
 use yew_router::prelude::*;
 
 /// The worst impact among the incidents (used for the landing-page top-line status).
-pub fn worst_impact(incidents: &[Incident]) -> Option<Impact> {
+pub fn worst_impact(incidents: &[IncidentView]) -> Option<Impact> {
     incidents
         .iter()
         .filter(|i| i.is_active())
@@ -27,7 +27,7 @@ pub fn worst_impact(incidents: &[Incident]) -> Option<Impact> {
 /// nothing when there are no incidents to show.
 #[derive(Properties, PartialEq)]
 pub struct IncidentsSectionProps {
-    pub incidents: Vec<Incident>,
+    pub incidents: Vec<IncidentView>,
 }
 
 #[function_component(IncidentsSection)]
@@ -40,7 +40,7 @@ pub fn incidents_section(props: &IncidentsSectionProps) -> Html {
         <div class="incidents-section">
             <div class="incidents-section__summaries">
                 { for props.incidents.iter().map(|incident| html! {
-                    <IncidentSummary key={incident.id.to_string()} incident={incident.clone()} />
+                    <IncidentSummary key={incident.id().to_string()} incident={incident.clone()} />
                 }) }
             </div>
         </div>
@@ -51,7 +51,7 @@ pub fn incidents_section(props: &IncidentsSectionProps) -> Html {
 /// impact-coloured markers, each revealing its update in a popover on hover.
 #[derive(Properties, PartialEq)]
 pub struct IncidentSummaryProps {
-    pub incident: Incident,
+    pub incident: IncidentView,
 }
 
 #[function_component(IncidentSummary)]
@@ -67,8 +67,8 @@ pub fn incident_summary(props: &IncidentSummaryProps) -> Html {
                 <h3 class="incident-summary__title">
                     <span class="incident-summary__timestamp">{date_format(incident.started_at().unwrap_or_else(Utc::now))}</span>
 
-                    <Link<Route> to={Route::Incident { id: incident.id.to_string() }} classes="incident-link">
-                        {&incident.title}
+                    <Link<Route> to={Route::Incident { id: incident.id().to_string() }} classes="incident-link">
+                        {incident.title()}
                     </Link<Route>>
                 </h3>
                 <span class={classes!("incident-streak", status_class)}>{status_text}</span>
@@ -85,7 +85,7 @@ pub fn incident_summary(props: &IncidentSummaryProps) -> Html {
 /// (no card chrome); the update entries themselves are the cards.
 #[derive(Properties, PartialEq)]
 pub struct IncidentBlockProps {
-    pub incident: Incident,
+    pub incident: IncidentView,
 }
 
 #[function_component(IncidentBlock)]
@@ -100,11 +100,11 @@ pub fn incident_block(props: &IncidentBlockProps) -> Html {
                     <h3 class="incident-block__title">
                         <span class="incident-summary__timestamp">{date_format(incident.started_at().unwrap_or_else(Utc::now))}</span>
 
-                        <Link<Route> to={Route::Incident { id: incident.id.to_string() }} classes="incident-link">
-                            {&incident.title}
+                        <Link<Route> to={Route::Incident { id: incident.id().to_string() }} classes="incident-link">
+                            {incident.title()}
                         </Link<Route>>
                     </h3>
-                    // <span class="incident-id">{format!("{}", incident.id)}</span>
+                    // <span class="incident-id">{format!("{}", incident.id())}</span>
                 </div>
                 <span class={classes!("incident-streak", status_class)}>{status_text}</span>
             </div>
@@ -117,21 +117,31 @@ pub fn incident_block(props: &IncidentBlockProps) -> Html {
 mod tests {
     use super::*;
     use chrono::DateTime;
-    use grey_api::{Identifier, IncidentUpdate};
+    use grey_api::{Identifier, Incident, IncidentUpdate, IncidentUpdateId};
 
     fn ts(secs: i64) -> DateTime<Utc> {
         DateTime::from_timestamp(secs, 0).unwrap()
     }
 
     fn update(impact: Impact, secs: i64) -> IncidentUpdate {
-        IncidentUpdate { impact, timestamp: ts(secs), message: format!("update at {secs}") }
+        IncidentUpdate {
+            id: IncidentUpdateId::compose(Identifier::from(1_234_567u64), secs as u64),
+            impact,
+            timestamp: ts(secs),
+            message: format!("update at {secs}"),
+            version: (secs * 1000) as u64,
+            deleted: false,
+        }
     }
 
-    fn incident(updates: Vec<IncidentUpdate>) -> Incident {
-        Incident { id: Identifier::from(1_234_567u64), title: "DB outage".into(), version: 1, updates }
+    fn incident(updates: Vec<IncidentUpdate>) -> IncidentView {
+        IncidentView::new(
+            Incident { id: Identifier::from(1_234_567u64), title: "DB outage".into(), version: 1, deleted: false },
+            updates,
+        )
     }
 
-    async fn render_block(incident: Incident) -> String {
+    async fn render_block(incident: IncidentView) -> String {
         #[function_component(Harness)]
         fn harness(props: &IncidentBlockProps) -> Html {
             use yew_router::history::{AnyHistory, MemoryHistory};
