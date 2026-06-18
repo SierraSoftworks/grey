@@ -12,8 +12,8 @@
 use std::rc::Rc;
 
 use grey_api::{
-    AdminUser, ApiError, CreateIncident, Identifier, Incident, IncidentEdit, Peer, Probe, UiConfig,
-    UiNotice,
+    AdminUser, ApiError, CreateIncident, Cron, Identifier, Incident, IncidentEdit, Peer, Probe,
+    UiConfig, UiNotice,
 };
 use yew::prelude::*;
 
@@ -48,6 +48,7 @@ pub struct StoreState {
     pub notices: Vec<UiNotice>,
     pub incidents: Vec<Incident>,
     pub probes: Vec<Probe>,
+    pub crons: Vec<Cron>,
     /// The most recent background-fetch failure, surfaced to the user as a dismissible banner.
     pub error: Option<ApiError>,
 }
@@ -56,6 +57,7 @@ pub struct StoreState {
 /// edits — are expressed as one of these and applied by [`StoreState::reduce`].
 pub enum Action {
     SetProbes(Vec<Probe>),
+    SetCrons(Vec<Cron>),
     SetNotices(Vec<UiNotice>),
     SetPeers(Vec<Peer>),
     SetIncidents(Vec<Incident>),
@@ -84,6 +86,7 @@ impl Reducible for StoreState {
         let mut next = (*self).clone();
         match action {
             Action::SetProbes(probes) => next.probes = probes,
+            Action::SetCrons(crons) => next.crons = crons,
             Action::SetNotices(notices) => next.notices = notices,
             Action::SetPeers(peers) => next.peers = peers,
             Action::SetIncidents(mut incidents) => {
@@ -133,6 +136,10 @@ impl Store {
 
     pub fn probes(&self) -> &[Probe] {
         &self.state.probes
+    }
+
+    pub fn crons(&self) -> &[Cron] {
+        &self.state.crons
     }
 
     pub fn notices(&self) -> &[UiNotice] {
@@ -221,6 +228,8 @@ pub struct StoreProviderProps {
     #[prop_or_default]
     pub probes: Vec<Probe>,
     #[prop_or_default]
+    pub crons: Vec<Cron>,
+    #[prop_or_default]
     pub peers: Vec<Peer>,
     #[prop_or_default]
     pub incidents: Vec<Incident>,
@@ -236,6 +245,7 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
         let config = props.config.clone();
         let notices = props.notices.clone();
         let probes = props.probes.clone();
+        let crons = props.crons.clone();
         let peers = props.peers.clone();
         let incidents = props.incidents.clone();
         move || {
@@ -249,6 +259,7 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
                 notices,
                 incidents,
                 probes,
+                crons,
                 error: None,
             }
         }
@@ -313,6 +324,7 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
                 wasm_bindgen_futures::spawn_local(async move {
                     if !seeded {
                         state.dispatch(load_probes(&client).await);
+                        state.dispatch(load_crons(&client).await);
                         state.dispatch(load_notices(&client).await);
                         state.dispatch(load_incidents(&client).await);
                     }
@@ -322,6 +334,7 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
                         // background collapses into a single fetch once focus returns.
                         focus.active().await;
                         state.dispatch(load_probes(&client).await);
+                        state.dispatch(load_crons(&client).await);
                         state.dispatch(load_notices(&client).await);
                         state.dispatch(load_incidents(&client).await);
                     }
@@ -431,6 +444,17 @@ async fn load_probes(client: &ApiClient) -> Action {
         Ok(probes) => Action::SetProbes(probes),
         Err(err) => {
             gloo::console::error!(format!("Failed to fetch probes: {err}"));
+            Action::SetError(err)
+        }
+    }
+}
+
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+async fn load_crons(client: &ApiClient) -> Action {
+    match client.crons().await {
+        Ok(crons) => Action::SetCrons(crons),
+        Err(err) => {
+            gloo::console::error!(format!("Failed to fetch crons: {err}"));
             Action::SetError(err)
         }
     }

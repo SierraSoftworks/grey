@@ -3,7 +3,7 @@ use grey_ui::{App, AppProps};
 use yew::ServerRenderer;
 
 use super::{ASSETS_DIR, AppState};
-use crate::state::{IncidentStore, ProbeStore};
+use crate::state::{CronStore, IncidentStore, ProbeStore};
 
 pub async fn index(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpResponse> {
     let probe_histories = data.state.get_probe_states().await?;
@@ -11,6 +11,15 @@ pub async fn index(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpRe
     let config = data.state.get_config();
     let mut probes: Vec<grey_api::Probe> = probe_histories.into_values().collect();
     probes.sort_by_key(|p| p.name.clone());
+
+    let mut crons: Vec<grey_api::Cron> = data
+        .state
+        .get_cron_states()
+        .await
+        .unwrap_or_default()
+        .into_values()
+        .collect();
+    crons.sort_by_key(|c| c.name.clone());
 
     // Only the publicly visible incidents are server-rendered for unauthenticated viewers.
     let incidents = data.state.list_incidents(false).await.unwrap_or_default();
@@ -32,6 +41,7 @@ pub async fn index(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpRe
         config: (&config.ui).into(),
         notices: config.ui.notices.clone(),
         probes,
+        crons,
         // Cluster topology is operator-only: it is never part of the server-rendered payload and is
         // fetched client-side once an administrator has signed in, so it can't leak to anonymous
         // viewers via the page's hydration data.

@@ -13,7 +13,7 @@ use tracing_batteries::prelude::*;
 use crate::cluster::Versioned;
 use crate::result::ProbeResult;
 
-use super::{CLUSTER_FIELDS_TABLE, ProbeState, State};
+use super::{CLUSTER_FIELDS_TABLE, CRON_FIELDS_TABLE, ProbeState, State};
 
 /// Storage operations for probe state (the cluster-replicated, gossiped records).
 #[allow(async_fn_in_trait)]
@@ -164,6 +164,25 @@ impl ProbeStore for State {
 
             if dropped_probe_records > 0 {
                 info!(name: "state.gc.summary", { dropped_probe_records = %dropped_probe_records }, "Dropped stale probe records");
+            }
+
+            // Cron records age out on the same expiry; a cron whose checks-ins (and re-gossip) have
+            // stopped for long enough is dropped just like a stale probe record.
+            let mut cron_table = txn.open_table(CRON_FIELDS_TABLE)?;
+            let mut dropped_cron_records = 0;
+            cron_table.retain(|(_, cron_name), (version, _data)| {
+                let last_updated = chrono::DateTime::from_timestamp_millis(version as i64).unwrap_or_default();
+                if last_updated >= history_expiry_threshold {
+                    true
+                } else {
+                    info!(name: "state.gc.cron", { cron.name = %cron_name, %last_updated, expired_at=%history_expiry_threshold }, "Dropping stale cron record");
+                    dropped_cron_records += 1;
+                    false
+                }
+            })?;
+
+            if dropped_cron_records > 0 {
+                info!(name: "state.gc.summary", { dropped_cron_records = %dropped_cron_records }, "Dropped stale cron records");
             }
         }
 

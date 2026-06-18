@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -13,6 +14,9 @@ pub struct Config {
     pub probes: Vec<Probe>,
 
     #[serde(default)]
+    pub crons: Vec<CronConfig>,
+
+    #[serde(default)]
     pub ui: UiConfig,
 
     #[serde(default)]
@@ -23,6 +27,72 @@ pub struct Config {
     pub state: PathBuf,
 }
 
+/// Configuration for a "deadman's switch" cron monitor. A scheduled job reports check-ins to the
+/// agent; the schedule and completion detectors flag missed or hung runs relative to these settings.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct CronConfig {
+    pub name: String,
+
+    /// The expected cadence as a fixed interval. Exactly one of `interval` / `schedule` must be set.
+    #[serde(default, with = "humantime_serde::option")]
+    pub interval: Option<std::time::Duration>,
+
+    /// The expected cadence as a standard 5-field crontab expression (evaluated in UTC). Exactly one
+    /// of `interval` / `schedule` must be set.
+    #[serde(default)]
+    pub schedule: Option<String>,
+
+    /// How long a run may stay in flight before it reads as overrunning (optional; enables
+    /// completion/timeout detection).
+    #[serde(default, with = "humantime_serde::option")]
+    pub max_duration: Option<std::time::Duration>,
+
+    /// Slack after the next-due time before a late run is called missing (optional; a
+    /// schedule-derived default applies otherwise).
+    #[serde(default, with = "humantime_serde::option")]
+    pub grace: Option<std::time::Duration>,
+
+    /// An optional shared secret required on check-ins; when set, callers must supply it via the
+    /// `X-Cron-Token` header or a `token` query parameter.
+    #[serde(default)]
+    pub token: Option<String>,
+
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
+}
+
+impl CronConfig {
+    /// The schedule this cron declares, preferring an explicit crontab `schedule` over `interval`.
+    /// (Config validation guarantees exactly one is set; the fallback is purely defensive.)
+    fn build_schedule(&self) -> grey_api::CronSchedule {
+        match (&self.schedule, self.interval) {
+            (Some(expr), _) => grey_api::CronSchedule::Cron(expr.clone()),
+            (None, Some(interval)) => grey_api::CronSchedule::Every(interval),
+            (None, None) => grey_api::CronSchedule::Every(std::time::Duration::from_secs(3600)),
+        }
+    }
+
+    /// A bare [`grey_api::Cron`] carrying this configuration, used to seed the pooled view.
+    pub fn to_cron(&self) -> grey_api::Cron {
+        grey_api::Cron::from_config(
+            self.name.clone(),
+            self.tags.clone(),
+            self.build_schedule(),
+            self.max_duration,
+            self.grace,
+        )
+    }
+
+    /// Re-applies this configuration onto a (possibly gossiped) record so display and detection use
+    /// the local operator's settings rather than whatever a peer last advertised.
+    pub fn stamp(&self, cron: &mut grey_api::Cron) {
+        cron.tags = self.tags.clone();
+        cron.schedule = self.build_schedule();
+        cron.max_duration = self.max_duration;
+        cron.grace = self.grace;
+    }
+}
+
 impl Config {
     #[cfg(test)]
     pub fn test(temp_dir: &PathBuf) -> Self {
@@ -30,6 +100,7 @@ impl Config {
             probes: vec![
                 Probe::test(),
             ],
+            crons: vec![],
             ui: UiConfig::default(),
             cluster: ClusterConfig::default(),
             state: temp_dir.join("test_state.redb"),
@@ -45,7 +116,53 @@ impl Config {
         })?;
 
         let config: Self = serde_yaml::from_str(&config)?;
+        config.validate_crons()?;
         Ok(config)
+    }
+
+    /// Validates that each cron declares exactly one of `interval` / `schedule`, that any crontab
+    /// expression parses, and that no cron shares a name with a probe — so a misconfiguration fails
+    /// the load rather than silently misbehaving. The name check is what lets gossip key replicated
+    /// state by the bare entity name (the `ReplicatedEntity` variant carries the type); without it a
+    /// same-named probe and cron would collide in a peer's per-node diff map.
+    fn validate_crons(&self) -> Result<(), Box<dyn std::error::Error>> {
+        for cron in &self.crons {
+            if self.probes.iter().any(|probe| probe.name == cron.name) {
+                return Err(format!(
+                    "Cron '{}' has the same name as a probe; names must be unique across probes and crons.",
+                    cron.name
+                )
+                .into());
+            }
+
+            match (&cron.schedule, cron.interval) {
+                (Some(_), Some(_)) => {
+                    return Err(format!(
+                        "Cron '{}' sets both `interval` and `schedule`; set exactly one.",
+                        cron.name
+                    )
+                    .into());
+                }
+                (None, None) => {
+                    return Err(format!(
+                        "Cron '{}' must set either `interval` or `schedule`.",
+                        cron.name
+                    )
+                    .into());
+                }
+                (Some(expr), None) => {
+                    if !grey_api::CronSchedule::Cron(expr.clone()).is_valid() {
+                        return Err(format!(
+                            "Cron '{}' has an invalid crontab `schedule`: '{expr}'.",
+                            cron.name
+                        )
+                        .into());
+                    }
+                }
+                (None, Some(_)) => {}
+            }
+        }
+        Ok(())
     }
 
     #[tracing::instrument(name = "config.reload", level=Level::DEBUG, skip(path), err(Debug))]
@@ -280,6 +397,89 @@ mod tests {
             mixed.checks[0].to_string(),
             r#"http.header.content-type matches r"^text/html""#
         );
+    }
+
+    /// The shipped `crons` example must parse through the real configuration loader, guarding the
+    /// example against drift and exercising the `CronConfig` (humantime) deserialization.
+    #[tokio::test]
+    async fn loads_crons_example() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../example/crons.yml");
+        let config = Config::load_from_path(&path)
+            .await
+            .expect("example/crons.yml should load");
+
+        let backup = config
+            .crons
+            .iter()
+            .find(|c| c.name == "backup.nightly")
+            .expect("backup.nightly cron should be present");
+        assert_eq!(backup.schedule.as_deref(), Some("0 2 * * *"));
+        assert_eq!(backup.interval, None);
+        assert_eq!(backup.max_duration, Some(std::time::Duration::from_secs(30 * 60)));
+        assert_eq!(backup.grace, Some(std::time::Duration::from_secs(60 * 60)));
+
+        let sync = config
+            .crons
+            .iter()
+            .find(|c| c.name == "sync.hourly")
+            .expect("sync.hourly cron should be present");
+        assert_eq!(sync.interval, Some(std::time::Duration::from_secs(60 * 60)));
+        assert_eq!(sync.schedule, None);
+        assert_eq!(sync.token.as_deref(), Some("change-me"));
+    }
+
+    /// A cron with an invalid crontab `schedule`, or that sets neither/both of `interval`/`schedule`,
+    /// must fail to load rather than silently misbehaving.
+    #[tokio::test]
+    async fn rejects_invalid_cron_schedules() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let cases = [
+            // Invalid crontab expression.
+            "crons:\n  - name: bad\n    schedule: 'not a cron'\n",
+            // Neither interval nor schedule.
+            "crons:\n  - name: bad\n    max_duration: 1m\n",
+            // Both interval and schedule.
+            "crons:\n  - name: bad\n    interval: 1h\n    schedule: '* * * * *'\n",
+        ];
+
+        for (i, body) in cases.iter().enumerate() {
+            let path = dir.path().join(format!("bad-{i}.yml"));
+            tokio::fs::write(&path, body).await.unwrap();
+            assert!(
+                Config::load_from_path(&path).await.is_err(),
+                "config #{i} should be rejected: {body}"
+            );
+        }
+
+        // A well-formed crontab cron loads.
+        let ok = dir.path().join("ok.yml");
+        tokio::fs::write(&ok, "crons:\n  - name: good\n    schedule: '*/5 * * * *'\n")
+            .await
+            .unwrap();
+        assert!(Config::load_from_path(&ok).await.is_ok());
+    }
+
+    /// A cron may not share a name with a probe: gossip keys replicated state by the bare entity
+    /// name (the type is carried by the `ReplicatedEntity` variant), so a clash must be rejected at
+    /// load rather than colliding on the wire.
+    #[tokio::test]
+    async fn rejects_cron_sharing_a_probe_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let probe = "probes:\n  - name: backup\n    policy: { interval: 5s, timeout: 2s }\n    target: !Http\n      url: https://example.com\n";
+
+        let clash = dir.path().join("clash.yml");
+        tokio::fs::write(&clash, format!("{probe}crons:\n  - name: backup\n    interval: 1h\n"))
+            .await
+            .unwrap();
+        assert!(Config::load_from_path(&clash).await.is_err(), "a cron named like a probe must be rejected");
+
+        // Distinct names load fine.
+        let ok = dir.path().join("ok.yml");
+        tokio::fs::write(&ok, format!("{probe}crons:\n  - name: backup.cron\n    interval: 1h\n"))
+            .await
+            .unwrap();
+        assert!(Config::load_from_path(&ok).await.is_ok());
     }
 }
 

@@ -148,6 +148,11 @@ mod browser {
             self.get_json(&format!("{BASE}/probes")).await
         }
 
+        /// Every cron's current state.
+        pub async fn crons(&self) -> Result<Vec<grey_api::Cron>, ApiError> {
+            self.get_json(&format!("{BASE}/crons")).await
+        }
+
         /// The configured UI notices.
         pub async fn notices(&self) -> Result<Vec<grey_api::UiNotice>, ApiError> {
             self.get_json(&format!("{BASE}/notices")).await
@@ -271,6 +276,9 @@ impl ApiClient {
     }
 
     pub async fn probes(&self) -> Result<Vec<grey_api::Probe>, ApiError> {
+        Self::unavailable()
+    }
+    pub async fn crons(&self) -> Result<Vec<grey_api::Cron>, ApiError> {
         Self::unavailable()
     }
     pub async fn notices(&self) -> Result<Vec<grey_api::UiNotice>, ApiError> {

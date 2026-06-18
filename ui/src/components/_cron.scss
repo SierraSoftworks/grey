@@ -1,0 +1,130 @@
+@use '../styles/variables' as *;
+
+// Cron card styles. Mirrors the probe card, but the history is a discrete recent-runs strip rather
+// than a continuous availability timeline.
+.cron {
+    padding: 1rem 0 1rem 2rem;
+
+    &:last-child {
+        border-bottom: none;
+    }
+}
+
+.cron__title {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.cron__name-section {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-right: auto;
+}
+
+.cron__name {
+    font-weight: inherit;
+    margin: 0;
+}
+
+// A small pill marking this entity as a cron, tinted by its current health.
+.cron__badge {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.1rem 0.4rem;
+    border-radius: $border-radius-small;
+    border: 1px solid $color-separator;
+    color: $color-text-muted;
+
+    &.ok { border-color: $color-status-ok; color: $color-status-ok; }
+    &.warn { border-color: $color-status-warn; color: $color-status-warn; }
+    &.error { border-color: $color-status-error; color: $color-status-error; }
+    &.unknown { border-color: $color-status-unknown; color: $color-status-unknown; }
+}
+
+.cron__schedule {
+    font-size: 0.8rem;
+    color: $color-text-muted;
+}
+
+// How long the cron has held its current state, shown on the right (mirrors `.probe__streak`).
+.cron__state {
+    align-self: center;
+    font-size: 0.8rem;
+    color: $color-text-muted;
+    white-space: nowrap;
+}
+
+.cron__tags {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0 0.5rem;
+    vertical-align: text-bottom;
+}
+
+.cron__tag {
+    display: flex;
+    align-items: center;
+    padding: 0.2rem 0.6rem;
+    background-color: $background-base;
+    border-radius: $border-radius-small;
+    border: 1px solid $color-separator;
+    color: $color-text;
+    font-size: 0.75rem;
+    gap: 0.25rem;
+
+    .cron__tag-name { color: $color-text-muted; }
+    .cron__tag-value { font-weight: 600; }
+}
+
+// The recent-runs strip: one cell per observed run, oldest first.
+.cron__runs {
+    display: flex;
+    flex-direction: row;
+    gap: 3px;
+    height: 0.8rem;
+    margin-top: 0.5rem;
+}
+
+.cron-run {
+    flex: 0 0 0.8rem;
+    border-radius: $border-radius-small;
+    cursor: pointer;
+    // A positioned ancestor so the hover popover anchors to this cell, and a stacking bump while
+    // hovered so the popover sits above neighbouring cells.
+    position: relative;
+
+    &.tooltip-target {
+        z-index: 21;
+    }
+
+    &.ok { background-color: $color-status-ok; }
+    &.warn { background-color: $color-status-warn; }
+    &.error { background-color: $color-status-error; }
+}
+
+.cron__no-runs {
+    font-size: 0.8rem;
+    color: $color-text-muted;
+}
+
+.cron__meta {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: $color-text-muted;
+}
+
+.cron__message {
+    font-family: monospace;
+    color: $color-text;
+}

@@ -19,6 +19,25 @@ to provide highly available health information while delivering eventual consist
 
 [CRDTs]: https://en.wikipedia.org/wiki/Conflict-free_replicated_data_type)
 
+### Replicated state and protocol versioning
+
+The same anti-entropy gossip replicates every kind of cluster-wide state Grey tracks, not just
+probes: [cron](./crons.md) check-ins are synchronized through the identical path, so a check-in
+received by any node converges across the whole cluster. Each replicated record carries a tag
+identifying its entity type, which keeps the different kinds of state from colliding while sharing
+one digest/diff exchange.
+
+Every gossip datagram is also prefixed with a small protocol-version header. A node silently drops
+any datagram that isn't tagged with a protocol version it understands, so traffic from an
+incompatible Grey version (or unrelated noise arriving on the cluster port) is rejected cheaply
+before decryption rather than being mistaken for corrupt state.
+
+::: warning
+The gossip protocol version is tied to Grey's **major** version. All nodes in a cluster must run the
+same major version of Grey; a Grey 2.x node will not exchange state with a Grey 1.x node. Upgrade a
+cluster across a major version by replacing all of its nodes, rather than running a mix of the two.
+:::
+
 ## Quick Start
 
 ### 1. Generate a Shared Cluster Secret

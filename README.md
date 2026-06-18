@@ -11,6 +11,7 @@ they fail.
 - Extremely lightweight, can be run on every server in your fleet if you wish.
 - Native OpenTelemetry integration, including trace propagation.
 - Supports multiple health probes, including HTTP, gRPC, TCP, DNS, and custom JavaScript scripts.
+- Passive cron monitoring (a "deadman's switch") for scheduled jobs that check in instead of being probed.
 
 ## Usage
 Grey is a self contained binary which is expected to be executed with a YAML

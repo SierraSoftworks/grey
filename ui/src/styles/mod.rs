@@ -6,9 +6,11 @@
 //! visual definitions of those classes.
 
 mod cluster;
+mod cron;
 mod incident;
 mod probe;
 
 pub use cluster::*;
+pub use cron::*;
 pub use incident::*;
 pub use probe::*;

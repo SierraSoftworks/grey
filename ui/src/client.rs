@@ -24,6 +24,8 @@ pub struct AppProps {
     pub notices: Vec<grey_api::UiNotice>,
     pub probes: Vec<grey_api::Probe>,
     #[prop_or_default]
+    pub crons: Vec<grey_api::Cron>,
+    #[prop_or_default]
     pub incidents: Vec<grey_api::Incident>,
     /// The request path, used to seed the router during server-side rendering so a deep link to a
     /// non-home route renders the right page (and hydrates cleanly). Unused on the client, where the
@@ -50,6 +52,7 @@ impl AppProps {
             config,
             notices: Vec::new(),
             probes: Vec::new(),
+            crons: Vec::new(),
             incidents: Vec::new(),
             url: String::new(),
         })
@@ -72,8 +75,9 @@ impl AppProps {
         let probes_data = app_element
             .get_attribute("data-probes")
             .ok_or("#app[data-probes] not found")?;
-        // Incidents are optional: older server renders omit them.
+        // Incidents and crons are optional: older server renders omit them.
         let incidents_data = app_element.get_attribute("data-incidents");
+        let crons_data = app_element.get_attribute("data-crons");
 
         let config: UiConfig = serde_json::from_str(&config_data)?;
         let notices: Vec<grey_api::UiNotice> = serde_json::from_str(&notices_data)?;
@@ -81,11 +85,15 @@ impl AppProps {
         let incidents: Vec<grey_api::Incident> = incidents_data
             .and_then(|data| serde_json::from_str(&data).ok())
             .unwrap_or_default();
+        let crons: Vec<grey_api::Cron> = crons_data
+            .and_then(|data| serde_json::from_str(&data).ok())
+            .unwrap_or_default();
 
         Ok(Self {
             config,
             notices,
             probes,
+            crons,
             incidents,
             url: String::new(),
         })
@@ -100,6 +108,7 @@ pub fn app(props: &AppProps) -> Html {
     let config_json = serde_json::to_string(&props.config).unwrap_or_default();
     let notices_json = serde_json::to_string(&props.notices).unwrap_or_default();
     let probes_json = serde_json::to_string(&props.probes).unwrap_or_default();
+    let crons_json = serde_json::to_string(&props.crons).unwrap_or_default();
     let incidents_json = serde_json::to_string(&props.incidents).unwrap_or_default();
 
     html! {
@@ -107,12 +116,14 @@ pub fn app(props: &AppProps) -> Html {
             data-config={config_json}
             data-notices={notices_json}
             data-probes={probes_json}
+            data-crons={crons_json}
             data-incidents={incidents_json}
         >
             <StoreProvider
                 config={props.config.clone()}
                 notices={props.notices.clone()}
                 probes={props.probes.clone()}
+                crons={props.crons.clone()}
                 incidents={props.incidents.clone()}
             >
                 { render_router(&props.url) }
