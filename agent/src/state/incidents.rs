@@ -776,10 +776,10 @@ mod tests {
         );
     }
 
-    /// GC reaps incident rows (including delete tombstones) once their version ages past the expiry,
-    /// while leaving fresh ones in place.
+    /// Incidents are persistent records: unlike probes and crons, GC never ages them out, so the
+    /// outage history survives indefinitely no matter how old a record is.
     #[tokio::test]
-    async fn gc_reaps_aged_incident_rows() {
+    async fn gc_keeps_incidents_indefinitely() {
         use crate::cluster::{ClusterStateDiff, GossipStore, NodeID};
         use crate::state::{ProbeStore, ReplicatedEntity};
 
@@ -789,20 +789,22 @@ mod tests {
         // A fresh, locally-created incident.
         let fresh = state.create_incident("Fresh".into(), Impact::Offline, "x".into()).await.unwrap();
 
-        // An aged incident delivered via gossip (its version is ~8 days old, well past the 7-day
-        // default expiry).
+        // An incident whose version is far older than any probe/cron expiry, delivered via gossip.
         let aged_id = Identifier::from(0x7000_0000_0000_0002u64);
-        let aged_version = (chrono::Utc::now() - chrono::Duration::days(8)).timestamp_millis() as u64;
+        let aged_version = (chrono::Utc::now() - chrono::Duration::days(400)).timestamp_millis() as u64;
         let aged = Incident { id: aged_id, title: "Aged".into(), version: aged_version, deleted: false };
         let mut diff = ClusterStateDiff::new();
         diff.update(NodeID::new(), aged.id_field(), ReplicatedEntity::Incident(aged));
         state.apply(diff).await.unwrap();
 
-        assert!(state.get_incident(aged_id).await.unwrap().is_some(), "aged row present before GC");
-
         state.gc().await.unwrap();
 
-        assert!(state.get_incident(aged_id).await.unwrap().is_none(), "GC reaps the aged row");
-        assert!(state.get_incident(fresh.id()).await.unwrap().is_some(), "GC keeps the fresh row");
+        // Both survive: GC does not age out incident records (a non-deleted aged row remaining proves
+        // the incident table is left untouched by the sweep).
+        assert!(state.get_incident(fresh.id()).await.unwrap().is_some(), "GC keeps the fresh incident");
+        assert!(
+            state.get_incident(aged_id).await.unwrap().is_some(),
+            "GC keeps an arbitrarily old incident (persistent record)"
+        );
     }
 }
