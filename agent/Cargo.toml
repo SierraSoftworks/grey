@@ -12,7 +12,7 @@ path = "./src/main.rs"
 
 [dependencies]
 grey-ui = { workspace = true, features = ["ssr"] }
-grey-api.workspace = true
+grey-api = { workspace = true, features = ["server"] }
 
 chrono.workspace = true
 circular-buffer.workspace = true

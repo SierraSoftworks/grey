@@ -1,8 +1,13 @@
 use grey_api::Identifier;
 use yew::prelude::*;
 
-use crate::components::{IncidentBlock, StatusDot};
+use crate::components::IncidentBlock;
 use crate::contexts::use_store;
+// `StatusDot` and `time_format` are only used by the wasm-only admin editor below, so they are
+// unused in the SSR build.
+#[cfg(not(feature = "ssr"))]
+use crate::components::StatusDot;
+#[cfg(not(feature = "ssr"))]
 use crate::formatters::time_format;
 
 /// The `/incidents/{id}` page. Public visitors see the read-only incident; signed-in administrators

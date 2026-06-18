@@ -334,8 +334,9 @@ fn json_to_filter_value(value: &Value) -> FilterValue<'_> {
 
 fn json_error(status: StatusCode, error: ApiError) -> HttpResponse {
     // Stamp the HTTP status onto the body so clients can classify the failure from the error object
-    // alone (the SPA branches on this code without re-reading the transport status).
-    HttpResponse::build(status).json(error.with_code(status.as_u16()))
+    // alone (the SPA branches on this code without re-reading the transport status). `ApiError`'s
+    // `Into<HttpResponse>` then renders the JSON body with the matching status.
+    error.with_code(status.as_u16()).into()
 }
 
 /// Middleware guarding the admin API: it requires a valid OIDC bearer token whose claims satisfy the

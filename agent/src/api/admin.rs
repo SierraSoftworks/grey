@@ -16,22 +16,18 @@ use crate::state::{CasOutcome, DEFAULT_INCIDENT_PAGE, IncidentStore};
 const MAX_MESSAGE_BYTES: usize = 32 * 1024;
 
 fn not_found() -> HttpResponse {
-    HttpResponse::NotFound().json(
-        ApiError::new("The incident you requested could not be found.")
-            .with_code(404)
-            .with_advice_lines([
-                "Check that the incident ID in the address is correct.",
-                "It may have been deleted since you last loaded the page.",
-            ]),
-    )
+    ApiError::not_found("The incident you requested could not be found.")
+        .with_advice_lines([
+            "Check that the incident ID in the address is correct.",
+            "It may have been deleted since you last loaded the page.",
+        ])
+        .into()
 }
 
 fn too_large() -> HttpResponse {
-    HttpResponse::PayloadTooLarge().json(
-        ApiError::new("The update message is too large.")
-            .with_code(413)
-            .with_advice("Shorten the message; very large updates cannot be replicated across the cluster."),
-    )
+    ApiError::payload_too_large("The update message is too large.")
+        .with_advice("Shorten the message; very large updates cannot be replicated across the cluster.")
+        .into()
 }
 
 /// The ETag for an entity is its version, quoted per RFC 7232.
@@ -46,19 +42,18 @@ fn if_match_version(req: &HttpRequest) -> Option<u64> {
 }
 
 fn precondition_required() -> HttpResponse {
-    HttpResponse::PreconditionRequired().json(
-        ApiError::new("An If-Match version header is required to edit this resource.")
-            .with_code(428)
-            .with_advice("Reload to obtain the current version, then retry."),
-    )
+    ApiError::precondition_required("An If-Match version header is required to edit this resource.")
+        .with_advice("Reload to obtain the current version, then retry.")
+        .into()
 }
 
 fn version_conflict(current: u64) -> HttpResponse {
+    // Carries the current ETag alongside the standard 412 body so the client can retry the
+    // check-and-set without a separate reload.
     HttpResponse::PreconditionFailed()
         .insert_header((header::ETAG, etag(current)))
         .json(
-            ApiError::new("The resource was modified by someone else.")
-                .with_code(412)
+            ApiError::precondition_failed("The resource was modified by someone else.")
                 .with_advice("Reload to see the latest version, then try again."),
         )
 }

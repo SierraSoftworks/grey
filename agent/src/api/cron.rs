@@ -49,16 +49,6 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
-fn error(code: u16, message: &str) -> HttpResponse {
-    let body = ApiError::new(message).with_code(code);
-    match code {
-        400 => HttpResponse::BadRequest().json(body),
-        401 => HttpResponse::Unauthorized().json(body),
-        404 => HttpResponse::NotFound().json(body),
-        _ => HttpResponse::InternalServerError().json(body),
-    }
-}
-
 /// `POST /api/v1/cron/{name}/check-in` — a check-in carried in a JSON body. The body is optional so a
 /// caller may also pass everything in the query string; missing/invalid parameters are reported as a
 /// 400.
@@ -90,16 +80,16 @@ async fn record(
     params: CronCheckinParams,
 ) -> Result<HttpResponse> {
     let Some(status) = params.status.as_deref().and_then(parse_status) else {
-        return Ok(error(
-            400,
+        return Ok(ApiError::bad_request(
             "A 'status' of 'running', 'succeeded' or 'failed' is required.",
-        ));
+        )
+        .into());
     };
 
     // Look the cron up in local config to both authorise the check-in and confirm it exists.
     let config = data.state.get_config();
     let Some(cfg) = config.crons.iter().find(|c| c.name == name) else {
-        return Ok(error(404, "No cron with that name is configured."));
+        return Ok(ApiError::not_found("No cron with that name is configured.").into());
     };
 
     if let Some(expected) = cfg.token.as_deref() {
@@ -113,7 +103,9 @@ async fn record(
             .map(|p| constant_time_eq(p.as_bytes(), expected.as_bytes()))
             .unwrap_or(false)
         {
-            return Ok(error(401, "A valid token is required to check in to this cron."));
+            return Ok(
+                ApiError::unauthorized("A valid token is required to check in to this cron.").into(),
+            );
         }
     }
 
@@ -129,7 +121,7 @@ async fn record(
         Ok(HttpResponse::Accepted().finish())
     } else {
         // The cron was removed from config between the lookup above and the write.
-        Ok(error(404, "No cron with that name is configured."))
+        Ok(ApiError::not_found("No cron with that name is configured.").into())
     }
 }
 
