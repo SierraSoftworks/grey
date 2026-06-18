@@ -13,7 +13,10 @@ use tracing_batteries::prelude::*;
 use crate::cluster::Versioned;
 use crate::result::ProbeResult;
 
-use super::{CLUSTER_FIELDS_TABLE, CRON_FIELDS_TABLE, ProbeState, State};
+use super::{
+    PROBES_TABLE, CRON_TABLE, ProbeState, State,
+    gc_lww_table,
+};
 
 /// Storage operations for probe state (the cluster-replicated, gossiped records).
 #[allow(async_fn_in_trait)]
@@ -46,7 +49,7 @@ impl ProbeStore for State {
         }
 
         let txn = self.database.begin_read()?;
-        let table = txn.open_table(CLUSTER_FIELDS_TABLE)?;
+        let table = txn.open_table(PROBES_TABLE)?;
         let iter = table.iter()?;
         for entry in iter.filter_map(|r| r.ok()) {
             let (key, value) = entry;
@@ -68,7 +71,7 @@ impl ProbeStore for State {
     async fn update_probe_config(&self, probe: &crate::Probe) -> Result<(), Box<dyn Error>> {
         let txn = self.database.begin_write()?;
         {
-            let mut table = txn.open_table(CLUSTER_FIELDS_TABLE)?;
+            let mut table = txn.open_table(PROBES_TABLE)?;
 
             let mut snapshot = table
                 .get((self.node_id.into(), probe.name.clone()))?
@@ -103,7 +106,7 @@ impl ProbeStore for State {
 
         if let Some(probe) = self.get_config().probes.iter().find(|p| p.name == probe_name) {
             let result = {
-                let mut table = txn.open_table(CLUSTER_FIELDS_TABLE)?;
+                let mut table = txn.open_table(PROBES_TABLE)?;
 
                 let (mut snapshot, _version) = table
                     .get((self.node_id.into(), probe.name.clone()))?
@@ -142,7 +145,7 @@ impl ProbeStore for State {
     async fn gc(&self) -> Result<(), Box<dyn Error>> {
         let txn = self.database.begin_write()?;
         {
-            let mut table_fields = txn.open_table(CLUSTER_FIELDS_TABLE)?;
+            let mut table_fields = txn.open_table(PROBES_TABLE)?;
 
             let history_expiry_threshold =
                 chrono::Utc::now() - self.get_config().cluster.gc_probe_expiry;
@@ -166,23 +169,15 @@ impl ProbeStore for State {
                 info!(name: "state.gc.summary", { dropped_probe_records = %dropped_probe_records }, "Dropped stale probe records");
             }
 
-            // Cron records age out on the same expiry; a cron whose checks-ins (and re-gossip) have
-            // stopped for long enough is dropped just like a stale probe record.
-            let mut cron_table = txn.open_table(CRON_FIELDS_TABLE)?;
-            let mut dropped_cron_records = 0;
-            cron_table.retain(|(_, cron_name), (version, _data)| {
-                let last_updated = chrono::DateTime::from_timestamp_millis(version as i64).unwrap_or_default();
-                if last_updated >= history_expiry_threshold {
-                    true
-                } else {
-                    info!(name: "state.gc.cron", { cron.name = %cron_name, %last_updated, expired_at=%history_expiry_threshold }, "Dropping stale cron record");
-                    dropped_cron_records += 1;
-                    false
-                }
-            })?;
+            // Crons age out on the same expiry as probes: a record whose writes (and re-gossip)
+            // have stopped for long enough is dropped, which is also what eventually reaps converged
+            // delete tombstones. Incidents and incident updates are deliberately *not* swept here —
+            // they form the historical record of outages and are retained indefinitely (their delete
+            // tombstones likewise persist rather than being reaped on the probe-expiry cadence).
+            let dropped_crons = gc_lww_table(&txn, CRON_TABLE, history_expiry_threshold)?;
 
-            if dropped_cron_records > 0 {
-                info!(name: "state.gc.summary", { dropped_cron_records = %dropped_cron_records }, "Dropped stale cron records");
+            if dropped_crons > 0 {
+                info!(name: "state.gc.summary", { dropped_crons = %dropped_crons }, "Dropped stale cron records");
             }
         }
 
@@ -288,7 +283,7 @@ mod tests {
         {
             let txn = state.database.begin_write().unwrap();
             {
-                let mut table = txn.open_table(CLUSTER_FIELDS_TABLE).unwrap();
+                let mut table = txn.open_table(PROBES_TABLE).unwrap();
                 let stale = rmp_serde::to_vec_named(&probe_at("stale", chrono::Utc::now())).unwrap();
                 let fresh = rmp_serde::to_vec_named(&probe_at("fresh", chrono::Utc::now())).unwrap();
                 table.insert((node.into(), "stale".to_string()), (stale_ms, stale.as_slice())).unwrap();
@@ -300,7 +295,7 @@ mod tests {
         state.gc().await.unwrap();
 
         let txn = state.database.begin_read().unwrap();
-        let table = txn.open_table(CLUSTER_FIELDS_TABLE).unwrap();
+        let table = txn.open_table(PROBES_TABLE).unwrap();
         assert!(
             table.get((node.into(), "fresh".to_string())).unwrap().is_some(),
             "a recent probe must be retained"

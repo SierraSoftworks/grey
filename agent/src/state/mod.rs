@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, Mutex, RwLock},
 };
 use std::error::Error;
-use grey_api::{Cron, Probe};
+use grey_api::{Cron, Incident, IncidentUpdate, Probe};
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 use tracing::info;
 use tracing_batteries::prelude::*;
@@ -23,22 +23,34 @@ mod probes;
 mod replicated;
 
 pub use crons::CronStore;
-pub use incidents::{CasOutcome, IncidentStore};
+pub use incidents::{CasOutcome, DEFAULT_INCIDENT_PAGE, IncidentStore};
 pub use probes::ProbeStore;
-pub use replicated::ReplicatedEntity;
+pub use replicated::{GlobalLwwEntity, LwwFieldValue, ReplicatedEntity};
 
 // Maps a (NodeID, Probe Name) to a tuple of (Version, MsgPack Snapshot). Shared with the probe and
-// gossip sub-modules.
-const CLUSTER_FIELDS_TABLE: TableDefinition<(u128, String), (u64, &[u8])> =
-    TableDefinition::new("cluster_fields");
-// Maps a (NodeID, Cron Name) to a tuple of (Version, MsgPack Snapshot). A dedicated table for cron
-// state, replicated alongside probe state through the generalised gossip path.
-const CRON_FIELDS_TABLE: TableDefinition<(u128, String), (u64, &[u8])> =
-    TableDefinition::new("cron_fields");
+// gossip sub-modules. Probes are the one per-observer entity: every node keeps its own observation of
+// each probe under this key, and the gossip partition is the node component of the key.
+const PROBES_TABLE: TableDefinition<(u128, String), (u64, &[u8])> =
+    TableDefinition::new("probes");
+
+// The global last-writer-wins entity tables: one row per entity id, valued by `(version, last_writer,
+// msgpack)` (see `LwwFieldValue`). Unlike probes these are *not* per-observer — a single global
+// record per cron / incident / incident-update, advertised under the `last_writer` partition. New
+// table names (the legacy per-node `cron_fields` and JSON `incidents` tables are abandoned, not
+// migrated).
+pub(crate) const CRON_TABLE: TableDefinition<&str, LwwFieldValue> =
+    TableDefinition::new("crons");
+
+
+pub(crate) const INCIDENTS_TABLE: TableDefinition<u64, LwwFieldValue> =
+    TableDefinition::new("incidents");
+pub(crate) const INCIDENT_UPDATES_TABLE: TableDefinition<u128, LwwFieldValue> =
+    TableDefinition::new("incidents.updates");
+
 // Stores this instance's persistent identity so that a restart resumes the same NodeID (and keeps
 // advertising its existing probe state) rather than appearing as a brand-new node.
-const CLUSTER_IDENTITY_TABLE: TableDefinition<&str, u128> =
-    TableDefinition::new("cluster_identity");
+const INSTANCE_METADATA_TABLE: TableDefinition<&str, u128> =
+    TableDefinition::new("instance_metadata");
 const NODE_ID_KEY: &str = "node_id";
 const GENERATION_KEY: &str = "generation";
 
@@ -141,7 +153,7 @@ impl State {
         let read = database.begin_read()?;
         // `open_table` errors on a read transaction if the table has never been created, which is
         // the expected first-run case — fall through to generating a new identity.
-        if let Ok(table) = read.open_table(CLUSTER_IDENTITY_TABLE)
+        if let Ok(table) = read.open_table(INSTANCE_METADATA_TABLE)
             && let Some(existing) = table.get(NODE_ID_KEY)?
         {
             return Ok(NodeID::from(existing.value()));
@@ -152,7 +164,7 @@ impl State {
         let id: u128 = node_id.into();
         let write = database.begin_write()?;
         {
-            let mut table = write.open_table(CLUSTER_IDENTITY_TABLE)?;
+            let mut table = write.open_table(INSTANCE_METADATA_TABLE)?;
             table.insert(NODE_ID_KEY, id)?;
         }
         write.commit()?;
@@ -169,7 +181,7 @@ impl State {
         // generations.
         let write = database.begin_write()?;
         let next = {
-            let mut table = write.open_table(CLUSTER_IDENTITY_TABLE)?;
+            let mut table = write.open_table(INSTANCE_METADATA_TABLE)?;
             let current: u128 = table.get(GENERATION_KEY)?.map(|v| v.value()).unwrap_or(0);
             let next = current.saturating_add(1);
             table.insert(GENERATION_KEY, next)?;
@@ -367,6 +379,92 @@ where
     Ok(())
 }
 
+// --- Global last-writer-wins gossip helpers --------------------------------------------------------
+//
+// These mirror the probe helpers above for the [`GlobalLwwEntity`] family. The read-path helpers
+// (`digest_lww`/`emit_lww_table_diffs`) are generic over the entity's [`GlobalLwwEntity::Key`]: they
+// only iterate the table and read the `(version, last_writer, snapshot)` value, taking the gossip
+// partition from `last_writer` (in the value) and the field key from the deserialized entity's id —
+// they never build or look up a key, so they need no redb key-borrow gymnastics. The write path
+// (`apply`) builds keys concretely per entity type and shares only [`lww_supersedes`].
+
+/// Whether an incoming `(version, last_writer)` supersedes the stored one under the LWW total order.
+/// The `last_writer` tiebreaker makes equal-millisecond writes converge deterministically across
+/// nodes; a freshly-seen entity (no existing row) is always accepted.
+fn lww_supersedes(existing: Option<(u64, u128)>, incoming: (u64, u128)) -> bool {
+    match existing {
+        Some(current) => incoming > current,
+        None => true,
+    }
+}
+
+/// Drops rows from a global-LWW table whose `version` (a `last_modified` in ms) has aged past
+/// `threshold`, reaping both stale records and converged delete tombstones. Returns the count dropped.
+/// Generic over the key type, since it only retains by the value's version and never inspects the key.
+pub(crate) fn gc_lww_table<K: redb::Key + 'static>(
+    txn: &redb::WriteTransaction,
+    def: TableDefinition<K, LwwFieldValue>,
+    threshold: chrono::DateTime<chrono::Utc>,
+) -> Result<u64, Box<dyn Error>> {
+    let mut table = txn.open_table(def)?;
+    let mut dropped = 0u64;
+    table.retain(|_key, (version, _writer, _data)| {
+        let last_updated =
+            chrono::DateTime::from_timestamp_millis(version as i64).unwrap_or_default();
+        if last_updated >= threshold {
+            true
+        } else {
+            dropped += 1;
+            false
+        }
+    })?;
+    Ok(dropped)
+}
+
+/// Folds each row of one global-LWW table into `digest` under its `last_writer` partition.
+fn digest_lww<E: GlobalLwwEntity>(
+    txn: &redb::ReadTransaction,
+    digest: &mut ClusterStateDigest<NodeID>,
+) -> Result<(), Box<dyn Error>> {
+    if let Ok(table) = txn.open_table(E::TABLE) {
+        for (_key, value) in table.iter()?.filter_map(|r| r.ok()) {
+            let (version, last_writer, _data) = value.value();
+            digest.update(NodeID::from(last_writer), version);
+        }
+    }
+    Ok(())
+}
+
+/// Emits the diffs for one global-LWW table: every row newer than the peer's advertised version for
+/// that row's `last_writer` partition, keyed by the entity's own id field.
+fn emit_lww_table_diffs<E: GlobalLwwEntity>(
+    txn: &redb::ReadTransaction,
+    digest: &ClusterStateDigest<NodeID>,
+    delta: &mut cluster::ClusterStateDiff<NodeID, ReplicatedEntity>,
+    wrap: impl Fn(E) -> ReplicatedEntity,
+) -> Result<(), Box<dyn Error>> {
+    let Ok(table) = txn.open_table(E::TABLE) else {
+        return Ok(());
+    };
+    for (_key, value) in table.iter()?.filter_map(|r| r.ok()) {
+        let (version, last_writer, data) = value.value();
+
+        let peer = NodeID::from(last_writer);
+        let remote_version = digest.get_max_version(&peer).unwrap_or_default();
+        if version <= remote_version {
+            continue;
+        }
+
+        let entity: E = rmp_serde::from_slice(data)
+            .map_err(|e| format!("Failed to parse global-LWW state for diff: {e:?}"))?;
+        if let Some(diff) = entity.diff(remote_version) {
+            let field = diff.id_field();
+            delta.update(peer, field, wrap(diff));
+        }
+    }
+    Ok(())
+}
+
 impl GossipStore for State {
     type Id = NodeID;
     type State = ReplicatedEntity;
@@ -381,17 +479,19 @@ impl GossipStore for State {
         let mut digest = ClusterStateDigest::new();
 
         let txn = self.database.begin_read()?;
-        // Both entity tables share the per-peer version space (the scuttlebutt digest is a single
-        // max-version per node); iterate each, treating a not-yet-created table as empty.
-        for table_def in [CLUSTER_FIELDS_TABLE, CRON_FIELDS_TABLE] {
-            if let Ok(table) = txn.open_table(table_def) {
-                for (key, value) in table.iter()?.filter_map(|r| r.ok()) {
-                    let (node_id, _field) = key.value();
-                    let (version, _data) = value.value();
-                    digest.update(node_id.into(), version);
-                }
+        // Every entity table shares the per-peer version space (the scuttlebutt digest is a single
+        // max-version per node). Probes are per-observer (partition = the node component of the key);
+        // the global-LWW entities take their partition from each row's `last_writer`.
+        if let Ok(table) = txn.open_table(PROBES_TABLE) {
+            for (key, value) in table.iter()?.filter_map(|r| r.ok()) {
+                let (node_id, _field) = key.value();
+                let (version, _data) = value.value();
+                digest.update(node_id.into(), version);
             }
         }
+        digest_lww::<Cron>(&txn, &mut digest)?;
+        digest_lww::<Incident>(&txn, &mut digest)?;
+        digest_lww::<IncidentUpdate>(&txn, &mut digest)?;
 
         trace!(name: "state.digest", { host.node_id = %self.node_id, digest = %digest }, "Composed new cluster state digest.");
 
@@ -408,8 +508,10 @@ impl GossipStore for State {
         let mut delta = cluster::ClusterStateDiff::new();
 
         let txn = self.database.begin_read()?;
-        emit_table_diffs::<Probe>(&txn, CLUSTER_FIELDS_TABLE, &digest, &mut delta, ReplicatedEntity::Probe)?;
-        emit_table_diffs::<Cron>(&txn, CRON_FIELDS_TABLE, &digest, &mut delta, ReplicatedEntity::Cron)?;
+        emit_table_diffs::<Probe>(&txn, PROBES_TABLE, &digest, &mut delta, ReplicatedEntity::Probe)?;
+        emit_lww_table_diffs::<Cron>(&txn, &digest, &mut delta, ReplicatedEntity::Cron)?;
+        emit_lww_table_diffs::<Incident>(&txn, &digest, &mut delta, ReplicatedEntity::Incident)?;
+        emit_lww_table_diffs::<IncidentUpdate>(&txn, &digest, &mut delta, ReplicatedEntity::IncidentUpdate)?;
 
         trace!(name: "state.diff", { host.node_id = %self.node_id, digest = %digest, delta = ?delta }, "Composed new cluster state diff.");
 
@@ -423,8 +525,10 @@ impl GossipStore for State {
         trace!(name: "state.apply", { host.node_id = %self.node_id, diff = ?diff }, "Applying cluster state diff.");
         let txn = self.database.begin_write()?;
         {
-            let mut probe_table = txn.open_table(CLUSTER_FIELDS_TABLE)?;
-            let mut cron_table = txn.open_table(CRON_FIELDS_TABLE)?;
+            let mut probe_table = txn.open_table(PROBES_TABLE)?;
+            let mut cron_table = txn.open_table(CRON_TABLE)?;
+            let mut incident_table = txn.open_table(INCIDENTS_TABLE)?;
+            let mut update_table = txn.open_table(INCIDENT_UPDATES_TABLE)?;
 
             let own_id: u128 = self.node_id.into();
 
@@ -432,9 +536,11 @@ impl GossipStore for State {
                 let peer_id: u128 = peer.into();
 
                 for (field, entity) in node_diff {
-                    // The `ReplicatedEntity` variant routes the update to the right table; the field
-                    // key is just the bare entity name (probe and cron names are kept distinct by
-                    // config validation, so there is no cross-table collision to disambiguate).
+                    // The `ReplicatedEntity` variant routes the update to the right table. Probes are
+                    // per-observer (folded via the CRDT `merge_into_table` and keyed by the diff's
+                    // node); the global-LWW entities are keyed by their own id and resolved by the
+                    // `(version, last_writer)` total order, where the diff's partition (`peer_id`) is
+                    // the incoming `last_writer`.
                     match entity {
                         ReplicatedEntity::Probe(incoming) => {
                             merge_into_table(&mut probe_table, peer_id, &field, &incoming)?;
@@ -462,7 +568,36 @@ impl GossipStore for State {
                             }
                         }
                         ReplicatedEntity::Cron(incoming) => {
-                            merge_into_table(&mut cron_table, peer_id, &field, &incoming)?;
+                            let existing = cron_table
+                                .get(incoming.name.as_str())?
+                                .map(|g| { let (v, w, _) = g.value(); (v, w) });
+                            if lww_supersedes(existing, (incoming.version(), peer_id)) {
+                                let bytes = rmp_serde::to_vec_named(&incoming)
+                                    .map_err(|e| format!("Failed to serialize cron for update: {e:?}"))?;
+                                cron_table.insert(incoming.name.as_str(), (incoming.version(), peer_id, bytes.as_slice()))?;
+                            }
+                        }
+                        ReplicatedEntity::Incident(incoming) => {
+                            let key: u64 = incoming.id.into();
+                            let existing = incident_table
+                                .get(key)?
+                                .map(|g| { let (v, w, _) = g.value(); (v, w) });
+                            if lww_supersedes(existing, (incoming.version(), peer_id)) {
+                                let bytes = rmp_serde::to_vec_named(&incoming)
+                                    .map_err(|e| format!("Failed to serialize incident for update: {e:?}"))?;
+                                incident_table.insert(key, (incoming.version(), peer_id, bytes.as_slice()))?;
+                            }
+                        }
+                        ReplicatedEntity::IncidentUpdate(incoming) => {
+                            let key: u128 = incoming.id.into();
+                            let existing = update_table
+                                .get(key)?
+                                .map(|g| { let (v, w, _) = g.value(); (v, w) });
+                            if lww_supersedes(existing, (incoming.version(), peer_id)) {
+                                let bytes = rmp_serde::to_vec_named(&incoming)
+                                    .map_err(|e| format!("Failed to serialize incident update for update: {e:?}"))?;
+                                update_table.insert(key, (incoming.version(), peer_id, bytes.as_slice()))?;
+                            }
                         }
                     }
                 }
@@ -528,11 +663,61 @@ mod tests {
         // record, so the claim survives even if the peer's record is eventually
         // garbage-collected.
         let txn = state.database.begin_read().unwrap();
-        let table = txn.open_table(CLUSTER_FIELDS_TABLE).unwrap();
+        let table = txn.open_table(PROBES_TABLE).unwrap();
         let entry = table.get((state.node_id.into(), probe.name.clone())).unwrap().unwrap();
         let (_version, data) = entry.value();
         let own_record: ProbeState = rmp_serde::from_slice(data).unwrap();
         assert_eq!(own_record.streak.covered_since, Some(streak_start));
+    }
+
+    /// `digest` summarises both entity tables, and `diff` against an empty digest emits this node's
+    /// probe *and* cron records — exercising the gossip read path for both entity types.
+    #[tokio::test]
+    async fn digest_and_diff_cover_both_probe_and_cron_tables() {
+        use crate::config::CronConfig;
+        use crate::cron::CronCheckin;
+        use grey_api::CronStatus;
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let state = State::test(dir.path().to_path_buf()).await;
+
+        // `State::test` already recorded a probe sample for this node; add a configured cron + a
+        // check-in so both tables hold state for the local node.
+        let mut config = Config::test(&dir.path().to_path_buf());
+        config.crons = vec![CronConfig {
+            name: "backup".into(),
+            interval: Some(std::time::Duration::from_secs(60)),
+            schedule: None,
+            max_duration: None,
+            grace: None,
+            token: None,
+            tags: HashMap::new(),
+        }];
+        *state.config.write().unwrap() = Arc::new(config);
+        state
+            .record_cron_checkin(
+                "backup",
+                CronCheckin::new(CronStatus::Succeeded, "ok".into(), chrono::Utc::now()),
+            )
+            .await
+            .unwrap();
+
+        // The digest summarises this node with a non-zero max version (across both tables).
+        let digest = state.digest().await.unwrap();
+        assert!(digest.get_max_version(&state.node_id).unwrap_or(0) > 0);
+
+        // Diffing against an empty digest emits both the probe and the cron record for this node.
+        let mut delta = state.diff(ClusterStateDigest::new()).await.unwrap().into_inner();
+        let node_diff = delta.remove(&state.node_id).expect("our node's state in the diff");
+        assert!(
+            node_diff.values().any(|e| matches!(e, ReplicatedEntity::Probe(_))),
+            "the probe diff should be emitted"
+        );
+        assert!(
+            node_diff.values().any(|e| matches!(e, ReplicatedEntity::Cron(_))),
+            "the cron diff should be emitted"
+        );
     }
 
     fn b64_key(byte: u8) -> String {

@@ -1,15 +1,18 @@
 //! The SPA's single API client.
 //!
-//! [`ApiClient`] exposes one method per entity (`probes`, `notices`, `incidents`, `peers`, the
-//! incident CRUD calls and `me`), so callers never hand-build requests. Every failure surfaces as a
-//! [`grey_api::ApiError`], whose `code` mirrors the HTTP status so callers can classify problems.
+//! [`ApiClient`] exposes one method per entity operation, so callers never hand-build requests. Every
+//! failure surfaces as a [`grey_api::ApiError`], whose `code` mirrors the HTTP status so callers can
+//! classify problems.
 //!
 //! Authenticated calls attach the stored ID token as an `Authorization: Bearer` header. When the
 //! agent rejects a token as expired (HTTP 401), the client transparently renews it from the stored
 //! refresh token (see [`crate::auth`]) and retries the request once; interactive sign-in is handled
 //! separately via a popup (see [`crate::auth::begin_login`]). Browser-only; the SSR build gets stubs.
 
-use grey_api::{AdminUser, ApiError, CreateIncident, Incident, IncidentEdit, Peer, UiAuthConfig};
+use grey_api::{
+    AdminUser, ApiError, CreateIncident, CreateUpdate, IncidentUpdateId, IncidentView,
+    IncidentsPage, Peer, PutIncident, PutUpdate, UiAuthConfig,
+};
 
 /// A client for the agent's HTTP API. Cheap to clone; holds only the public OIDC config it needs to
 /// renew sessions on the caller's behalf.
@@ -49,11 +52,8 @@ mod browser {
         format!("Bearer {token}")
     }
 
-    /// The advice we fall back to when nothing more specific applies: reloading the page re-runs the
-    /// whole bootstrap (config, session, data) and clears most transient client-side faults.
     const REFRESH_ADVICE: &str = "Refresh the page to try again.";
 
-    /// Guarantees an error carries at least one actionable suggestion, defaulting to a page refresh.
     fn with_fallback_advice(mut error: ApiError) -> ApiError {
         if error.advice.is_empty() {
             error.advice.push(REFRESH_ADVICE.to_string());
@@ -61,35 +61,22 @@ mod browser {
         error
     }
 
-    /// Coerces a transport-level failure (a browser/JS error raised before any HTTP response) into a
-    /// friendly [`ApiError`] with tailored advice. These are the connectivity and serialization
-    /// faults the client can hit on the way to (or back from) the agent, none of which carry an HTTP
-    /// status of their own.
     fn net(err: gloo::net::Error) -> ApiError {
         use gloo::net::Error;
 
         match err {
-            // A `JsError` here almost always means the request never reached the server: the network
-            // dropped, the host is unreachable, or the browser aborted the fetch ("Failed to fetch"
-            // is the canonical message). Treat it as a connectivity problem.
             Error::JsError(_) => ApiError::new("We couldn't reach the server.").with_advice_lines([
                 "Check that your device is still connected to the internet.",
                 "The service may be briefly unavailable — wait a moment, then refresh the page.",
             ]),
-            // The server answered, but its body wasn't the JSON we expected — usually a transient
-            // proxy/error page or a version skew between the UI and the agent.
             Error::SerdeError(_) => ApiError::new("The server returned an unexpected response.")
                 .with_advice(REFRESH_ADVICE),
-            // Anything else gloo surfaces; keep the detail but still point at a recovery step.
             other => {
                 ApiError::new(format!("Something went wrong: {other}")).with_advice(REFRESH_ADVICE)
             }
         }
     }
 
-    /// Builds an [`ApiError`] from a non-success response, preferring the agent's structured error
-    /// body and falling back to a generic message stamped with the HTTP status. Either way the
-    /// result is guaranteed to carry advice so the banner always has something actionable to show.
     async fn error_from(response: Response) -> ApiError {
         let status = response.status();
         let error = match response.json::<ApiError>().await {
@@ -104,7 +91,6 @@ mod browser {
         with_fallback_advice(error)
     }
 
-    /// Decodes a JSON success body, or surfaces the structured error on a non-success response.
     async fn read_json<T: DeserializeOwned>(response: Response) -> Result<T, ApiError> {
         if response.ok() {
             response.json::<T>().await.map_err(net)
@@ -113,8 +99,6 @@ mod browser {
         }
     }
 
-    /// Builds a request for the given verb, attaching the bearer token, `If-Match` ETag and JSON
-    /// body when supplied.
     fn build<B: Serialize>(
         verb: &Verb,
         url: &str,
@@ -143,68 +127,118 @@ mod browser {
     impl ApiClient {
         // --- Public endpoints -------------------------------------------------------------------
 
-        /// Every probe's current state.
         pub async fn probes(&self) -> Result<Vec<grey_api::Probe>, ApiError> {
             self.get_json(&format!("{BASE}/probes")).await
         }
 
-        /// Every cron's current state.
         pub async fn crons(&self) -> Result<Vec<grey_api::Cron>, ApiError> {
             self.get_json(&format!("{BASE}/crons")).await
         }
 
-        /// The configured UI notices.
         pub async fn notices(&self) -> Result<Vec<grey_api::UiNotice>, ApiError> {
             self.get_json(&format!("{BASE}/notices")).await
         }
 
-        /// The publicly visible incidents (hidden drafts are excluded).
-        pub async fn incidents(&self) -> Result<Vec<Incident>, ApiError> {
-            self.get_json(&format!("{BASE}/incidents")).await
+        /// The first page of publicly visible incidents (hidden drafts excluded), each with its
+        /// updates embedded.
+        pub async fn incidents(&self) -> Result<Vec<IncidentView>, ApiError> {
+            let page: IncidentsPage = self.get_json(&format!("{BASE}/incidents")).await?;
+            Ok(page.incidents)
+        }
+
+        /// A page of publicly visible incidents continuing from `cursor` (for "load more").
+        pub async fn incidents_page(
+            &self,
+            cursor: Option<&str>,
+        ) -> Result<IncidentsPage, ApiError> {
+            let url = match cursor {
+                Some(c) => format!("{BASE}/incidents?cursor={c}"),
+                None => format!("{BASE}/incidents"),
+            };
+            self.get_json(&url).await
         }
 
         // --- Admin endpoints --------------------------------------------------------------------
 
-        /// The signed-in administrator, derived from the bearer token's claims.
         pub async fn me(&self) -> Result<AdminUser, ApiError> {
             self.get_json(&format!("{ADMIN}/me")).await
         }
 
-        /// The cluster's peers as seen by this node (operator-only).
         pub async fn peers(&self) -> Result<Vec<Peer>, ApiError> {
             self.get_json(&format!("{ADMIN}/cluster/peers")).await
         }
 
-        /// Every incident, including hidden drafts (admin view).
-        pub async fn admin_incidents(&self) -> Result<Vec<Incident>, ApiError> {
-            self.get_json(&format!("{ADMIN}/incidents")).await
+        /// The first page of incidents including hidden drafts (admin view).
+        pub async fn admin_incidents(&self) -> Result<Vec<IncidentView>, ApiError> {
+            let page: IncidentsPage = self.get_json(&format!("{ADMIN}/incidents")).await?;
+            Ok(page.incidents)
         }
 
         /// A single incident (including hidden), by id.
-        pub async fn incident(&self, id: &str) -> Result<Incident, ApiError> {
+        pub async fn incident(&self, id: &str) -> Result<IncidentView, ApiError> {
             self.get_json(&format!("{ADMIN}/incidents/{id}")).await
         }
 
         /// Creates an incident from a title and its opening update.
-        pub async fn create_incident(&self, input: &CreateIncident) -> Result<Incident, ApiError> {
+        pub async fn create_incident(
+            &self,
+            input: &CreateIncident,
+        ) -> Result<IncidentView, ApiError> {
             let response = self
                 .send(Verb::Post, &format!("{ADMIN}/incidents"), None, Some(input))
                 .await?;
             read_json(response).await
         }
 
-        /// Replaces an incident via check-and-set: `version` is sent as the `If-Match` ETag, so a
-        /// concurrent change surfaces as a 412 [`ApiError`].
-        pub async fn replace_incident(
+        /// Replaces an incident's title via check-and-set on its `version` (the `If-Match` ETag).
+        pub async fn put_incident(
             &self,
             id: &str,
             version: u64,
-            edit: &IncidentEdit,
-        ) -> Result<Incident, ApiError> {
+            edit: &PutIncident,
+        ) -> Result<IncidentView, ApiError> {
+            let response = self
+                .send(Verb::Put, &format!("{ADMIN}/incidents/{id}"), Some(version), Some(edit))
+                .await?;
+            read_json(response).await
+        }
+
+        /// Deletes an incident via check-and-set on its `version`.
+        pub async fn delete_incident(&self, id: &str, version: u64) -> Result<(), ApiError> {
+            let response = self
+                .send::<()>(Verb::Delete, &format!("{ADMIN}/incidents/{id}"), Some(version), None)
+                .await?;
+            if response.ok() {
+                Ok(())
+            } else {
+                Err(error_from(response).await)
+            }
+        }
+
+        /// Adds a new update to an incident.
+        pub async fn create_update(
+            &self,
+            incident_id: &str,
+            input: &CreateUpdate,
+        ) -> Result<IncidentView, ApiError> {
+            let response = self
+                .send(Verb::Post, &format!("{ADMIN}/incidents/{incident_id}/updates"), None, Some(input))
+                .await?;
+            read_json(response).await
+        }
+
+        /// Replaces an update's message via check-and-set on the update's `version`.
+        pub async fn put_update(
+            &self,
+            update_id: IncidentUpdateId,
+            version: u64,
+            edit: &PutUpdate,
+        ) -> Result<IncidentView, ApiError> {
+            let incident = update_id.incident_id();
             let response = self
                 .send(
                     Verb::Put,
-                    &format!("{ADMIN}/incidents/{id}"),
+                    &format!("{ADMIN}/incidents/{incident}/updates/{update_id}"),
                     Some(version),
                     Some(edit),
                 )
@@ -212,10 +246,20 @@ mod browser {
             read_json(response).await
         }
 
-        /// Deletes an incident.
-        pub async fn delete_incident(&self, id: &str) -> Result<(), ApiError> {
+        /// Deletes an update via check-and-set on its `version`.
+        pub async fn delete_update(
+            &self,
+            update_id: IncidentUpdateId,
+            version: u64,
+        ) -> Result<(), ApiError> {
+            let incident = update_id.incident_id();
             let response = self
-                .send::<()>(Verb::Delete, &format!("{ADMIN}/incidents/{id}"), None, None)
+                .send::<()>(
+                    Verb::Delete,
+                    &format!("{ADMIN}/incidents/{incident}/updates/{update_id}"),
+                    Some(version),
+                    None,
+                )
                 .await?;
             if response.ok() {
                 Ok(())
@@ -226,15 +270,11 @@ mod browser {
 
         // --- Request orchestration --------------------------------------------------------------
 
-        /// Sends a GET and decodes a JSON success body, surfacing any error response.
         async fn get_json<T: DeserializeOwned>(&self, url: &str) -> Result<T, ApiError> {
             let response = self.send::<()>(Verb::Get, url, None, None).await?;
             read_json(response).await
         }
 
-        /// Sends a request, attaching the stored bearer when one is available. On a 401 it renews
-        /// the session from the refresh token and retries once; a renewal failure drops the dead
-        /// session so the UI can re-prompt for sign-in.
         async fn send<B: Serialize>(
             &self,
             verb: Verb,
@@ -252,7 +292,6 @@ mod browser {
                 return Ok(response);
             }
 
-            // The token was rejected as expired/invalid: try a silent refresh, then retry once.
             if self.auth.is_some()
                 && let Ok(fresh) = crate::auth::refresh_session().await
             {
@@ -262,7 +301,6 @@ mod browser {
                     .map_err(net);
             }
 
-            // Renewal isn't possible — drop the session so the UI prompts for an interactive login.
             crate::auth::clear_token();
             Ok(response)
         }
@@ -284,7 +322,10 @@ impl ApiClient {
     pub async fn notices(&self) -> Result<Vec<grey_api::UiNotice>, ApiError> {
         Self::unavailable()
     }
-    pub async fn incidents(&self) -> Result<Vec<Incident>, ApiError> {
+    pub async fn incidents(&self) -> Result<Vec<IncidentView>, ApiError> {
+        Self::unavailable()
+    }
+    pub async fn incidents_page(&self, _cursor: Option<&str>) -> Result<IncidentsPage, ApiError> {
         Self::unavailable()
     }
     pub async fn me(&self) -> Result<AdminUser, ApiError> {
@@ -293,24 +334,46 @@ impl ApiClient {
     pub async fn peers(&self) -> Result<Vec<Peer>, ApiError> {
         Self::unavailable()
     }
-    pub async fn admin_incidents(&self) -> Result<Vec<Incident>, ApiError> {
+    pub async fn admin_incidents(&self) -> Result<Vec<IncidentView>, ApiError> {
         Self::unavailable()
     }
-    pub async fn incident(&self, _id: &str) -> Result<Incident, ApiError> {
+    pub async fn incident(&self, _id: &str) -> Result<IncidentView, ApiError> {
         Self::unavailable()
     }
-    pub async fn create_incident(&self, _input: &CreateIncident) -> Result<Incident, ApiError> {
+    pub async fn create_incident(&self, _input: &CreateIncident) -> Result<IncidentView, ApiError> {
         Self::unavailable()
     }
-    pub async fn replace_incident(
+    pub async fn put_incident(
         &self,
         _id: &str,
         _version: u64,
-        _edit: &IncidentEdit,
-    ) -> Result<Incident, ApiError> {
+        _edit: &PutIncident,
+    ) -> Result<IncidentView, ApiError> {
         Self::unavailable()
     }
-    pub async fn delete_incident(&self, _id: &str) -> Result<(), ApiError> {
+    pub async fn delete_incident(&self, _id: &str, _version: u64) -> Result<(), ApiError> {
+        Self::unavailable()
+    }
+    pub async fn create_update(
+        &self,
+        _incident_id: &str,
+        _input: &CreateUpdate,
+    ) -> Result<IncidentView, ApiError> {
+        Self::unavailable()
+    }
+    pub async fn put_update(
+        &self,
+        _update_id: IncidentUpdateId,
+        _version: u64,
+        _edit: &PutUpdate,
+    ) -> Result<IncidentView, ApiError> {
+        Self::unavailable()
+    }
+    pub async fn delete_update(
+        &self,
+        _update_id: IncidentUpdateId,
+        _version: u64,
+    ) -> Result<(), ApiError> {
         Self::unavailable()
     }
 }

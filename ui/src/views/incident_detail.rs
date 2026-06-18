@@ -3,10 +3,11 @@ use yew::prelude::*;
 
 use crate::components::{IncidentBlock, StatusDot};
 use crate::contexts::use_store;
+use crate::formatters::time_format;
 
 /// The `/incidents/{id}` page. Public visitors see the read-only incident; signed-in administrators
-/// get an inline editor (click any field to change it; a save control appears once there are
-/// unsaved changes) plus controls to add/remove updates and delete the incident.
+/// get an inline editor: edit the title, add updates, edit an update's message, remove updates, and
+/// delete the incident. Each action is its own check-and-set API call against that entity's version.
 #[derive(Properties, PartialEq)]
 pub struct IncidentDetailProps {
     pub id: String,
@@ -26,7 +27,7 @@ pub fn incident_detail(props: &IncidentDetailProps) -> Html {
     let _ = &store;
 
     let wanted = Identifier::parse(&props.id);
-    let incident = store.incidents().iter().find(|i| Some(i.id) == wanted).cloned();
+    let incident = store.incidents().iter().find(|i| Some(i.id()) == wanted).cloned();
 
     html! {
         <div class="page">
@@ -51,42 +52,42 @@ struct AdminIncidentDetailProps {
 #[cfg(feature = "wasm")]
 #[function_component(AdminIncidentDetail)]
 fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
-    use crate::components::icons::{check_icon, edit_icon, save_icon};
+    use crate::components::icons::{check_icon, edit_icon, save_icon, trash_icon};
     use crate::components::markdown::render_markdown;
     use crate::routes::Route;
     use crate::styles::impact_class;
-    use chrono::Utc;
-    use grey_api::{Impact, IncidentEdit, IncidentUpdate};
+    use grey_api::{CreateUpdate, Impact, IncidentUpdateId, IncidentView, PutIncident, PutUpdate};
     use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
     use yew_router::prelude::*;
 
-    // The canonical incident (with its version) plus the editable draft fields.
-    let loaded = use_state(|| Option::<grey_api::Incident>::None);
+    // The canonical incident (with its updates + versions) plus the editable draft fields.
+    let loaded = use_state(|| Option::<IncidentView>::None);
     let title = use_state(String::new);
-    let updates = use_state(Vec::<IncidentUpdate>::new);
+    // The update whose message is open in a textarea (by id), plus that textarea's draft.
+    let editing = use_state(|| Option::<IncidentUpdateId>::None);
+    let message_draft = use_state(String::new);
+    // The "add update" form.
+    let new_impact = use_state(|| "offline".to_string());
+    let new_message = use_state(String::new);
     let saving = use_state(|| false);
-    // Which posted update (by index) currently has its message open in a textarea; the rest render
-    // their message as markdown.
-    let editing = use_state(|| Option::<usize>::None);
     let navigator = use_navigator();
-    // The shared store, whose save/delete helpers reflect changes everywhere without a refetch.
     let store = use_store();
     let client = store.client().clone();
 
     // Load the incident (including hidden) once.
     {
         let id = props.id.clone();
+        let new_impact = new_impact.clone();
         let loaded = loaded.clone();
         let title = title.clone();
-        let updates = updates.clone();
         let store = store.clone();
         let client = client.clone();
         use_effect_with((props.token.clone(), props.id.clone()), move |_| {
             wasm_bindgen_futures::spawn_local(async move {
                 match client.incident(&id).await {
                     Ok(incident) => {
-                        title.set(incident.title.clone());
-                        updates.set(incident.sorted_updates().into_iter().cloned().collect());
+                        title.set(incident.title().to_string());
+                        new_impact.set(incident.current_impact().as_str().to_string());
                         loaded.set(Some(incident));
                     }
                     Err(e) => store.set_error(e),
@@ -104,10 +105,8 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
         };
     };
 
-    // The unchanged baseline, in the same (sorted) order as the editable list, so reordering by the
-    // server's storage order never reads as a spurious change.
-    let baseline: Vec<IncidentUpdate> = current.sorted_updates().into_iter().cloned().collect();
-    let dirty = current.title != *title || baseline != *updates;
+    let incident_version = current.incident.version;
+    let title_dirty = current.title() != *title;
 
     let on_title = {
         let title = title.clone();
@@ -117,104 +116,108 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
         })
     };
 
-    let on_update_impact = |index: usize| {
-        let updates = updates.clone();
-        Callback::from(move |e: Event| {
-            let el: HtmlSelectElement = e.target_unchecked_into();
-            let mut next = (*updates).clone();
-            if let Some(u) = next.get_mut(index) {
-                u.impact = el.value().parse().unwrap_or_default();
-            }
-            updates.set(next);
-        })
+    // Replaces the just-saved incident everywhere and refreshes the local draft state.
+    let apply_saved = {
+        let loaded = loaded.clone();
+        let title = title.clone();
+        move |view: IncidentView| {
+            title.set(view.title().to_string());
+            loaded.set(Some(view));
+        }
     };
-    let on_update_message = |index: usize| {
-        let updates = updates.clone();
-        Callback::from(move |e: InputEvent| {
-            let el: HtmlTextAreaElement = e.target_unchecked_into();
-            let mut next = (*updates).clone();
-            if let Some(u) = next.get_mut(index) {
-                u.message = el.value();
-            }
-            updates.set(next);
-        })
-    };
-    let on_remove_update = |index: usize| {
-        let updates = updates.clone();
+
+    let on_save_title = {
+        let id = current.id().to_string();
+        let title = title.clone();
+        let saving = saving.clone();
+        let store = store.clone();
+        let apply_saved = apply_saved.clone();
         Callback::from(move |_| {
-            let mut next = (*updates).clone();
-            if index < next.len() {
-                next.remove(index);
-            }
-            updates.set(next);
-        })
-    };
-    let on_add_update = {
-        let updates = updates.clone();
-        Callback::from(move |_| {
-            let mut next = (*updates).clone();
-            next.push(IncidentUpdate {
-                impact: Impact::Offline,
-                timestamp: Utc::now(),
-                message: String::new(),
+            let edit = PutIncident { title: (*title).trim().to_string() };
+            let (id, saving, store, apply_saved) = (id.clone(), saving.clone(), store.clone(), apply_saved.clone());
+            saving.set(true);
+            wasm_bindgen_futures::spawn_local(async move {
+                match store.put_incident(id, incident_version, edit).await {
+                    Ok(view) => apply_saved(view),
+                    Err(e) => store.set_error(e),
+                }
+                saving.set(false);
             });
-            updates.set(next);
         })
     };
 
-    let on_save = {
-        let token = props.token.clone();
-        let id = current.id.to_string();
-        let version = current.version;
-        let title = title.clone();
-        let updates = updates.clone();
-        let loaded = loaded.clone();
+    let on_add_update = {
+        let id = current.id().to_string();
+        let new_impact = new_impact.clone();
+        let new_message = new_message.clone();
         let saving = saving.clone();
-        let editing = editing.clone();
         let store = store.clone();
+        let apply_saved = apply_saved.clone();
         Callback::from(move |_| {
-            let edit = IncidentEdit {
-                title: (*title).trim().to_string(),
-                updates: (*updates).clone(),
-            };
-            let _ = &token;
-            let id = id.clone();
-            let loaded = loaded.clone();
-            let title = title.clone();
-            let updates = updates.clone();
-            let saving = saving.clone();
-            let editing = editing.clone();
-            let store = store.clone();
+            let message = (*new_message).trim().to_string();
+            if message.is_empty() {
+                store.set_error(grey_api::ApiError::new("An update message is required."));
+                return;
+            }
+            let input = CreateUpdate { impact: new_impact.parse().unwrap_or_default(), message };
+            let (id, new_message, saving, store, apply_saved) =
+                (id.clone(), new_message.clone(), saving.clone(), store.clone(), apply_saved.clone());
             saving.set(true);
             wasm_bindgen_futures::spawn_local(async move {
-                let result = store.save_incident(id, version, edit).await;
-                saving.set(false);
-                match result {
-                    Ok(incident) => {
-                        title.set(incident.title.clone());
-                        updates.set(incident.sorted_updates().into_iter().cloned().collect());
-                        loaded.set(Some(incident));
-                        editing.set(None);
-                    }
+                match store.create_update(id, input).await {
+                    Ok(view) => { apply_saved(view); new_message.set(String::new()); }
                     Err(e) => store.set_error(e),
                 }
+                saving.set(false);
+            });
+        })
+    };
+
+    let on_save_update = |uid: IncidentUpdateId, version: u64| {
+        let message_draft = message_draft.clone();
+        let editing = editing.clone();
+        let saving = saving.clone();
+        let store = store.clone();
+        let apply_saved = apply_saved.clone();
+        Callback::from(move |_| {
+            let edit = PutUpdate { message: (*message_draft).clone() };
+            let (editing, saving, store, apply_saved) =
+                (editing.clone(), saving.clone(), store.clone(), apply_saved.clone());
+            saving.set(true);
+            wasm_bindgen_futures::spawn_local(async move {
+                match store.put_update(uid, version, edit).await {
+                    Ok(view) => { apply_saved(view); editing.set(None); }
+                    Err(e) => store.set_error(e),
+                }
+                saving.set(false);
+            });
+        })
+    };
+
+    let on_remove_update = |uid: IncidentUpdateId, version: u64| {
+        let saving = saving.clone();
+        let store = store.clone();
+        Callback::from(move |_| {
+            let (saving, store) = (saving.clone(), store.clone());
+            saving.set(true);
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Err(e) = store.delete_update(uid, version).await {
+                    store.set_error(e);
+                }
+                saving.set(false);
             });
         })
     };
 
     let on_delete = {
-        let token = props.token.clone();
-        let id_value = current.id;
+        let id_value = current.id();
         let navigator = navigator.clone();
         let store = store.clone();
         Callback::from(move |_| {
-            let _ = &token;
-            let navigator = navigator.clone();
-            let store = store.clone();
+            let (navigator, store) = (navigator.clone(), store.clone());
             wasm_bindgen_futures::spawn_local(async move {
-                match store.delete_incident(id_value).await {
+                match store.delete_incident(id_value, incident_version).await {
                     Ok(()) => {
-                        // The store has already dropped it from the shared list; leave the page.
                         if let Some(nav) = navigator {
                             nav.push(&Route::Incidents);
                         }
@@ -226,6 +229,31 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
     };
 
     let status_class = impact_class(current.current_impact());
+    // Newest update first in the editor.
+    let mut updates = current.updates.clone();
+    updates.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+    let on_new_impact = {
+        let new_impact = new_impact.clone();
+        Callback::from(move |e: Event| {
+            let el: HtmlSelectElement = e.target_unchecked_into();
+            new_impact.set(el.value());
+        })
+    };
+    let on_new_message = {
+        let new_message = new_message.clone();
+        Callback::from(move |e: InputEvent| {
+            let el: HtmlTextAreaElement = e.target_unchecked_into();
+            new_message.set(el.value());
+        })
+    };
+    let on_draft_message = {
+        let message_draft = message_draft.clone();
+        Callback::from(move |e: InputEvent| {
+            let el: HtmlTextAreaElement = e.target_unchecked_into();
+            message_draft.set(el.value());
+        })
+    };
 
     html! {
         <div class="page incident-edit">
@@ -238,14 +266,14 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                             value={(*title).clone()}
                             oninput={on_title}
                         />
-                        <span class="incident-id">{format!("#{}", current.id)}</span>
+                        <span class="incident-id">{format!("#{}", current.id())}</span>
                     </div>
-                    if dirty {
+                    if title_dirty {
                         <button
                             class={classes!("incident-edit__save-icon", (*saving).then_some("saving"))}
-                            title="Save changes"
+                            title="Save title"
                             disabled={*saving}
-                            onclick={on_save}
+                            onclick={on_save_title}
                         >
                             { save_icon() }
                         </button>
@@ -253,13 +281,38 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                 </div>
 
                 <ul class="incident-timeline incident-timeline--editing">
-                    { for (*updates).iter().enumerate().rev().map(|(i, update)| {
+                    <li class="incident-timeline__item incident-timeline__item--new">
+                        <div class="incident-timeline__rail">
+                            <span class={classes!("incident-timeline__circle", impact_class(new_impact.parse().unwrap_or_default()))}></span>
+                            <span class={classes!("incident-timeline__tail", impact_class(new_impact.parse().unwrap_or_default()))}></span>
+                        </div>
+                        <div class="incident-timeline__body">
+                            <div class="incident-timeline__time">
+                                <select onchange={on_new_impact}>
+                                    { for [Impact::Offline, Impact::Degraded, Impact::None, Impact::Hidden].into_iter().map(|opt| html! {
+                                        <option value={opt.as_str()} selected={opt.as_str() == *new_impact}>{opt.label()}</option>
+                                    }) }
+                                </select>
+
+                                <button type="button" class="incident-edit__icon-button" disabled={*saving} onclick={on_add_update}>{check_icon()}</button>
+                            </div>
+                            <div class={classes!("incident-timeline__card", status_class)}>
+                                <textarea
+                                    class="incident-timeline__message-input"
+                                    rows="3"
+                                    value={(*new_message).clone()}
+                                    oninput={on_new_message}
+                                    placeholder="Enter your next incident update in markdown form..."
+                                />
+                            </div>
+                        </div>
+                    </li>
+
+                    { for updates.iter().map(|update| {
                         let class = impact_class(update.impact);
-                        // An update is "posted" once it is part of the loaded incident: its impact then
-                        // becomes fixed and only its message stays editable. New (unsaved) updates keep
-                        // full control so the impact can still be chosen before the first save.
-                        let posted = current.updates.iter().any(|u| u.timestamp == update.timestamp);
-                        let is_editing = *editing == Some(i);
+                        let uid = update.id;
+                        let version = update.version;
+                        let is_editing = *editing == Some(uid);
                         html! {
                             <li class="incident-timeline__item">
                                 <div class="incident-timeline__rail">
@@ -267,51 +320,34 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                                     <span class={classes!("incident-timeline__tail", class)}></span>
                                 </div>
                                 <div class="incident-timeline__body">
-                                    if posted {
-                                        <div class="incident-timeline__time">{update.timestamp.format("%Y-%m-%d %H:%M UTC").to_string()}</div>
-                                        <div class={classes!("incident-timeline__card", class)}>
-                                            <div class="incident-timeline__card-head">
-                                                <span class={classes!("incident-status-pill", class)}>{update.impact.label()}</span>
-                                                if is_editing {
-                                                    <button type="button" class="incident-edit__icon-button" title="Done editing"
-                                                        onclick={ let editing = editing.clone(); Callback::from(move |_| editing.set(None)) }>
-                                                        { check_icon() }
-                                                    </button>
-                                                } else {
-                                                    <button type="button" class="incident-edit__icon-button" title="Edit message"
-                                                        onclick={ let editing = editing.clone(); Callback::from(move |_| editing.set(Some(i))) }>
-                                                        { edit_icon() }
-                                                    </button>
-                                                }
-                                            </div>
-                                            if is_editing {
-                                                <textarea
-                                                    class="incident-timeline__message-input"
-                                                    rows="3"
-                                                    value={update.message.clone()}
-                                                    oninput={on_update_message(i)}
-                                                />
-                                            } else {
-                                                <div class="incident-timeline__card-message markdown">{ render_markdown(&update.message) }</div>
-                                            }
-                                        </div>
-                                    } else {
-                                        <div class="incident-timeline__edit-row">
-                                            <select onchange={on_update_impact(i)}>
-                                                { for [Impact::Offline, Impact::Degraded, Impact::None, Impact::Hidden].into_iter().map(|opt| html! {
-                                                    <option value={opt.as_str()} selected={opt == update.impact}>{opt.label()}</option>
-                                                }) }
-                                            </select>
-                                            <span class="incident-timeline__time">{update.timestamp.format("%Y-%m-%d %H:%M UTC").to_string()}</span>
-                                            <button type="button" class="link-button danger" onclick={on_remove_update(i)}>{"Remove"}</button>
-                                        </div>
-                                        <textarea
-                                            class="incident-timeline__message-input"
-                                            rows="3"
-                                            value={update.message.clone()}
-                                            oninput={on_update_message(i)}
-                                        />
-                                    }
+                                    <div class="incident-timeline__time">
+                                        <span class={classes!("incident-status-pill", class)}>{update.impact.label()}</span>
+                                        <time datetime={update.timestamp.to_rfc3339()}>{time_format(update.timestamp)}</time>
+                                        if is_editing {
+                                            <button type="button" class="incident-edit__icon-button" title="Save message"
+                                                disabled={*saving} onclick={on_save_update(uid, version)}>
+                                                { check_icon() }
+                                            </button>
+                                        } else {
+                                            <button type="button" class="incident-edit__icon-button" title="Edit message"
+                                                onclick={ let editing = editing.clone(); let message_draft = message_draft.clone(); let msg = update.message.clone(); Callback::from(move |_| { message_draft.set(msg.clone()); editing.set(Some(uid)); }) }>
+                                                { edit_icon() }
+                                            </button>
+                                            <button type="button" class="incident-edit__icon-button danger" title="Remove update" disabled={*saving} onclick={on_remove_update(uid, version)}>{ trash_icon() }</button>
+                                        }
+                                    </div>
+                                    <div class={classes!("incident-timeline__card", class)}>
+                                        if is_editing {
+                                            <textarea
+                                                class="incident-timeline__message-input"
+                                                rows="3"
+                                                value={(*message_draft).clone()}
+                                                oninput={on_draft_message.clone()}
+                                            />
+                                        } else {
+                                            <div class="incident-timeline__card-message markdown">{ render_markdown(&update.message) }</div>
+                                        }
+                                    </div>
                                 </div>
                             </li>
                         }
@@ -319,8 +355,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                 </ul>
 
                 <div class="incident-admin-controls">
-                    <button type="button" onclick={on_add_update}>{"Add update"}</button>
-                    <button type="button" class="danger" onclick={on_delete}>{"Delete incident"}</button>
+                    <button type="button" class="danger" disabled={*saving} onclick={on_delete}>{"Delete incident"}</button>
                 </div>
 
                 <p class="incident-edit__hint">

@@ -26,7 +26,7 @@ pub struct AppProps {
     #[prop_or_default]
     pub crons: Vec<grey_api::Cron>,
     #[prop_or_default]
-    pub incidents: Vec<grey_api::Incident>,
+    pub incidents: Vec<grey_api::IncidentView>,
     /// The request path, used to seed the router during server-side rendering so a deep link to a
     /// non-home route renders the right page (and hydrates cleanly). Unused on the client, where the
     /// browser's location drives the router.
@@ -82,7 +82,7 @@ impl AppProps {
         let config: UiConfig = serde_json::from_str(&config_data)?;
         let notices: Vec<grey_api::UiNotice> = serde_json::from_str(&notices_data)?;
         let probes: Vec<grey_api::Probe> = serde_json::from_str(&probes_data)?;
-        let incidents: Vec<grey_api::Incident> = incidents_data
+        let incidents: Vec<grey_api::IncidentView> = incidents_data
             .and_then(|data| serde_json::from_str(&data).ok())
             .unwrap_or_default();
         let crons: Vec<grey_api::Cron> = crons_data

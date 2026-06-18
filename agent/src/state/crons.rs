@@ -1,17 +1,23 @@
 //! Cron-state storage: the [`CronStore`] trait and its implementation over the [`State`] redb store,
-//! plus the cluster [`Versioned`] implementation for crons. Kept separate from the underlying store,
-//! mirroring the probe and incident storage splits.
+//! plus the cluster [`Versioned`] / [`GlobalLwwEntity`] implementations for crons.
+//!
+//! Unlike probes (a per-observer record per node), a cron's check-in state is a **single global
+//! record** keyed by the cron's name and resolved by whole-record last-writer-wins. A check-in
+//! appends a run to the latest record this node holds and re-stamps the wall-clock version, so the
+//! history accumulates on the node a cron checks in to; the rare case of the same cron checking in on
+//! two nodes before gossip converges resolves by LWW (the later write wins, the other's run is
+//! dropped) rather than being unioned.
 
 use std::collections::HashMap;
 use std::error::Error;
 
-use grey_api::{Cron, Mergeable};
-use redb::{ReadableDatabase, ReadableTable};
+use grey_api::Cron;
+use redb::{ReadableDatabase, ReadableTable, TableDefinition};
 
 use crate::cluster::Versioned;
 use crate::cron::CronCheckin;
 
-use super::{CRON_FIELDS_TABLE, State};
+use super::{CRON_TABLE, GlobalLwwEntity, LwwFieldValue, State};
 
 impl Versioned for Cron {
     type Diff = Cron;
@@ -23,8 +29,7 @@ impl Versioned for Cron {
     }
 
     fn diff(&self, version: u64) -> Option<Self::Diff> {
-        // `runs` is already bounded, so unlike probes there is no history to trim — the whole record
-        // is the catch-up state.
+        // The whole record is the catch-up state under whole-record LWW.
         if self.version() > version {
             Some(self.clone())
         } else {
@@ -33,18 +38,32 @@ impl Versioned for Cron {
     }
 
     fn apply(&mut self, diff: &Self::Diff) {
-        self.merge(diff);
+        // Whole-record last-writer-wins by version. The authoritative `(version, last_writer)`
+        // tiebreak for equal versions is applied by the gossip store (`State::apply`), which knows the
+        // incoming writer; this version-only form is the defensive fallback for the generic path.
+        if diff.version() > self.version() {
+            *self = diff.clone();
+        }
+    }
+}
+
+impl GlobalLwwEntity for Cron {
+    type Key = &'static str;
+    const TABLE: TableDefinition<'static, &'static str, LwwFieldValue> = CRON_TABLE;
+
+    fn id_field(&self) -> String {
+        self.name.clone()
     }
 }
 
 /// Storage operations for cron state (the cluster-replicated, gossiped check-in records).
 #[allow(async_fn_in_trait)]
 pub trait CronStore {
-    /// The pooled, cluster-merged cron states keyed by cron name, with configuration echo fields
-    /// re-stamped from local config.
+    /// The cluster-wide cron states keyed by cron name, with configuration echo fields re-stamped
+    /// from local config.
     async fn get_cron_states(&self) -> Result<HashMap<String, Cron>, Box<dyn Error>>;
 
-    /// Folds a check-in into this node's record for the named cron. Returns `Ok(false)` when the cron
+    /// Folds a check-in into the global record for the named cron. Returns `Ok(false)` when the cron
     /// is not present in the local configuration (a 404 for the caller).
     async fn record_cron_checkin(
         &self,
@@ -67,16 +86,14 @@ impl CronStore for State {
         let txn = self.database.begin_read()?;
         // The table only exists once something has been written to it; treat its absence as "no
         // cron state yet" rather than an error.
-        if let Ok(table) = txn.open_table(CRON_FIELDS_TABLE) {
+        if let Ok(table) = txn.open_table(CRON_TABLE) {
             for entry in table.iter()?.filter_map(|r| r.ok()) {
                 let (key, value) = entry;
-                let (_node_id, name) = key.value();
-                let (_version, data) = value.value();
+                let name = key.value();
+                let (_version, _last_writer, data) = value.value();
                 if let Ok(snapshot) = rmp_serde::from_slice::<Cron>(data) {
-                    crons
-                        .entry(name.clone())
-                        .and_modify(|existing| existing.merge(&snapshot))
-                        .or_insert_with(|| snapshot.clone());
+                    // A single global record per cron — take it directly (no per-node pooling).
+                    crons.insert(name.to_string(), snapshot);
                 }
             }
         }
@@ -104,12 +121,14 @@ impl CronStore for State {
 
         let txn = self.database.begin_write()?;
         {
-            let mut table = txn.open_table(CRON_FIELDS_TABLE)?;
+            let mut table = txn.open_table(CRON_TABLE)?;
 
+            // Append to the latest global record this node holds (so history accumulates), falling
+            // back to a fresh config-seeded record.
             let mut cron = table
-                .get((self.node_id.into(), name.to_string()))?
+                .get(name)?
                 .and_then(|existing| {
-                    let (_version, data) = existing.value();
+                    let (_version, _last_writer, data) = existing.value();
                     rmp_serde::from_slice::<Cron>(data).ok()
                 })
                 .unwrap_or_else(|| cfg.to_cron());
@@ -119,8 +138,8 @@ impl CronStore for State {
             checkin.apply(&mut cron);
 
             table.insert(
-                (self.node_id.into(), name.to_string()),
-                (cron.version(), rmp_serde::to_vec_named(&cron)?.as_slice()),
+                name,
+                (cron.version(), self.node_id.into(), rmp_serde::to_vec_named(&cron)?.as_slice()),
             )?;
         }
         txn.commit()?;
@@ -197,8 +216,8 @@ mod tests {
         assert_eq!(backup.last_checkin.as_ref().unwrap().message, "done");
     }
 
-    /// A cron record received from a peer through the gossip apply path is stored and surfaces in the
-    /// pooled view even on a node that has no local check-ins for it.
+    /// A cron record received from a peer through the gossip apply path is stored as the global record
+    /// and surfaces in the cluster view even on a node that has no local check-ins for it.
     #[tokio::test]
     async fn cron_replicates_through_gossip_apply() {
         use crate::cluster::{ClusterStateDiff, GossipStore, NodeID};
@@ -226,5 +245,42 @@ mod tests {
         let backup = pooled.get("backup").expect("the gossiped cron is pooled");
         assert_eq!(backup.runs.len(), 1);
         assert_eq!(backup.last_checkin.as_ref().unwrap().message, "from-peer");
+    }
+
+    /// Whole-record last-writer-wins: a higher-versioned record replaces a lower-versioned one
+    /// regardless of run contents (no union), and a stale incoming record is ignored.
+    #[tokio::test]
+    async fn cron_apply_is_last_writer_wins() {
+        use crate::cluster::{ClusterStateDiff, GossipStore, NodeID};
+        use crate::state::ReplicatedEntity;
+
+        let dir = tempfile::tempdir().unwrap();
+        let state = state_with_cron(dir.path()).await;
+
+        // Establish a local record by recording a check-in.
+        state
+            .record_cron_checkin("backup", checkin(CronStatus::Succeeded, "local"))
+            .await
+            .unwrap();
+        let local_version = state.get_cron_states().await.unwrap()["backup"].version();
+
+        // A stale peer record (older version) must not overwrite the local one.
+        let mut stale = grey_api::Cron::from_config(
+            "backup",
+            HashMap::new(),
+            grey_api::CronSchedule::Every(Duration::from_secs(60)),
+            None,
+            None,
+        );
+        stale.last_updated = chrono::DateTime::from_timestamp_millis(local_version as i64 - 1_000).unwrap();
+        stale.last_checkin = Some(grey_api::CheckIn { at: stale.last_updated, status: CronStatus::Failed, message: "stale".into() });
+        let mut diff = ClusterStateDiff::new();
+        diff.update(NodeID::new(), "backup".to_string(), ReplicatedEntity::Cron(stale));
+        state.apply(diff).await.unwrap();
+        assert_eq!(
+            state.get_cron_states().await.unwrap()["backup"].last_checkin.as_ref().unwrap().message,
+            "local",
+            "a stale (lower-version) record must not win"
+        );
     }
 }

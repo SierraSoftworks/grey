@@ -99,7 +99,7 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
                 match store.create_incident(input).await {
                     Ok(created) => {
                         if let Some(nav) = navigator {
-                            nav.push(&Route::Incident { id: created.id.to_string() });
+                            nav.push(&Route::Incident { id: created.id().to_string() });
                         }
                     }
                     Err(e) => {

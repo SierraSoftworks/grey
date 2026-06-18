@@ -12,23 +12,23 @@
 use std::rc::Rc;
 
 use grey_api::{
-    AdminUser, ApiError, CreateIncident, Cron, Identifier, Incident, IncidentEdit, Peer, Probe,
-    UiConfig, UiNotice,
+    AdminUser, ApiError, CreateIncident, CreateUpdate, Cron, Identifier, IncidentUpdateId,
+    IncidentView, Peer, Probe, PutIncident, PutUpdate, UiConfig, UiNotice,
 };
 use yew::prelude::*;
 
 use crate::api::ApiClient;
 
-/// Sorts incidents most-recently-updated first (those with no updates sort last), mirroring the
-/// server's ordering so optimistic insertions land in the right place.
-fn sort_incidents(incidents: &mut [Incident]) {
-    incidents.sort_by(|a, b| b.last_updated().cmp(&a.last_updated()));
+/// Sorts incidents newest-first by id (snowflake ids are time-ordered), mirroring the server's
+/// ordering so optimistic insertions land in the right place.
+fn sort_incidents(incidents: &mut [IncidentView]) {
+    incidents.sort_by(|a, b| b.id().cmp(&a.id()));
 }
 
 /// Inserts or replaces an incident in the shared (public) list. The list mirrors the unauthenticated
 /// view, so an incident that is now hidden is dropped rather than shown.
-fn apply_incident_upsert(incidents: &mut Vec<Incident>, incident: Incident) {
-    incidents.retain(|i| i.id != incident.id);
+fn apply_incident_upsert(incidents: &mut Vec<IncidentView>, incident: IncidentView) {
+    incidents.retain(|i| i.id() != incident.id());
     if incident.is_public() {
         incidents.push(incident);
     }
@@ -46,7 +46,7 @@ pub struct StoreState {
     pub token: Option<String>,
     pub peers: Vec<Peer>,
     pub notices: Vec<UiNotice>,
-    pub incidents: Vec<Incident>,
+    pub incidents: Vec<IncidentView>,
     pub probes: Vec<Probe>,
     pub crons: Vec<Cron>,
     /// The most recent background-fetch failure, surfaced to the user as a dismissible banner.
@@ -60,10 +60,10 @@ pub enum Action {
     SetCrons(Vec<Cron>),
     SetNotices(Vec<UiNotice>),
     SetPeers(Vec<Peer>),
-    SetIncidents(Vec<Incident>),
+    SetIncidents(Vec<IncidentView>),
     /// Insert or replace a single incident (after an admin create or edit), without waiting for the
     /// next poll.
-    UpsertIncident(Incident),
+    UpsertIncident(IncidentView),
     /// Remove a single incident (after an admin delete).
     RemoveIncident(Identifier),
     /// Record an established session (the validated administrator and their ID token).
@@ -96,7 +96,7 @@ impl Reducible for StoreState {
             Action::UpsertIncident(incident) => {
                 apply_incident_upsert(&mut next.incidents, incident)
             }
-            Action::RemoveIncident(id) => next.incidents.retain(|incident| incident.id != id),
+            Action::RemoveIncident(id) => next.incidents.retain(|incident| incident.id() != id),
             Action::SetSession { user, token } => {
                 next.user = Some(user);
                 next.token = token;
@@ -150,7 +150,7 @@ impl Store {
         &self.state.peers
     }
 
-    pub fn incidents(&self) -> &[Incident] {
+    pub fn incidents(&self) -> &[IncidentView] {
         &self.state.incidents
     }
 
@@ -186,27 +186,64 @@ impl Store {
     // --- Mutations ------------------------------------------------------------------------------
 
     /// Creates an incident and reflects it in the shared list immediately.
-    pub async fn create_incident(&self, input: CreateIncident) -> Result<Incident, ApiError> {
+    pub async fn create_incident(&self, input: CreateIncident) -> Result<IncidentView, ApiError> {
         let created = self.client.create_incident(&input).await?;
         self.state.dispatch(Action::UpsertIncident(created.clone()));
         Ok(created)
     }
 
-    /// Saves an incident (check-and-set on `version`) and folds the authoritative result back in.
-    pub async fn save_incident(
+    /// Replaces an incident's title (check-and-set on the incident's `version`).
+    pub async fn put_incident(
         &self,
         id: String,
         version: u64,
-        edit: IncidentEdit,
-    ) -> Result<Incident, ApiError> {
-        let saved = self.client.replace_incident(&id, version, &edit).await?;
+        edit: PutIncident,
+    ) -> Result<IncidentView, ApiError> {
+        let saved = self.client.put_incident(&id, version, &edit).await?;
         self.state.dispatch(Action::UpsertIncident(saved.clone()));
         Ok(saved)
     }
 
-    /// Deletes an incident and drops it from the shared list.
-    pub async fn delete_incident(&self, id: Identifier) -> Result<(), ApiError> {
-        self.client.delete_incident(&id.to_string()).await?;
+    /// Adds a new update to an incident and folds the refreshed incident back in.
+    pub async fn create_update(
+        &self,
+        incident_id: String,
+        input: CreateUpdate,
+    ) -> Result<IncidentView, ApiError> {
+        let saved = self.client.create_update(&incident_id, &input).await?;
+        self.state.dispatch(Action::UpsertIncident(saved.clone()));
+        Ok(saved)
+    }
+
+    /// Replaces an update's message (check-and-set on the update's `version`).
+    pub async fn put_update(
+        &self,
+        update_id: IncidentUpdateId,
+        version: u64,
+        edit: PutUpdate,
+    ) -> Result<IncidentView, ApiError> {
+        let saved = self.client.put_update(update_id, version, &edit).await?;
+        self.state.dispatch(Action::UpsertIncident(saved.clone()));
+        Ok(saved)
+    }
+
+    /// Deletes an update (check-and-set on its `version`) and folds the refreshed incident back in.
+    pub async fn delete_update(
+        &self,
+        update_id: IncidentUpdateId,
+        version: u64,
+    ) -> Result<(), ApiError> {
+        self.client.delete_update(update_id, version).await?;
+        // Re-fetch the parent incident so the removed update drops out of the view.
+        if let Ok(view) = self.client.incident(&update_id.incident_id().to_string()).await {
+            self.state.dispatch(Action::UpsertIncident(view));
+        }
+        Ok(())
+    }
+
+    /// Deletes an incident (check-and-set on its `version`) and drops it from the shared list.
+    pub async fn delete_incident(&self, id: Identifier, version: u64) -> Result<(), ApiError> {
+        self.client.delete_incident(&id.to_string(), version).await?;
         self.state.dispatch(Action::RemoveIncident(id));
         Ok(())
     }
@@ -232,7 +269,7 @@ pub struct StoreProviderProps {
     #[prop_or_default]
     pub peers: Vec<Peer>,
     #[prop_or_default]
-    pub incidents: Vec<Incident>,
+    pub incidents: Vec<IncidentView>,
     pub children: Children,
 }
 

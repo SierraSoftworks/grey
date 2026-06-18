@@ -1,5 +1,5 @@
 use chrono::Utc;
-use grey_api::{Impact, Incident};
+use grey_api::{Impact, IncidentView};
 
 use crate::formatters::compact_duration;
 use crate::styles::impact_class;
@@ -7,7 +7,7 @@ use crate::styles::impact_class;
 /// The status text shown alongside an incident, paired with its colour class: the current impact and
 /// how long it has held (like a probe's streak), "Resolved" once it returns to operational, or
 /// "Draft" while hidden.
-pub fn incident_status(incident: &Incident) -> (String, &'static str) {
+pub fn incident_status(incident: &IncidentView) -> (String, &'static str) {
     match incident.current_impact() {
         Impact::Hidden => ("Draft".to_string(), impact_class(Impact::Hidden)),
         Impact::None => {

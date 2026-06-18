@@ -19,3 +19,22 @@ pub fn cron_run_class(status: CronStatus) -> &'static str {
         CronStatus::Failed => "error",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classes_map_every_variant() {
+        assert_eq!(cron_class(CronHealth::Succeeded), "ok");
+        assert_eq!(cron_class(CronHealth::Running), "ok");
+        assert_eq!(cron_class(CronHealth::Stuck), "warn");
+        assert_eq!(cron_class(CronHealth::Failed), "error");
+        assert_eq!(cron_class(CronHealth::Missing), "error");
+        assert_eq!(cron_class(CronHealth::Pending), "unknown");
+
+        assert_eq!(cron_run_class(CronStatus::Succeeded), "ok");
+        assert_eq!(cron_run_class(CronStatus::Running), "warn");
+        assert_eq!(cron_run_class(CronStatus::Failed), "error");
+    }
+}
