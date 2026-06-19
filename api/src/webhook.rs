@@ -290,4 +290,24 @@ mod tests {
         // The payload matches the probe/cron API shape: there is no per-node identity on it.
         assert!(json.get("node").is_none(), "events carry no node field");
     }
+
+    /// A freshly built event is stamped with the current schema version, and a payload that predates
+    /// the `version` field still deserializes — defaulting to the current version.
+    #[test]
+    fn version_is_stamped_and_defaults_when_absent() {
+        let event = WebhookEvent::for_probe("evt", ts(1), &failing_probe("web"), "passing", true);
+        assert_eq!(event.version, WEBHOOK_SCHEMA_VERSION);
+
+        // A payload missing `version` (e.g. from a pre-versioning agent) decodes with the default.
+        let legacy = serde_json::json!({
+            "id": "evt",
+            "event": "probe.state_changed",
+            "timestamp": "2026-06-19T12:00:00Z",
+            "entity": { "type": "probe", "name": "web" },
+            "state": { "current": "failing", "previous": "passing", "healthy": false, "was_healthy": true }
+        });
+        let decoded: WebhookEvent = serde_json::from_value(legacy).unwrap();
+        assert_eq!(decoded.version, WEBHOOK_SCHEMA_VERSION);
+        assert_eq!(decoded.entity.name, "web");
+    }
 }
