@@ -5,10 +5,10 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use actix_web::{
-    HttpMessage, HttpResponse,
+    HttpMessage, HttpRequest, HttpResponse,
     body::BoxBody,
     dev::{ServiceRequest, ServiceResponse},
-    http::{StatusCode, header::AUTHORIZATION},
+    http::{StatusCode, header::AUTHORIZATION, header::HeaderMap},
     middleware::Next,
     web,
 };
@@ -332,6 +332,141 @@ fn json_to_filter_value(value: &Value) -> FilterValue<'_> {
     }
 }
 
+/// Extracts a bearer token from an `Authorization` header, accepting either capitalisation of the
+/// `Bearer` scheme. Shared by the admin middleware and the public-endpoint [`resolve_auth_context`].
+fn bearer_token(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| {
+            value
+                .strip_prefix("Bearer ")
+                .or_else(|| value.strip_prefix("bearer "))
+        })
+        .map(|token| token.trim().to_string())
+}
+
+/// A request's resolved authentication context, used to decide which probes and crons a viewer may
+/// see via their `visible` filter.
+///
+/// Unlike [`require_admin`] (which rejects an unauthorised request outright), this is computed for the
+/// *public* read endpoints, so an anonymous request — or one carrying an invalid/expired token —
+/// simply resolves to "not authenticated, not admin" and sees only the entities visible to everyone.
+#[derive(Clone, Default)]
+pub struct AuthContext {
+    /// Whether a valid OIDC bearer token accompanied the request.
+    pub authenticated: bool,
+    /// Whether the validated identity also satisfied the configured admin ACL.
+    pub admin: bool,
+    /// The validated token claims (empty when unauthenticated), exposed to a `visible` filter under
+    /// the `claims.` prefix for parity with the admin ACL.
+    pub claims: Map<String, Value>,
+}
+
+impl AuthContext {
+    /// Whether a viewer with this context may see an entity guarded by `visible`. A filter that fails
+    /// to evaluate is treated as *not* visible (fail-closed), matching the deny-by-default posture of
+    /// the admin ACL: a malformed visibility rule hides the entity rather than leaking it.
+    pub fn can_see(&self, visible: &filt_rs::Filter) -> bool {
+        visible.matches(&VisibilityFilter(self)).unwrap_or(false)
+    }
+}
+
+/// Exposes a request's resolved [`AuthContext`] to a probe/cron `visible` filter. The addressable
+/// fields are `auth` (a boolean: any valid token was presented), `auth.admin` (a boolean: the admin
+/// ACL passed), and `claims.<name>` (a validated token claim). Unknown keys resolve to null, matching
+/// `filt-rs`'s own convention — so `visible: auth.admin` restricts an entity to administrators while
+/// the default `visible: true` shows it to everyone.
+struct VisibilityFilter<'a>(&'a AuthContext);
+
+impl Filterable for VisibilityFilter<'_> {
+    fn get(&self, key: &str) -> FilterValue<'_> {
+        match key {
+            "auth" => FilterValue::Bool(self.0.authenticated),
+            "auth.admin" => FilterValue::Bool(self.0.admin),
+            k if k.starts_with("claims.") => self
+                .0
+                .claims
+                .get(&k["claims.".len()..])
+                .map(json_to_filter_value)
+                .unwrap_or(FilterValue::Null),
+            _ => FilterValue::Null,
+        }
+    }
+}
+
+/// Resolves the [`AuthContext`] for a request to a public read endpoint. The context is anonymous
+/// when admin auth is not configured, or when no/invalid bearer token is presented. A valid token
+/// populates the claims and marks the request authenticated; the configured admin ACL is then
+/// evaluated (against the same `method`/`path`/`claims` fields [`require_admin`] uses) to decide
+/// whether the viewer also counts as an administrator.
+pub async fn resolve_auth_context(req: &HttpRequest, data: &AppState) -> AuthContext {
+    let config = data.state.get_config();
+    let Some(admin) = config.ui.admin.as_ref() else {
+        return AuthContext::default();
+    };
+
+    let Some(token) = bearer_token(req.headers()) else {
+        return AuthContext::default();
+    };
+
+    // An invalid or expired token on a public endpoint is treated as anonymous rather than an error:
+    // the viewer still sees everything visible to the public, exactly as if they had presented none.
+    let Ok(claims) = data.oidc.validate(&admin.oidc, &token).await else {
+        return AuthContext::default();
+    };
+
+    let is_admin = admin
+        .acl
+        .matches(&AdminRequestFilter {
+            method: req.method().as_str(),
+            path: req.path(),
+            claims: &claims,
+        })
+        .unwrap_or(false);
+
+    AuthContext {
+        authenticated: true,
+        admin: is_admin,
+        claims,
+    }
+}
+
+/// Drops the probes the given viewer may not see, honouring each probe's configured `visible` filter.
+/// A pooled probe with no local configuration entry (e.g. a gossiped record for a probe this node no
+/// longer configures) has no `visible` rule and stays visible, preserving the pre-visibility default.
+pub fn retain_visible_probes(
+    config: &crate::config::Config,
+    ctx: &AuthContext,
+    probes: &mut Vec<grey_api::Probe>,
+) {
+    probes.retain(|probe| {
+        config
+            .probes
+            .iter()
+            .find(|cfg| cfg.name == probe.name)
+            .map(|cfg| ctx.can_see(&cfg.visible))
+            .unwrap_or(true)
+    });
+}
+
+/// Drops the crons the given viewer may not see, honouring each cron's configured `visible` filter.
+/// As with [`retain_visible_probes`], a pooled cron with no local configuration entry stays visible.
+pub fn retain_visible_crons(
+    config: &crate::config::Config,
+    ctx: &AuthContext,
+    crons: &mut Vec<grey_api::Cron>,
+) {
+    crons.retain(|cron| {
+        config
+            .crons
+            .iter()
+            .find(|cfg| cfg.name == cron.name)
+            .map(|cfg| ctx.can_see(&cfg.visible))
+            .unwrap_or(true)
+    });
+}
+
 fn json_error(status: StatusCode, error: ApiError) -> HttpResponse {
     // Stamp the HTTP status onto the body so clients can classify the failure from the error object
     // alone (the SPA branches on this code without re-reading the transport status). `ApiError`'s
@@ -362,18 +497,7 @@ pub async fn require_admin(
         )));
     };
 
-    let token = req
-        .headers()
-        .get(AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| {
-            value
-                .strip_prefix("Bearer ")
-                .or_else(|| value.strip_prefix("bearer "))
-        })
-        .map(|token| token.trim().to_string());
-
-    let Some(token) = token else {
+    let Some(token) = bearer_token(req.headers()) else {
         return Ok(req.into_response(json_error(
             StatusCode::UNAUTHORIZED,
             ApiError::new("Authentication is required to access this resource.")
@@ -572,6 +696,89 @@ mod tests {
             acl.matches(&AdminRequestFilter { method: "GET", path: "/", claims: &claims })
                 .unwrap()
         );
+    }
+
+    /// The `visible` filter sees `auth` (any valid session) and `auth.admin` (the admin ACL passed)
+    /// as booleans, and the default `true` filter is visible to everyone.
+    #[test]
+    fn visibility_filter_exposes_auth_and_admin_flags() {
+        let public = filt_rs::Filter::new("true").unwrap();
+        let any_auth = filt_rs::Filter::new("auth").unwrap();
+        let admin_only = filt_rs::Filter::new("auth.admin").unwrap();
+
+        let anonymous = AuthContext::default();
+        let signed_in = AuthContext { authenticated: true, admin: false, claims: Map::new() };
+        let admin = AuthContext { authenticated: true, admin: true, claims: Map::new() };
+
+        // The default filter shows the entity to everyone.
+        assert!(anonymous.can_see(&public));
+        assert!(signed_in.can_see(&public));
+        assert!(admin.can_see(&public));
+
+        // `auth` gates on any valid session.
+        assert!(!anonymous.can_see(&any_auth));
+        assert!(signed_in.can_see(&any_auth));
+        assert!(admin.can_see(&any_auth));
+
+        // `auth.admin` gates on passing the admin ACL.
+        assert!(!anonymous.can_see(&admin_only));
+        assert!(!signed_in.can_see(&admin_only));
+        assert!(admin.can_see(&admin_only));
+    }
+
+    /// For parity with the admin ACL, a `visible` filter can also match on token `claims.*`; an
+    /// anonymous viewer carries no claims, so a claims-based filter excludes them.
+    #[test]
+    fn visibility_filter_exposes_claims() {
+        let in_group = filt_rs::Filter::new(r#"claims.groups contains "ops""#).unwrap();
+
+        assert!(!AuthContext::default().can_see(&in_group), "an anonymous viewer has no claims");
+
+        let mut claims = Map::new();
+        claims.insert(
+            "groups".into(),
+            Value::Array(vec![Value::String("ops".into()), Value::String("dev".into())]),
+        );
+        let ctx = AuthContext { authenticated: true, admin: false, claims };
+        assert!(ctx.can_see(&in_group));
+    }
+
+    /// The retain helper drops entities the viewer may not see, keeps unrestricted ones, and leaves
+    /// pooled records with no local configuration entry (orphans) visible.
+    #[tokio::test]
+    async fn retain_visible_probes_honours_context_and_orphans() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_yaml = format!(
+            "state: {}\nprobes:\n  - name: public.probe\n    policy: {{ interval: 60s, timeout: 5s }}\n    target: !Http\n      url: https://example.com\n  - name: admin.probe\n    policy: {{ interval: 60s, timeout: 5s }}\n    target: !Http\n      url: https://example.com\n    visible: auth.admin\n",
+            dir.path().join("s.redb").display().to_string().replace('\\', "/")
+        );
+        let path = dir.path().join("c.yml");
+        tokio::fs::write(&path, config_yaml).await.unwrap();
+        let config = crate::Config::load_from_path(&path).await.unwrap();
+
+        let api_probe = |name: &str| grey_api::Probe {
+            name: name.into(),
+            tags: std::collections::HashMap::new(),
+            last_updated: chrono::DateTime::UNIX_EPOCH,
+            history: Vec::new(),
+            observations: std::collections::HashMap::new(),
+            streak: grey_api::Streak::default(),
+        };
+
+        // Anonymous: only the public probe survives, but the orphan (no config entry) is kept.
+        let mut probes = vec![api_probe("public.probe"), api_probe("admin.probe"), api_probe("orphan.probe")];
+        retain_visible_probes(&config, &AuthContext::default(), &mut probes);
+        let mut names: Vec<&str> = probes.iter().map(|p| p.name.as_str()).collect();
+        names.sort();
+        assert_eq!(names, vec!["orphan.probe", "public.probe"]);
+
+        // An administrator sees the restricted probe too.
+        let admin = AuthContext { authenticated: true, admin: true, claims: Map::new() };
+        let mut probes = vec![api_probe("public.probe"), api_probe("admin.probe")];
+        retain_visible_probes(&config, &admin, &mut probes);
+        let mut names: Vec<&str> = probes.iter().map(|p| p.name.as_str()).collect();
+        names.sort();
+        assert_eq!(names, vec!["admin.probe", "public.probe"]);
     }
 
     #[test]

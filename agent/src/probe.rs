@@ -17,6 +17,14 @@ pub struct Probe {
     /// of its checks does not match.
     #[serde(default)]
     pub checks: Vec<filt_rs::Filter>,
+
+    /// A `filt-rs` expression deciding which viewers may see this probe in the API and UI, evaluated
+    /// against the requesting viewer's auth context: `auth` (a valid token was presented),
+    /// `auth.admin` (the configured admin ACL passed), and `claims.<name>` (a validated token claim,
+    /// for parity with the admin ACL). Defaults to `true` (visible to everyone); for example
+    /// `visible: auth.admin` restricts the probe to signed-in administrators.
+    #[serde(default = "crate::config::default_visible_filter")]
+    pub visible: filt_rs::Filter,
 }
 
 impl Probe {
@@ -28,6 +36,7 @@ impl Probe {
             target: crate::targets::TargetType::test(),
             tags: HashMap::new(),
             checks: vec![filt_rs::Filter::new("output.test == true").unwrap()],
+            visible: crate::config::default_visible_filter(),
         }
     }
 

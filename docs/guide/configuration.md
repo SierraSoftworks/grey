@@ -92,6 +92,53 @@ You can read more about the fields available for each target in the [Targets](..
 section of the documentation.
 :::
 
+### Visibility
+The optional `visible` property controls who can see a probe on the status dashboard and in the API.
+It is a [`filt-rs`](../checks/README.md) expression — the same language used by `checks` — but instead
+of being evaluated against a probe sample, it is evaluated against the **auth context** of whoever is
+making the request:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `auth` | boolean | `true` when the viewer presented a valid sign-in (a shortcut for "any authenticated user"). |
+| `auth.admin` | boolean | `true` when the viewer passed the [admin ACL](../ui/incidents.md#access-control). |
+| `claims.<name>` | claim value | A validated token claim, mirroring the admin ACL (e.g. `claims.groups`). |
+
+`visible` defaults to `true`, so a probe with no `visible` expression is shown to everyone, exactly as
+before. Set it to restrict a probe to a subset of viewers — entries a viewer may not see are never sent
+to their browser at all (they are filtered out of both the server-rendered page and the API response):
+
+```yaml
+probes:
+  - name: internal.dashboard
+    policy:
+      interval: 30s
+      timeout: 5s
+    target: !Http
+      url: https://internal.example.com/health
+    # Only signed-in administrators can see this probe.
+    visible: auth.admin
+
+  - name: partner.api
+    policy:
+      interval: 30s
+      timeout: 5s
+    target: !Http
+      url: https://partner.example.com/health
+    # Anyone signed in (not necessarily an admin) can see this probe.
+    visible: auth
+```
+
+Because `auth.admin` reuses the admin ACL, visibility requires an [`admin`](../ui/incidents.md) block to
+be configured; with no admin configured, nobody passes `auth.admin` and such an entry is hidden from
+everyone. The same `visible` property is available on [crons](crons.md).
+
+::: warning
+Visibility is a presentation control, not a security boundary for the probed services themselves — it
+governs what the status page and API expose, so use it to tidy a public status page rather than as the
+only protection for sensitive endpoints.
+:::
+
 ## Status Dashboard
 Grey includes an optional web-based user interface that provides real-time visibility
 into probe status and execution history. The UI can be enabled on any node and integrates

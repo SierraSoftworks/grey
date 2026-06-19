@@ -103,6 +103,12 @@ provide an expression that matches your account.
 A request with a valid token whose claims fail the ACL receives `403`; a request
 with no (or an invalid) token receives `401`.
 
+The same signed-in identity also drives per-probe and per-cron
+[visibility](../guide/configuration.md#visibility): a probe or cron with a
+`visible: auth.admin` filter is shown only to viewers who pass this ACL, while
+`visible: auth` shows it to anyone signed in. Whichever way it is set, entries a
+viewer may not see are filtered out before the page or API response reaches them.
+
 ## Managing incidents
 
 Once signed in, the **Incidents** page shows every incident (including hidden

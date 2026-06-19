@@ -39,6 +39,10 @@ crons:
 
   - name: sync.hourly
     interval: 1h           # the simple fixed-cadence form — or use `schedule` instead
+
+  - name: internal.report
+    schedule: '0 6 * * *'
+    visible: auth.admin    # only signed-in administrators can see this cron
 ```
 
 | Option | Default | Description |
@@ -50,6 +54,7 @@ crons:
 | `grace` | `interval / 10`, or `5m` for a crontab | Slack after the due time before a late run reads as missing. |
 | `token` | _none_ | When set, callers must present this secret on every check-in. |
 | `tags` | _none_ | Free-form labels; the `service` tag groups the cron with the probes of the same service. |
+| `visible` | `true` | A [`filt-rs`](../checks/README.md) expression over the viewer's auth context (`auth`, `auth.admin`, `claims.<name>`) deciding who can see this cron. See [Visibility](configuration.md#visibility). |
 
 ## Checking In
 

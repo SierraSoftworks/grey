@@ -116,10 +116,16 @@ async fn record(
     }
 }
 
-/// `GET /api/v1/crons` — every cron's current state, sorted by name. Public, mirroring `/probes`.
-pub async fn get_crons(data: web::Data<AppState>) -> Result<HttpResponse> {
+/// `GET /api/v1/crons` — the crons the requesting viewer may see, sorted by name. Public, mirroring
+/// `/probes`: a cron restricted with e.g. `visible: auth.admin` is returned only once a matching
+/// bearer token is presented.
+pub async fn get_crons(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpResponse> {
+    let ctx = super::auth::resolve_auth_context(&req, &data).await;
+    let config = data.state.get_config();
+
     let crons = data.state.get_cron_states().await?;
     let mut crons: Vec<Cron> = crons.into_values().collect();
+    super::auth::retain_visible_crons(&config, &ctx, &mut crons);
     crons.sort_by_key(|c| c.name.clone());
 
     Ok(HttpResponse::Ok().json(crons))
@@ -208,6 +214,31 @@ mod tests {
             .uri("/api/v1/cron/backup/check-in?status=bogus")
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status(), StatusCode::BAD_REQUEST);
+    }
+
+    /// A cron restricted with `visible: auth.admin` is omitted from the public listing for an
+    /// anonymous viewer, while an unrestricted cron is returned.
+    #[actix_web::test]
+    async fn restricted_crons_are_hidden_from_anonymous_viewers() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = format!(
+            "ui:\n  enabled: true\n  listen: 127.0.0.1:0\ncrons:\n  - name: public.cron\n    interval: 60s\n  - name: secret.cron\n    interval: 60s\n    visible: auth.admin\nstate: {}\nprobes: []\n",
+            dir.path().join("state.redb").display().to_string().replace('\\', "/")
+        );
+        let config_path = dir.path().join("config.yml");
+        tokio::fs::write(&config_path, config).await.unwrap();
+        let state = AppState::new(State::new(&config_path).await.unwrap());
+        let app = test::init_service(
+            App::new().app_data(web::Data::new(state)).configure(configure),
+        )
+        .await;
+
+        let req = test::TestRequest::get().uri("/api/v1/crons").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let crons: Vec<Cron> = serde_json::from_slice(&test::read_body(resp).await).unwrap();
+        let names: Vec<&str> = crons.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["public.cron"], "the admin-only cron must be hidden from anonymous viewers");
     }
 
     #[actix_web::test]

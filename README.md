@@ -168,6 +168,12 @@ immediately rather than at run time, and each is reported as its own pass/fail r
 the dashboard and in telemetry. See the [Checks guide](https://grey.sierrasoftworks.com/checks/)
 for the full expression language.
 
+A probe (or cron) can also carry a `visible` filter — the same `filt-rs` language — to control who
+sees it on the status page and in the API. It is evaluated against the viewer's auth context (`auth`,
+`auth.admin`, and `claims.<name>`), defaults to `true` (everyone), and an entry a viewer may not see is
+never sent to their browser. For example `visible: auth.admin` restricts an entry to signed-in
+administrators. See the [configuration guide](https://grey.sierrasoftworks.com/guide/configuration.html#visibility).
+
 ## Cron monitoring
 Some work can't be probed from the outside — backups, batch jobs, and scheduled tasks only
 tell you they're healthy by *running*. Grey's cron monitors are a passive "deadman's

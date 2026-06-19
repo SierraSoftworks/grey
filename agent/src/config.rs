@@ -64,6 +64,14 @@ pub struct CronConfig {
 
     #[serde(default)]
     pub tags: HashMap<String, String>,
+
+    /// A `filt-rs` expression deciding which viewers may see this cron in the API and UI, evaluated
+    /// against the requesting viewer's auth context: `auth` (a valid token was presented),
+    /// `auth.admin` (the configured admin ACL passed), and `claims.<name>` (a validated token claim,
+    /// for parity with the admin ACL). Defaults to `true` (visible to everyone); for example
+    /// `visible: auth.admin` restricts the cron to signed-in administrators.
+    #[serde(default = "default_visible_filter")]
+    pub visible: filt_rs::Filter,
 }
 
 impl CronConfig {
@@ -151,6 +159,13 @@ impl WebhookConfig {
 /// changes.
 fn default_webhook_filter() -> filt_rs::Filter {
     filt_rs::Filter::new("true").expect("the match-all webhook filter must parse")
+}
+
+/// The default visibility filter shows an entity to everyone, so a probe or cron with no `visible`
+/// expression is public — matching the behaviour before per-entity visibility was introduced. Shared
+/// by [`CronConfig`] and [`crate::Probe`].
+pub(crate) fn default_visible_filter() -> filt_rs::Filter {
+    filt_rs::Filter::new("true").expect("the match-all visibility filter must parse")
 }
 
 fn default_webhook_timeout() -> std::time::Duration {

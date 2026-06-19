@@ -56,3 +56,8 @@ probes:
     tags:
       domain: github.com
       service: Coding
+    # Control who can see this probe on the status page and in the API. The expression is evaluated
+    # against the viewer's auth context: `auth` (any valid sign-in), `auth.admin` (passed the `admin`
+    # ACL configured above), and `claims.<name>` (a validated token claim). It defaults to `true`
+    # (visible to everyone). Uncomment to restrict this probe to signed-in administrators:
+    # visible: auth.admin

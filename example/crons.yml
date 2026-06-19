@@ -27,6 +27,11 @@ crons:
     grace: 1h              # slack after 02:00 before a no-show reads as missing
     tags:
       service: Backups
+    # Control who can see this cron on the status page and in the API. The expression is evaluated
+    # against the viewer's auth context — `auth` (any valid sign-in), `auth.admin` (passed the admin
+    # ACL), and `claims.<name>` — and defaults to `true` (visible to everyone). Uncomment to restrict
+    # this cron to signed-in administrators:
+    # visible: auth.admin
 
   # A simple "every N" job that only reports on completion. With no `running` phase the
   # completion detector stays dormant; only the schedule (missed-run) detector applies.

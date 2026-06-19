@@ -385,6 +385,29 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
                 || ()
             });
         }
+
+        // Re-fetch the live entities the moment the session changes (sign-in or sign-out): an
+        // administrator should immediately see the probes/crons their access unlocks via a `visible`
+        // filter, and an anonymous viewer should stop seeing them on sign-out, without waiting for the
+        // next poll. The authenticated polls carry the bearer token, so the agent returns the set the
+        // viewer is permitted to see. The initial (mount) run is skipped, since the effects above
+        // already seed the starting set.
+        {
+            let state = state.clone();
+            let client = client.clone();
+            let first = use_mut_ref(|| true);
+            use_effect_with(state.token.is_some(), move |_| {
+                if std::mem::replace(&mut *first.borrow_mut(), false) {
+                    // Mount: the initial fetch is handled by the effects above.
+                } else {
+                    wasm_bindgen_futures::spawn_local(async move {
+                        state.dispatch(load_probes(&client).await);
+                        state.dispatch(load_crons(&client).await);
+                    });
+                }
+                || ()
+            });
+        }
     }
 
     let login = {
