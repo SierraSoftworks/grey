@@ -44,6 +44,21 @@ impl AppState {
     }
 }
 
+// Cache assets that carry a content hash for a year. Such files are immutable under a given name,
+// so browsers and shared caches can keep them indefinitely and skip revalidation on every refresh.
+const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
+
+/// Trunk fingerprints the build assets it emits — the WASM bundle, its JS loader and the compiled
+/// stylesheet — by embedding a content hash in the filename (e.g. `index-9f8a7b6c.js` or
+/// `index-9f8a7b6c_bg.wasm`). Because that name changes whenever the contents do, those assets are
+/// safe to cache forever. The un-fingerprinted entry document (`index.html`) is deliberately
+/// excluded so a fresh deployment is always picked up.
+fn is_fingerprinted(file_name: &str) -> bool {
+    file_name
+        .split(['-', '.', '_'])
+        .any(|segment| segment.len() >= 8 && segment.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
 // Custom handler for serving embedded static files
 async fn serve_static(path: web::Path<String>) -> Result<HttpResponse> {
     let file_path = path.into_inner();
@@ -59,6 +74,15 @@ async fn serve_static(path: web::Path<String>) -> Result<HttpResponse> {
             "html" => response.insert_header(ContentType::html()),
             _ => response.insert_header(ContentType::octet_stream()),
         };
+
+        let file_name = file_path.rsplit('/').next().unwrap_or(&file_path);
+        if is_fingerprinted(file_name) {
+            response.insert_header(("cache-control", IMMUTABLE_CACHE_CONTROL));
+        } else {
+            // Files without a content hash (notably index.html) must be revalidated so clients pick
+            // up a new build instead of serving a stale document from cache.
+            response.insert_header(("cache-control", "no-cache"));
+        }
 
         Ok(response.body(file.contents()))
     } else {
@@ -120,10 +144,74 @@ pub fn create_app() -> App<
         .route("/static/{filename:.*}", web::get().to(serve_static))
 }
 
+/// Pure-function tests for the fingerprint detector. These live in their own module because the
+/// integration tests below import `actix_web::test`, which shadows the built-in `#[test]` attribute.
+#[cfg(test)]
+mod fingerprint_tests {
+    use super::is_fingerprinted;
+
+    /// Content-hashed Trunk assets are recognised as fingerprinted (and so cacheable forever), while
+    /// the un-hashed entry document and other stable names are not.
+    #[test]
+    fn fingerprinted_assets_are_detected() {
+        assert!(is_fingerprinted("index-9f8a7b6c1d2e3f40.js"));
+        assert!(is_fingerprinted("index-9f8a7b6c1d2e3f40_bg.wasm"));
+        assert!(is_fingerprinted("styles-deadbeefcafef00d.css"));
+
+        assert!(!is_fingerprinted("index.html"));
+        assert!(!is_fingerprinted("favicon.ico"));
+        // A short, non-hash suffix must not be mistaken for a content hash.
+        assert!(!is_fingerprinted("app-v2.js"));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use actix_web::test;
+
+    /// Static assets carrying a content hash are served with a long-lived immutable cache policy so
+    /// repeat visits and refreshes don't re-download them, while un-hashed files are revalidated.
+    #[actix_web::test]
+    async fn static_assets_get_cache_headers() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::test(dir.path().to_path_buf()).await;
+        let app = test::init_service(create_app().app_data(web::Data::new(state))).await;
+
+        // The WASM bundle's JS loader is content-hashed; discover its name from the embedded build.
+        let hashed_js = ASSETS_DIR
+            .files()
+            .map(|f| f.path().file_name().unwrap().to_string_lossy().into_owned())
+            .find(|name| name.ends_with(".js") && is_fingerprinted(name))
+            .expect("the UI build should emit a content-hashed JS loader");
+
+        let req = test::TestRequest::get()
+            .uri(&format!("/static/{hashed_js}"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+        assert_eq!(
+            resp.headers()
+                .get("cache-control")
+                .and_then(|v| v.to_str().ok()),
+            Some(IMMUTABLE_CACHE_CONTROL),
+            "hashed assets must be cached as immutable"
+        );
+
+        // index.html carries no content hash and must be revalidated on every load.
+        let req = test::TestRequest::get()
+            .uri("/static/index.html")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+        assert_eq!(
+            resp.headers()
+                .get("cache-control")
+                .and_then(|v| v.to_str().ok()),
+            Some("no-cache"),
+            "the un-hashed entry document must not be cached aggressively"
+        );
+    }
 
     /// The incident routes must be wired into the application (the handler unit tests call the
     /// handlers directly and so don't exercise route registration).
