@@ -203,6 +203,24 @@ mod tests {
     }
 
     #[test]
+    fn referenced_fields_descends_through_unary_negation() {
+        let check = filter("!http.healthy");
+        assert_eq!(referenced_fields(&check), vec!["http.healthy"]);
+    }
+
+    #[test]
+    fn referenced_fields_descends_through_like_globs() {
+        let check = filter(r#"http.body like "*ok*""#);
+        assert_eq!(referenced_fields(&check), vec!["http.body"]);
+    }
+
+    #[test]
+    fn referenced_fields_descends_through_regex_matches() {
+        let check = filter(r#"http.header.content-type matches r"^text/html""#);
+        assert_eq!(referenced_fields(&check), vec!["http.header.content-type"]);
+    }
+
+    #[test]
     fn observed_fields_renders_referenced_values() {
         let sample = Sample::default()
             .with("http.status", 503)
@@ -266,5 +284,11 @@ mod tests {
         let (probe_message, detail) = describe_failure(&check, &sample, "did not pass".to_string());
         assert_eq!(probe_message, "The check 'true' did not pass.");
         assert_eq!(detail, "Did not pass.");
+    }
+
+    #[test]
+    fn capitalise_first_handles_empty_and_non_empty_input() {
+        assert_eq!(capitalise_first(""), "");
+        assert_eq!(capitalise_first("did not pass"), "Did not pass");
     }
 }
