@@ -693,6 +693,7 @@ mod tests {
             grace: None,
             token: None,
             tags: HashMap::new(),
+            visible: crate::config::default_visible_filter(),
         }];
         *state.config.write().unwrap() = Arc::new(config);
         state

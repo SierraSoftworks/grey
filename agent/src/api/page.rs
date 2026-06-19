@@ -6,10 +6,16 @@ use super::{ASSETS_DIR, AppState};
 use crate::state::{CronStore, IncidentStore, ProbeStore};
 
 pub async fn index(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpResponse> {
-    let probe_histories = data.state.get_probe_states().await?;
-
+    // Resolve the viewer's auth context so the server-rendered snapshot honours each entity's
+    // `visible` filter. A normal browser navigation carries no `Authorization` header, so this is
+    // anonymous in practice — admin-only probes/crons are therefore never embedded in the delivered
+    // HTML and instead appear after sign-in, when the SPA's authenticated polls fetch them.
+    let ctx = super::auth::resolve_auth_context(&req, &data).await;
     let config = data.state.get_config();
+
+    let probe_histories = data.state.get_probe_states().await?;
     let mut probes: Vec<grey_api::Probe> = probe_histories.into_values().collect();
+    super::auth::retain_visible_probes(&config, &ctx, &mut probes);
     probes.sort_by_key(|p| p.name.clone());
 
     let mut crons: Vec<grey_api::Cron> = data
@@ -19,6 +25,7 @@ pub async fn index(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpRe
         .unwrap_or_default()
         .into_values()
         .collect();
+    super::auth::retain_visible_crons(&config, &ctx, &mut crons);
     crons.sort_by_key(|c| c.name.clone());
 
     // Only the first page of publicly visible incidents is server-rendered for unauthenticated
