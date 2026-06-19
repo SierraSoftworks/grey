@@ -49,19 +49,23 @@ impl ProbeStore for State {
         }
 
         let txn = self.database.begin_read()?;
-        let table = txn.open_table(PROBES_TABLE)?;
-        let iter = table.iter()?;
-        for entry in iter.filter_map(|r| r.ok()) {
-            let (key, value) = entry;
-            let (_node_id, probe_name) = key.value();
-            let (_, data) = value.value();
-            if let Ok(snapshot) = rmp_serde::from_slice::<ProbeState>(data) {
-                histories
-                    .entry(probe_name.clone())
-                    .and_modify(|existing: &mut ProbeState| {
-                        existing.merge(&snapshot);
-                    })
-                    .or_insert_with(|| snapshot.clone());
+        // The table only exists once probe state has been written; treat its absence as "no stored
+        // state yet" (returning just the config-seeded probes) rather than erroring, so a fresh node
+        // — or the notifier's first pass before any sample is recorded — reads cleanly. Mirrors the
+        // tolerance in `get_cron_states`.
+        if let Ok(table) = txn.open_table(PROBES_TABLE) {
+            for entry in table.iter()?.filter_map(|r| r.ok()) {
+                let (key, value) = entry;
+                let (_node_id, probe_name) = key.value();
+                let (_, data) = value.value();
+                if let Ok(snapshot) = rmp_serde::from_slice::<ProbeState>(data) {
+                    histories
+                        .entry(probe_name.clone())
+                        .and_modify(|existing: &mut ProbeState| {
+                            existing.merge(&snapshot);
+                        })
+                        .or_insert_with(|| snapshot.clone());
+                }
             }
         }
 

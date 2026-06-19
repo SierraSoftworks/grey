@@ -642,6 +642,75 @@ mod tests {
         assert!(result.is_err(), "an unreachable endpoint must be reported as an error");
     }
 
+    /// A 4xx is reported as a (user/configuration) error distinct from a transport/5xx failure.
+    #[tokio::test]
+    async fn deliver_reports_client_error_as_user_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/hook"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+
+        let wh = webhook(format!("{}/hook", server.uri()), None, "true");
+        let event = WebhookEvent::for_probe("evt", Utc::now(), &probe("web", true), "passing", true);
+        let body = serde_json::to_vec(&event).unwrap();
+
+        let err = deliver(&reqwest::Client::new(), &wh, &event, body)
+            .await
+            .expect_err("a 401 response must be reported as an error");
+        assert!(err.to_string().contains("401"), "the error should name the status: {err}");
+    }
+
+    /// End-to-end: a full evaluation pass over a real [`State`] seeds silently, then — once a probe
+    /// flips to failing — delivers a matching `probe.state_changed` event to the configured endpoint.
+    /// Exercises `evaluate` → `dispatch` → filter match → `deliver` wired through the store.
+    #[tokio::test]
+    async fn evaluate_delivers_on_a_probe_transition() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/hook"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let config = format!(
+            "state: {state}\nprobes:\n  - name: web\n    policy:\n      interval: 60s\n      timeout: 5s\n    target: !Http\n      url: https://example.com\nwebhooks:\n  - endpoint: {endpoint}/hook\n    secret: topsecret\n    filter: 'true'\n",
+            state = dir.path().join("state.redb").display().to_string().replace('\\', "/"),
+            endpoint = server.uri(),
+        );
+        let config_path = dir.path().join("config.yml");
+        tokio::fs::write(&config_path, config).await.unwrap();
+
+        let state = State::new(&config_path).await.unwrap();
+        let mut notifier = Notifier::new(state.clone());
+
+        // First pass seeds the baseline (the probe reads as passing) and delivers nothing.
+        notifier.evaluate().await.unwrap();
+        assert!(server.received_requests().await.unwrap().is_empty());
+
+        // Record a failing sample so the pooled probe flips to failing.
+        let mut sample = crate::result::ProbeResult::new();
+        sample.pass = false;
+        sample.message = "boom".into();
+        state.update_probe_state("web", sample.finish()).await.unwrap();
+
+        // The next pass detects passing -> failing and delivers a matching event.
+        notifier.evaluate().await.unwrap();
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1, "the transition should produce exactly one delivery");
+
+        let delivered: WebhookEvent = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(delivered.entity.name, "web");
+        assert_eq!(delivered.state.previous, "passing");
+        assert_eq!(delivered.state.current, "failing");
+
+        // A further pass with no further change delivers nothing more.
+        notifier.evaluate().await.unwrap();
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
     fn parse_signature(header: &str) -> (i64, String) {
         let mut timestamp = 0i64;
         let mut v1 = String::new();
