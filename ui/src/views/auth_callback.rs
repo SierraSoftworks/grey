@@ -2,6 +2,8 @@ use yew::prelude::*;
 use yew_router::prelude::*;
 
 use crate::contexts::use_store;
+// `Route` is only referenced from the wasm redirect below; it is unused in the SSR build.
+#[cfg(not(feature = "ssr"))]
 use crate::routes::Route;
 
 /// The OIDC login callback page. The provider redirects the login popup here with `?code&state`;

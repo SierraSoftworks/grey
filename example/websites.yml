@@ -3,11 +3,6 @@ ui:
   enabled: true
   listen: 127.0.0.1:3002
 
-  # notices:
-  #   - title: Example Notice
-  #     description: This is an example notice message showcasing how you can alert users to something happening on your platform.
-  #     timestamp: 2025-08-10T19:00:00Z
-
 probes:
   - name: google.search
     policy:
@@ -16,9 +11,9 @@ probes:
       retries: 3
     target: !Http
       url: https://google.com?q=grey+healthcheck+system
-    validators:
-      http.status: !OneOf [200]
-      http.header.content-type: !Equals "text/html; charset=ISO-8859-1"
+    checks:
+      - http.status == 200
+      - http.header.content-type == "text/html; charset=ISO-8859-1"
     tags:
       domain: google.com
       service: Search
@@ -29,9 +24,9 @@ probes:
       retries: 3
     target: !Http
       url: https://www.bing.com
-    validators:
-      http.status: !OneOf [200]
-      http.header.content-type: !Equals "text/html; charset=utf-8"
+    checks:
+      - http.status == 200
+      - http.header.content-type == "text/html; charset=utf-8"
     tags:
       domain: bing.com
       service: Search
@@ -42,8 +37,8 @@ probes:
       retries: 3
     target: !Http
       url: https://github.com/SierraSoftworks/grey
-    validators:
-      http.status: !OneOf [200]
+    checks:
+      - http.status == 200
     tags:
       domain: github.com
       service: Coding
@@ -73,6 +68,6 @@ probes:
           output["quote.who"] = quote.who
         }
 
-    validators:
-      http.status: !Equals 200
-      quote.who: !Equals "Bender"
+    checks:
+      - http.status == 200
+      - quote.who == "Bender"

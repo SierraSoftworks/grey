@@ -15,8 +15,8 @@ probes:
       retries: 3
     target: !Tcp
       host: smtp.example.com:25
-    validators:
-      net.ip: !Equals "127.0.0.1"
+    checks:
+      - net.ip == "127.0.0.1"
 ```
 
 ## Inputs

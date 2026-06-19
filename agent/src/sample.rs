@@ -105,9 +105,8 @@ impl Display for SampleValue {
 
 impl filt_rs::Filterable for Sample {
     /// Exposes the sample's collected fields to the `filt-rs` expression
-    /// language so probes can be validated with `checks` alongside the classic
-    /// per-field `validators`. Unknown keys resolve to `null`, matching both
-    /// `Sample::get` and `filt-rs`'s own convention.
+    /// language so probes can be validated with `checks`. Unknown keys resolve
+    /// to `null`, matching both `Sample::get` and `filt-rs`'s own convention.
     fn get(&self, key: &str) -> filt_rs::FilterValue<'_> {
         self.metadata
             .get(key)

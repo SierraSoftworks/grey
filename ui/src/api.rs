@@ -80,12 +80,7 @@ mod browser {
     async fn error_from(response: Response) -> ApiError {
         let status = response.status();
         let error = match response.json::<ApiError>().await {
-            Ok(mut error) if !error.message.is_empty() => {
-                if error.code == 0 {
-                    error.code = status;
-                }
-                error
-            }
+            Ok(error) if !error.message.is_empty() => error.ensure_code(status),
             _ => ApiError::new(format!("Request failed (HTTP {status}).")).with_code(status),
         };
         with_fallback_advice(error)
@@ -116,7 +111,7 @@ mod browser {
             builder = builder.header("Authorization", &bearer(token));
         }
         if let Some(version) = if_match {
-            builder = builder.header("If-Match", &format!("\"{version}\""));
+            builder = builder.header("If-Match", &grey_api::version_etag(version));
         }
         match body {
             Some(body) => builder.json(body).map_err(net),
@@ -133,10 +128,6 @@ mod browser {
 
         pub async fn crons(&self) -> Result<Vec<grey_api::Cron>, ApiError> {
             self.get_json(&format!("{BASE}/crons")).await
-        }
-
-        pub async fn notices(&self) -> Result<Vec<grey_api::UiNotice>, ApiError> {
-            self.get_json(&format!("{BASE}/notices")).await
         }
 
         /// The first page of publicly visible incidents (hidden drafts excluded), each with its
@@ -317,9 +308,6 @@ impl ApiClient {
         Self::unavailable()
     }
     pub async fn crons(&self) -> Result<Vec<grey_api::Cron>, ApiError> {
-        Self::unavailable()
-    }
-    pub async fn notices(&self) -> Result<Vec<grey_api::UiNotice>, ApiError> {
         Self::unavailable()
     }
     pub async fn incidents(&self) -> Result<Vec<IncidentView>, ApiError> {

@@ -1,9 +1,9 @@
 //! The SPA's single, integrated state store.
 //!
 //! [`Store`] is a redux/vuex-style container for every piece of shared UI state — the public config,
-//! the signed-in administrator, the cluster peers, notices, incidents and probes — together with the
-//! mutation operations the UI needs (sign in/out and the incident create/edit/delete flows). It also
-//! owns the background polling that keeps the live entities fresh and the OIDC session bootstrap.
+//! the signed-in administrator, the cluster peers, incidents and probes — together with the mutation
+//! operations the UI needs (sign in/out and the incident create/edit/delete flows). It also owns the
+//! background polling that keeps the live entities fresh and the OIDC session bootstrap.
 //!
 //! State lives in a [`Reducible`] [`StoreState`] driven through a `use_reducer` handle, so every
 //! change flows through a single [`Action`]. Components read state and dispatch actions via
@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use grey_api::{
     AdminUser, ApiError, CreateIncident, CreateUpdate, Cron, Identifier, IncidentUpdateId,
-    IncidentView, Peer, Probe, PutIncident, PutUpdate, UiConfig, UiNotice,
+    IncidentView, Peer, Probe, PutIncident, PutUpdate, UiConfig,
 };
 use yew::prelude::*;
 
@@ -45,7 +45,6 @@ pub struct StoreState {
     /// The current ID token, mirrored here so views can gate admin UI and pass it to children.
     pub token: Option<String>,
     pub peers: Vec<Peer>,
-    pub notices: Vec<UiNotice>,
     pub incidents: Vec<IncidentView>,
     pub probes: Vec<Probe>,
     pub crons: Vec<Cron>,
@@ -58,7 +57,6 @@ pub struct StoreState {
 pub enum Action {
     SetProbes(Vec<Probe>),
     SetCrons(Vec<Cron>),
-    SetNotices(Vec<UiNotice>),
     SetPeers(Vec<Peer>),
     SetIncidents(Vec<IncidentView>),
     /// Insert or replace a single incident (after an admin create or edit), without waiting for the
@@ -87,7 +85,6 @@ impl Reducible for StoreState {
         match action {
             Action::SetProbes(probes) => next.probes = probes,
             Action::SetCrons(crons) => next.crons = crons,
-            Action::SetNotices(notices) => next.notices = notices,
             Action::SetPeers(peers) => next.peers = peers,
             Action::SetIncidents(mut incidents) => {
                 sort_incidents(&mut incidents);
@@ -140,10 +137,6 @@ impl Store {
 
     pub fn crons(&self) -> &[Cron] {
         &self.state.crons
-    }
-
-    pub fn notices(&self) -> &[UiNotice] {
-        &self.state.notices
     }
 
     pub fn peers(&self) -> &[Peer] {
@@ -261,8 +254,6 @@ pub struct StoreProviderProps {
     #[prop_or_default]
     pub config: UiConfig,
     #[prop_or_default]
-    pub notices: Vec<UiNotice>,
-    #[prop_or_default]
     pub probes: Vec<Probe>,
     #[prop_or_default]
     pub crons: Vec<Cron>,
@@ -280,7 +271,6 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
 
     let state = use_reducer_eq({
         let config = props.config.clone();
-        let notices = props.notices.clone();
         let probes = props.probes.clone();
         let crons = props.crons.clone();
         let peers = props.peers.clone();
@@ -293,7 +283,6 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
                 user: None,
                 token: None,
                 peers,
-                notices,
                 incidents,
                 probes,
                 crons,
@@ -350,7 +339,7 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
         let reload = props.config.reload_interval;
         let focus = use_focus_tracker();
 
-        // Probes, notices and incidents: fetch immediately when the page was rendered without their
+        // Probes, crons and incidents: fetch immediately when the page was rendered without their
         // data (a minimal/un-hydrated render), otherwise the first fetch lands after one interval.
         {
             let state = state.clone();
@@ -362,7 +351,6 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
                     if !seeded {
                         state.dispatch(load_probes(&client).await);
                         state.dispatch(load_crons(&client).await);
-                        state.dispatch(load_notices(&client).await);
                         state.dispatch(load_incidents(&client).await);
                     }
                     loop {
@@ -372,7 +360,6 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
                         focus.active().await;
                         state.dispatch(load_probes(&client).await);
                         state.dispatch(load_crons(&client).await);
-                        state.dispatch(load_notices(&client).await);
                         state.dispatch(load_incidents(&client).await);
                     }
                 });
@@ -492,17 +479,6 @@ async fn load_crons(client: &ApiClient) -> Action {
         Ok(crons) => Action::SetCrons(crons),
         Err(err) => {
             gloo::console::error!(format!("Failed to fetch crons: {err}"));
-            Action::SetError(err)
-        }
-    }
-}
-
-#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
-async fn load_notices(client: &ApiClient) -> Action {
-    match client.notices().await {
-        Ok(notices) => Action::SetNotices(notices),
-        Err(err) => {
-            gloo::console::error!(format!("Failed to fetch notices: {err}"));
             Action::SetError(err)
         }
     }

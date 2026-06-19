@@ -2,7 +2,12 @@ use serde::{Deserialize, Serialize};
 
 /// The aggregate health of a cluster peer as seen by this node — the best state across all of the
 /// peer's known addresses. Rendered in the UI as a coloured indicator.
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
+///
+/// The variants are declared **healthiest-first**, so the derived [`Ord`] sorts peers from healthiest
+/// to least healthy — exactly the order the UI lists them in. (Construction matches by condition, not
+/// by this numeric order — see the agent's `From<Signals>` — so the ordering is free to be display
+/// policy.)
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Debug, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum PeerHealth {
     /// A direct, confirmed two-way link to the peer (green).
@@ -28,6 +33,16 @@ impl PeerHealth {
             PeerHealth::Offline => "offline",
         }
     }
+
+    /// A human-readable label for display next to the indicator.
+    pub fn label(&self) -> &'static str {
+        match self {
+            PeerHealth::Online => "Online",
+            PeerHealth::Transitive => "Transitive",
+            PeerHealth::Suspect => "Suspect",
+            PeerHealth::Offline => "Offline",
+        }
+    }
 }
 
 /// Information about cluster peers as returned by the admin `/api/v1/admin/cluster/peers` endpoint.
@@ -48,4 +63,31 @@ pub struct Peer {
     /// responses from older agents deserialize this as `false`.
     #[serde(default)]
     pub current: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn health_orders_healthiest_first() {
+        assert!(PeerHealth::Online < PeerHealth::Transitive);
+        assert!(PeerHealth::Transitive < PeerHealth::Suspect);
+        assert!(PeerHealth::Suspect < PeerHealth::Offline);
+    }
+
+    #[test]
+    fn health_labels_and_tokens() {
+        for health in [
+            PeerHealth::Online,
+            PeerHealth::Transitive,
+            PeerHealth::Suspect,
+            PeerHealth::Offline,
+        ] {
+            assert!(!health.label().is_empty());
+            assert!(!health.as_str().is_empty());
+        }
+        assert_eq!(PeerHealth::Online.label(), "Online");
+        assert_eq!(PeerHealth::Offline.as_str(), "offline");
+    }
 }

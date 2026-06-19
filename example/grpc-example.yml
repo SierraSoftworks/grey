@@ -9,9 +9,9 @@ probes:
     target: !Grpc
       url: http://localhost:50051
       service: ""  # Check overall server health
-    validators:
-      grpc.status: !Equals "SERVING"
-      
+    checks:
+      - grpc.status == "SERVING"
+
   # Another example with a specific service
   - name: grpc.specific-service
     policy:
@@ -21,9 +21,9 @@ probes:
     target: !Grpc
       url: https://grpc.example.com:443
       service: "example.v1.ExampleService"
-    validators:
-      grpc.status: !Equals "SERVING"
-      grpc.status_code: !Equals 1
+    checks:
+      - grpc.status == "SERVING"
+      - grpc.status_code == 1
 
   # Example with custom CA certificate
   - name: grpc.custom-ca
@@ -40,5 +40,5 @@ probes:
         BAYTAkFVMRMwEQYDVQQIDApTb21lLVN0YXRlMSEwHwYDVQQKDBhJbnRlcm5ldCBX
         aWRnaXRzIFB0eSBMdGQwHhcNMTcwODI4MTUxNjU5WhcNMTgwODI4MTUxNjU5WjBF
         -----END CERTIFICATE-----
-    validators:
-      grpc.status: !Equals "SERVING"
+    checks:
+      - grpc.status == "SERVING"

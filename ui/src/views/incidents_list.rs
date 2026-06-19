@@ -1,9 +1,13 @@
 use grey_api::IncidentView;
 use yew::prelude::*;
+// The router prelude (`Link`) and `Route` are only used by the wasm-only admin list below, so they
+// are unused in the SSR build.
+#[cfg(not(feature = "ssr"))]
 use yew_router::prelude::*;
 
 use crate::components::IncidentBlock;
 use crate::contexts::use_store;
+#[cfg(not(feature = "ssr"))]
 use crate::routes::Route;
 
 /// The `/incidents` page: the full, read-only history of incidents and their updates. Editing and

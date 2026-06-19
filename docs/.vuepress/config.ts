@@ -61,16 +61,6 @@ export default defineUserConfig({
         ]
       },
       {
-        text: "Validators",
-        link: "/validators/",
-        children: [
-          '/validators/README.md',
-          '/validators/contains.md',
-          '/validators/equals.md',
-          '/validators/one_of.md',
-        ]
-      },
-      {
         text: "Checks",
         link: "/checks/",
       },
@@ -80,7 +70,6 @@ export default defineUserConfig({
         children: [
           '/ui/README.md',
           '/ui/links.md',
-          '/ui/notices.md',
           '/ui/incidents.md',
         ]
       },
@@ -103,9 +92,9 @@ export default defineUserConfig({
           children: [
             '/guide/README.md',
             `/guide/configuration.md`,
+            '/guide/clustering.md',
             '/guide/crons.md',
             '/guide/webhooks.md',
-            '/guide/clustering.md',
             '/guide/telemetry.md',
             '/guide/azure-msi.md',
           ]
@@ -124,17 +113,6 @@ export default defineUserConfig({
           ]
         }
       ],
-      '/validators/': [
-        {
-          text: "Validators",
-          children: [
-            '/validators/README.md',
-            '/validators/contains.md',
-            '/validators/equals.md',
-            '/validators/one_of.md',
-          ]
-        }
-      ],
       '/checks/': [
         {
           text: "Checks",
@@ -149,7 +127,6 @@ export default defineUserConfig({
           children: [
             '/ui/README.md',
             '/ui/links.md',
-            '/ui/notices.md',
             '/ui/incidents.md',
           ]
         }

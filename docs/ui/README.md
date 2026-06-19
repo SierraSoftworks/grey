@@ -31,12 +31,6 @@ ui:
     links:
         - title: GitHub
             url: https://github.com/SierraSoftworks/grey
-    notices:
-        - title: Example Notice
-            description: |
-              This is an example notice message showcasing how you can alert users to something happening on your platform.
-            timestamp: 2025-08-10T19:00:00Z
-            level: ok # ok, warning, error
 ```
 
 :::
@@ -126,22 +120,6 @@ links:
     url: https://grey.sierrasoftworks.com
   - title: Support
     url: https://support.example.com
-```
-
-### notices
-
-A list of notices to display prominently on the status page. See [Notices](./notices.md) for more details.
-
-```yaml
-notices:
-  - title: Scheduled Maintenance
-    description: We will be performing scheduled maintenance on our systems from 2:00 AM to 4:00 AM UTC on August 15th.
-    timestamp: 2025-08-15T02:00:00Z
-    level: warning
-  - title: Service Restored
-    description: All services have been restored to normal operation.
-    timestamp: 2025-08-15T04:30:00Z
-    level: ok
 ```
 
 ## Security Considerations

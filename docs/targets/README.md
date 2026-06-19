@@ -22,9 +22,9 @@ probes:
       retries: 3
     target: !Http
       url: https://example.com
-    validators:
-      http.status: !OneOf [200]
-      http.header.content-type: !Contains "text/html"
+    checks:
+      - http.status in [200]
+      - http.header.content-type contains "text/html"
 
   - name: grpc.example
     policy:
@@ -34,9 +34,9 @@ probes:
     target: !Grpc
       url: https://api.example.com:443
       service: "myservice.v1.MyService"
-    validators:
-      grpc.status: !Equals "SERVING"
-      grpc.status_code: !Equals 1
+    checks:
+      - grpc.status == "SERVING"
+      - grpc.status_code == 1
 
   - name: tcp.example
     policy:
@@ -45,8 +45,8 @@ probes:
       retries: 3
     target: !Tcp
       host: example.com:6379
-    validators:
-      net.ip: !Equals "127.0.0.1"
+    checks:
+      - net.ip == "127.0.0.1"
 
   - name: dns.example
     policy:
@@ -56,8 +56,8 @@ probes:
     target: !Dns
       domain: example.com
       record_type: MX
-    validators:
-      dns.answers: !Contains "10 smtp.example.com"
+    checks:
+      - "10 smtp.example.com" in dns.answers
 
   - name: script.example
     policy:
@@ -72,8 +72,8 @@ probes:
         
         const data = await response.json();
         output["api.version"] = data.version;
-    validators:
-      api.status: !Equals 200
-      api.ok: !Equals true
-      api.version: !Contains "v1"
+    checks:
+      - api.status == 200
+      - api.ok == true
+      - api.version contains "v1"
 ```

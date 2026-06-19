@@ -21,6 +21,10 @@ pub enum Impact {
 }
 
 impl Impact {
+    /// Every impact, in declared (worst-first, ending with `Hidden`) order — the canonical list for
+    /// `<select>` menus, so the UI never re-hardcodes the variants or their serde tokens.
+    pub const ALL: [Impact; 4] = [Impact::Offline, Impact::Degraded, Impact::None, Impact::Hidden];
+
     /// Severity rank for picking the "worst" impact among active incidents. Higher is worse;
     /// `Hidden` ranks lowest since hidden incidents never affect the public status.
     pub fn rank(self) -> u8 {
@@ -278,6 +282,15 @@ mod tests {
         assert_eq!(Impact::default(), Impact::Hidden);
         assert!(Impact::Offline.rank() > Impact::Degraded.rank());
         assert!(Impact::None.rank() > Impact::Hidden.rank());
+    }
+
+    #[test]
+    fn impact_all_lists_every_variant_in_select_order() {
+        assert_eq!(Impact::ALL, [Impact::Offline, Impact::Degraded, Impact::None, Impact::Hidden]);
+        // Every token parses back to its variant, so `<option value>`s built from `as_str()` round-trip.
+        for impact in Impact::ALL {
+            assert_eq!(impact.as_str().parse::<Impact>().unwrap(), impact);
+        }
     }
 
     #[test]

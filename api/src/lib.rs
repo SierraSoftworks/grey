@@ -1,5 +1,6 @@
 mod cron;
 mod error;
+mod etag;
 mod identifier;
 mod incident;
 mod probe;
@@ -13,6 +14,7 @@ mod webhook;
 
 pub use cron::*;
 pub use error::*;
+pub use etag::*;
 pub use identifier::*;
 pub use incident::*;
 pub use observation::*;

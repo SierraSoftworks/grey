@@ -3,12 +3,12 @@ use grey_api::Impact;
 use yew::prelude::*;
 
 use crate::components::incidents::worst_impact;
-use crate::components::{Banner, BannerKind, IncidentsSection, ServiceList, Timeline};
+use crate::components::{Banner, BannerKind, IncidentsSection, ServiceList};
 use crate::contexts::use_store;
 
-/// The status page: a top-line banner, the probe list, notices, and recent/active incidents. The
-/// top-line status reflects the worst active incident when there is one, otherwise it is derived
-/// from probe health.
+/// The status page: a top-line banner, the probe list, and recent/active incidents. The top-line
+/// status reflects the worst active incident when there is one, otherwise it is derived from probe
+/// health.
 #[function_component(HomeView)]
 pub fn home_view() -> Html {
     let store = use_store();
@@ -49,7 +49,6 @@ pub fn home_view() -> Html {
                 <ServiceList />
             </div>
 
-            <Timeline />
             <IncidentsSection incidents={recent_incidents} />
         </>
     }

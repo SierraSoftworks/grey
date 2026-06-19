@@ -16,8 +16,8 @@ probes:
     target: !Dns
       domain: example.com.
       record_type: MX
-    validators:
-      dns.answers: !Contains "10 smtp.example.com"
+    checks:
+      - "10 smtp.example.com" in dns.answers
 ```
 
 ## Inputs
@@ -49,6 +49,7 @@ dns.answers:
 ```
 
 ::: tip
-The easiest way to validate the contents of the `dns.answers` property is to use the
-`!Contains` validator.
+The easiest way to validate the contents of the `dns.answers` property is to write a check
+that tests for membership, such as `"10 smtp.example.com" in dns.answers`. You can also use
+`contains` to match a substring within one of the answers.
 :::
