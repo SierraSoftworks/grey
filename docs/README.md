@@ -63,11 +63,6 @@ ui:
   links:
     - title: GitHub
       url: https://github.com/SierraSoftworks/grey
-  notices:
-    - title: Example Notice
-      description: This is an example notice message showcasing how you can alert users to something happening on your platform.
-      timestamp: 2025-08-10T19:00:00Z
-      level: ok # ok, warning, error
 ```
 
 <ClientOnly>

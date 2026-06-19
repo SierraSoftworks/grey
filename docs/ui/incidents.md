@@ -2,9 +2,8 @@
 
 Incidents let an administrator record and communicate events affecting your
 services — outages, degradations, and their resolution — directly from the
-status page. Unlike [notices](./notices.md), which are static entries in your
-configuration file, incidents are created and managed live through the UI and
-stored in Grey's state database.
+status page. Each incident is a timestamped, updatable event that you create
+and manage live through the UI, stored in Grey's state database.
 
 An incident is just a title and a series of **updates**, each with an **impact**,
 a timestamp, and a markdown message. Its start, current status and resolution are

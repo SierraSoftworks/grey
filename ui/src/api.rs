@@ -130,10 +130,6 @@ mod browser {
             self.get_json(&format!("{BASE}/crons")).await
         }
 
-        pub async fn notices(&self) -> Result<Vec<grey_api::UiNotice>, ApiError> {
-            self.get_json(&format!("{BASE}/notices")).await
-        }
-
         /// The first page of publicly visible incidents (hidden drafts excluded), each with its
         /// updates embedded.
         pub async fn incidents(&self) -> Result<Vec<IncidentView>, ApiError> {
@@ -312,9 +308,6 @@ impl ApiClient {
         Self::unavailable()
     }
     pub async fn crons(&self) -> Result<Vec<grey_api::Cron>, ApiError> {
-        Self::unavailable()
-    }
-    pub async fn notices(&self) -> Result<Vec<grey_api::UiNotice>, ApiError> {
         Self::unavailable()
     }
     pub async fn incidents(&self) -> Result<Vec<IncidentView>, ApiError> {

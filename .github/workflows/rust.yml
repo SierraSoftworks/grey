@@ -106,26 +106,17 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run Tests for Grey
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --no-fail-fast -p grey
+        run: cargo test --no-fail-fast -p grey
         env:
             RUSTFLAGS: -Cinstrument-coverage
 
       - name: Run Tests for Grey UI
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --no-fail-fast -p grey-ui
+        run: cargo test --no-fail-fast -p grey-ui
         env:
           RUSTFLAGS: -Cinstrument-coverage
 
       - name: Run Tests for Grey API
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --no-fail-fast -p grey-api
+        run: cargo test --no-fail-fast -p grey-api
         env:
           RUSTFLAGS: -Cinstrument-coverage
 
@@ -216,12 +207,12 @@ jobs:
           # usable cache restored, forcing a full rebuild on every run.
           key: ${{ matrix.target }}
 
+      - name: Install cross
+        if: ${{ matrix.cross }}
+        run: cargo install cross --locked
+
       - name: cargo build
-        uses: actions-rs/cargo@v1.0.3
-        with:
-          use-cross: ${{ matrix.cross }}
-          command: build
-          args: --release --target ${{ matrix.target }} ${{ matrix.flags }}
+        run: ${{ matrix.cross && 'cross' || 'cargo' }} build --release --target ${{ matrix.target }} ${{ matrix.flags }}
 
       # cross runs the compiler inside a Docker container as root, so the
       # registry downloads and build artifacts it writes into the cached

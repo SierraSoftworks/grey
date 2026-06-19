@@ -13,7 +13,6 @@ mod cluster;
 mod config;
 mod cron;
 mod incidents;
-mod notices;
 mod page;
 mod probes;
 mod trace;
@@ -95,7 +94,6 @@ pub fn create_app() -> App<
         // API; an optional per-cron token gates writes when configured.
         .route("/api/v1/cron/{name}/check-in", web::get().to(cron::report_checkin_get))
         .route("/api/v1/cron/{name}/check-in", web::post().to(cron::report_checkin_post))
-        .route("/api/v1/notices", web::get().to(notices::get_notices))
         .route("/api/v1/incidents", web::get().to(incidents::get_incidents))
         // Public login endpoints: the SPA fetches the provider's authorization endpoint, then hands
         // the resulting authorization code here for the agent to exchange with its client secret.

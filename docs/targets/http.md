@@ -20,10 +20,10 @@ probes:
         Authorization: Bearer <token>
       body: '{"foo": "bar"}'
       no_verify: false
-    validators:
-      http.status: !OneOf [200, 201]
-      http.header.content-type: !Equals "application/json"
-      http.body: !Contains "foo"
+    checks:
+      - http.status in [200, 201]
+      - http.header.content-type == "application/json"
+      - http.body contains "foo"
 ```
 
 ## Inputs

@@ -5,16 +5,6 @@ ui:
 
   title: Sierra Softworks (dev)
 
-  notices:
-    - title: Testing Underway
-      description: We are currently testing the system, please do not be alarmed if you see some odd UI behaviour...
-      timestamp: 2024-08-19T12:00:00Z
-      level: warning
-    - title: Maintenance Scheduled
-      description: Scheduled maintenance will occur on Sunday at 2 AM UTC.
-      timestamp: 2024-08-20T14:00:00Z
-      level: ok
-
   links:
     - title: GitHub
       url: https://github.com/SierraSoftworks/grey
@@ -27,8 +17,8 @@ probes:
       retries: 3
     target: !Dns
       domain: google.com
-    validators:
-      dns.answers: !NotEquals []
+    checks:
+      - dns.answers != []
     tags:
       domain: google.com
       service: internet
@@ -39,8 +29,8 @@ probes:
       retries: 1
     target: !Tcp
       host: example.com:443
-    validators:
-      net.ip: !Equals "23.215.0.138"
+    checks:
+      - net.ip == "23.215.0.138"
     tags:
       domain: example.com
       service: failure
