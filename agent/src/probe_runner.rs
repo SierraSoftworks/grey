@@ -225,12 +225,16 @@ impl ProbeRunner {
             .entered();
 
             // The check expression is the validations map key and the UI shows the pass/fail state,
-            // so a failure message carries only what those can't: the sample fields the check
-            // consulted (and, when it couldn't be evaluated at all, the underlying error).
-            let failure = match check.matches(&sample) {
-                Ok(true) => None,
-                Ok(false) => Some(checks::unmatched_message(check, &sample)),
-                Err(e) => Some(checks::evaluation_error_message(check, &sample, e)),
+            // so the public failure message carries only what those can't: the sample fields the
+            // check consulted. The raw evaluation error is operator-only — it can expose internal
+            // detail and the message is served publicly — so it is kept to telemetry alone.
+            let (failure, otel_detail) = match check.matches(&sample) {
+                Ok(true) => (None, None),
+                Ok(false) => (Some(checks::unmatched_message(check, &sample)), None),
+                Err(e) => (
+                    Some(checks::evaluation_error_message(check, &sample)),
+                    Some(e.to_string()),
+                ),
             };
 
             match failure {
@@ -241,9 +245,16 @@ impl ProbeRunner {
                         .insert(check.to_string(), ValidationResult::pass());
                 }
                 Some(message) => {
+                    // Telemetry gets the public message plus any operator-only detail (the raw
+                    // evaluation error); the status page (validation result + probe error) gets the
+                    // public message alone.
+                    let otel_message = match otel_detail {
+                        Some(detail) => format!("{message} ({detail})"),
+                        None => message.clone(),
+                    };
                     span.record("otel.status_code", "Error")
-                        .record("otel.status_message", message.as_str());
-                    error!(check = %check, "{message}");
+                        .record("otel.status_message", otel_message.as_str());
+                    error!(check = %check, "{otel_message}");
                     result
                         .validations
                         .insert(check.to_string(), ValidationResult::fail(&message));

@@ -152,18 +152,18 @@ pub fn unmatched_message(check: &Filter, sample: &Sample) -> String {
 }
 
 /// The failure message stored for a check that could not be evaluated at all
-/// (for example a type error in the expression). Here the error is the relevant
-/// information, followed by any fields the check referenced.
-pub fn evaluation_error_message(
-    check: &Filter,
-    sample: &Sample,
-    error: impl std::fmt::Display,
-) -> String {
+/// (for example a type error in the expression).
+///
+/// This message is served publicly on the status page, and the underlying error
+/// can carry internal detail, so it is deliberately generic — the raw error is
+/// surfaced only through telemetry (see the probe runner). The sample fields the
+/// check referenced are still included, since those values are already public.
+pub fn evaluation_error_message(check: &Filter, sample: &Sample) -> String {
     let observed = observed_fields(check, sample);
     if observed.is_empty() {
-        format!("The check could not be evaluated: {error}.")
+        "The check could not be evaluated.".to_string()
     } else {
-        format!("The check could not be evaluated: {error}.\n{observed}")
+        format!("The check could not be evaluated.\n{observed}")
     }
 }
 
@@ -299,21 +299,21 @@ mod tests {
     }
 
     #[test]
-    fn evaluation_error_message_includes_the_error_and_fields() {
+    fn evaluation_error_message_is_generic_and_includes_fields() {
         let sample = Sample::default().with("http.status", 503);
         let check = filter("http.status == 200");
-        assert_eq!(
-            evaluation_error_message(&check, &sample, "type mismatch"),
-            "The check could not be evaluated: type mismatch.\nhttp.status=503"
-        );
+        let message = evaluation_error_message(&check, &sample);
+        assert_eq!(message, "The check could not be evaluated.\nhttp.status=503");
+        // The raw evaluation error must not leak into the public message; it is telemetry-only.
+        assert!(!message.to_lowercase().contains("mismatch"));
     }
 
     #[test]
     fn evaluation_error_message_without_fields() {
         let sample = Sample::default();
         assert_eq!(
-            evaluation_error_message(&filter("true"), &sample, "boom"),
-            "The check could not be evaluated: boom."
+            evaluation_error_message(&filter("true"), &sample),
+            "The check could not be evaluated."
         );
     }
 }
