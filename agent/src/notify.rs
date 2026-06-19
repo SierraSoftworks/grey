@@ -108,6 +108,14 @@ impl Notifier {
 
     /// Delivers each event to every webhook whose filter matches it. The JSON body is serialized once
     /// per event and the matching deliveries are dispatched concurrently.
+    ///
+    /// Instrumented so a batch of deliveries shares a parent span; each individual delivery (and any
+    /// failure) is a child [`deliver`] span beneath it.
+    #[tracing::instrument(
+        name = "webhook.dispatch",
+        skip_all,
+        fields(otel.kind = "internal", events = events.len())
+    )]
     async fn dispatch(&self, webhooks: &[WebhookConfig], events: &[WebhookEvent]) {
         let mut sends = Vec::new();
         for event in events {
@@ -132,7 +140,9 @@ impl Notifier {
             }
         }
 
-        futures::future::join_all(sends).await;
+        // Each delivery surfaces its own outcome on its span (success status, or a span error via
+        // `deliver`'s `err`), so the collected results are intentionally discarded here.
+        let _ = futures::future::join_all(sends).await;
     }
 }
 
@@ -215,12 +225,33 @@ fn event_matches(filter: &Filter, event: &WebhookEvent) -> Result<bool, Box<dyn 
 
 /// Delivers one event to one webhook: POSTs the (already serialized) JSON body with Grey's
 /// signature/metadata headers and any operator-configured extra headers.
+///
+/// Instrumented as an outbound client span so a delivery — and any failure to send it — is
+/// observable in the trace pipeline. The secret-bearing `webhook` is deliberately **not** recorded
+/// (only its label and endpoint are); the response status is stamped onto the span on completion, and
+/// a transport error or a non-success response is surfaced as the span's error via `err`, so operators
+/// can find and debug failing deliveries by their status code, endpoint, and the entity involved.
+#[tracing::instrument(
+    name = "webhook.deliver",
+    skip_all,
+    err(Display),
+    fields(
+        otel.kind = "client",
+        otel.name = webhook.label(),
+        webhook.name = webhook.label(),
+        webhook.endpoint = %webhook.endpoint,
+        event.id = %event.id,
+        event.kind = event.event.as_str(),
+        entity.name = %event.entity.name,
+        http.status_code = EmptyField,
+    )
+)]
 async fn deliver(
     http: &reqwest::Client,
     webhook: &WebhookConfig,
     event: &WebhookEvent,
     body: Vec<u8>,
-) {
+) -> Result<(), Box<dyn std::error::Error>> {
     // Sign and stamp with the event's own timestamp so the `t=` a receiver verifies against matches
     // the `timestamp` in the payload.
     let timestamp = event.timestamp.timestamp();
@@ -239,21 +270,25 @@ async fn deliver(
     }
 
     // Operator-supplied headers are applied after Grey's own, but a misconfigured name/value only
-    // fails this single delivery (surfaced below) rather than the whole pass.
+    // fails this single delivery rather than the whole pass.
     for (name, value) in &webhook.headers {
         request = request.header(name.as_str(), value.as_str());
     }
 
-    match request.body(body).send().await {
-        Ok(response) if response.status().is_success() => {
-            debug!(name: "webhook.delivered", { webhook = webhook.label(), event.id = event.id, entity = event.entity.name, http.status = response.status().as_u16() }, "Delivered webhook event.");
-        }
-        Ok(response) => {
-            warn!(name: "webhook.rejected", { webhook = webhook.label(), event.id = event.id, http.status = response.status().as_u16() }, "Webhook endpoint returned a non-success status.");
-        }
-        Err(e) => {
-            warn!(name: "webhook.failed", { webhook = webhook.label(), event.id = event.id, exception = %e }, "Failed to deliver webhook event.");
-        }
+    let response = request
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| format!("failed to send the request to {}: {e}", webhook.endpoint))?;
+
+    let status = response.status();
+    Span::current().record("http.status_code", status.as_u16());
+
+    if status.is_success() {
+        debug!(name: "webhook.delivered", { webhook = webhook.label(), event.id = event.id, entity = event.entity.name, http.status_code = status.as_u16() }, "Delivered webhook event.");
+        Ok(())
+    } else {
+        Err(format!("the endpoint returned a non-success status ({status})").into())
     }
 }
 
@@ -480,7 +515,7 @@ mod tests {
         );
         let body = serde_json::to_vec(&event).unwrap();
 
-        deliver(&reqwest::Client::new(), &wh, &event, body).await;
+        deliver(&reqwest::Client::new(), &wh, &event, body).await.unwrap();
 
         let requests = server.received_requests().await.unwrap();
         assert_eq!(requests.len(), 1);
@@ -517,11 +552,44 @@ mod tests {
         let wh = webhook(format!("{}/hook", server.uri()), None, "true");
         let event = WebhookEvent::for_probe("evt", Utc::now(), "n", &probe("web", true), "passing", true);
         let body = serde_json::to_vec(&event).unwrap();
-        deliver(&reqwest::Client::new(), &wh, &event, body).await;
+        deliver(&reqwest::Client::new(), &wh, &event, body).await.unwrap();
 
         let requests = server.received_requests().await.unwrap();
         assert_eq!(requests.len(), 1);
         assert!(requests[0].headers.get("grey-webhook-signature").is_none());
+    }
+
+    /// A non-success response is surfaced as an error (which the `#[instrument(err)]` on `deliver`
+    /// records on the span), so operators can observe failed deliveries.
+    #[tokio::test]
+    async fn deliver_reports_non_success_as_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/hook"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let wh = webhook(format!("{}/hook", server.uri()), None, "true");
+        let event = WebhookEvent::for_probe("evt", Utc::now(), "n", &probe("web", true), "passing", true);
+        let body = serde_json::to_vec(&event).unwrap();
+
+        let result = deliver(&reqwest::Client::new(), &wh, &event, body).await;
+        let err = result.expect_err("a 500 response must be reported as an error");
+        assert!(err.to_string().contains("500"), "the error should name the status: {err}");
+    }
+
+    /// A transport failure (an unreachable endpoint) is reported as an error rather than panicking.
+    #[tokio::test]
+    async fn deliver_reports_transport_failure_as_error() {
+        // A reserved TEST-NET-1 address that won't accept connections; a short timeout bounds the test.
+        let mut wh = webhook("http://192.0.2.1:9/hook".into(), None, "true");
+        wh.timeout = Duration::from_millis(300);
+        let event = WebhookEvent::for_probe("evt", Utc::now(), "n", &probe("web", true), "passing", true);
+        let body = serde_json::to_vec(&event).unwrap();
+
+        let result = deliver(&reqwest::Client::new(), &wh, &event, body).await;
+        assert!(result.is_err(), "an unreachable endpoint must be reported as an error");
     }
 
     fn parse_signature(header: &str) -> (i64, String) {
