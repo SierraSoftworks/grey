@@ -11,7 +11,6 @@
 #   Content-Type: application/json
 #   Grey-Webhook-Event: probe.state_changed        # or cron.state_changed
 #   Grey-Webhook-Delivery: <unique event id>
-#   Grey-Webhook-Timestamp: <unix seconds>
 #   Grey-Webhook-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<timestamp>.<body>">
 #
 # The signature follows the scheme Tailscale documents for its webhooks

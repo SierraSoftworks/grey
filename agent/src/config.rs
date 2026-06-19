@@ -120,7 +120,10 @@ pub struct WebhookConfig {
     pub secret: Option<String>,
 
     /// Additional headers attached to every delivery (for example an `Authorization` token expected
-    /// by the receiving platform). These are sent alongside Grey's own signature/metadata headers.
+    /// by the receiving platform). These are sent alongside Grey's own signature/metadata headers,
+    /// but they are **not** covered by the signature (which authenticates only the timestamp and
+    /// body), so a receiver must not treat them as authenticated or rely on them being unmodified in
+    /// transit.
     #[serde(default)]
     pub headers: HashMap<String, String>,
 

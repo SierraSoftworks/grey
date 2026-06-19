@@ -39,9 +39,8 @@ use crate::state::{CronStore, ProbeStore, State};
 const EVALUATION_INTERVAL: Duration = Duration::from_secs(15);
 
 /// The signature header, in the Tailscale `t=<unix-seconds>,v1=<hex>` form (see [`WebhookConfig`]).
+/// The signed timestamp travels in the `t=` field, so no separate timestamp header is needed.
 const SIGNATURE_HEADER: &str = "Grey-Webhook-Signature";
-/// The Unix-seconds timestamp the signature was computed over, surfaced for convenience.
-const TIMESTAMP_HEADER: &str = "Grey-Webhook-Timestamp";
 /// The event's unique id, for downstream de-duplication of fan-out / retried deliveries.
 const DELIVERY_HEADER: &str = "Grey-Webhook-Delivery";
 /// The event kind (`probe.state_changed` / `cron.state_changed`).
@@ -265,27 +264,27 @@ async fn deliver(
     event: &WebhookEvent,
     body: Vec<u8>,
 ) -> Result<(), human_errors::Error> {
-    // Sign and stamp with the event's own timestamp so the `t=` a receiver verifies against matches
-    // the `timestamp` in the payload.
-    let timestamp = event.timestamp.timestamp();
-
     let mut request = http
         .post(&webhook.endpoint)
         .timeout(webhook.timeout)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .header(EVENT_HEADER, event.event.as_str())
-        .header(DELIVERY_HEADER, event.id.as_str())
-        .header(TIMESTAMP_HEADER, timestamp.to_string());
+        .header(DELIVERY_HEADER, event.id.as_str());
 
-    if let Some(secret) = webhook.secret.as_deref().filter(|s| !s.is_empty()) {
-        let signature = sign(secret, timestamp, &body);
-        request = request.header(SIGNATURE_HEADER, format!("t={timestamp},v1={signature}"));
-    }
-
-    // Operator-supplied headers are applied after Grey's own, but a misconfigured name/value only
-    // fails this single delivery rather than the whole pass.
+    // Operator-supplied headers are applied first, before Grey's own signature/trace headers. They
+    // are NOT covered by the signature (which authenticates only the timestamp and body), so a
+    // receiver must not treat them as authenticated or trust them to be unmodified in transit. A
+    // misconfigured name/value only fails this single delivery rather than the whole pass.
     for (name, value) in &webhook.headers {
         request = request.header(name.as_str(), value.as_str());
+    }
+
+    // Sign the event's own timestamp plus the body. The timestamp travels inside the signature
+    // header's `t=` field, so a receiver has everything it needs to verify without a separate header.
+    if let Some(secret) = webhook.secret.as_deref().filter(|s| !s.is_empty()) {
+        let timestamp = event.timestamp.timestamp();
+        let signature = sign(secret, timestamp, &body);
+        request = request.header(SIGNATURE_HEADER, format!("t={timestamp},v1={signature}"));
     }
 
     // Propagate the current (`webhook.deliver`) trace context via W3C `traceparent`/`tracestate`, so a

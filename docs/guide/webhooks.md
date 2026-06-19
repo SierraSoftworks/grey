@@ -87,10 +87,12 @@ When a `secret` is configured, every delivery carries these headers:
 Content-Type: application/json
 Grey-Webhook-Event: probe.state_changed
 Grey-Webhook-Delivery: 0d6f1a3e-8b3b-4f9e-9b3a-2f0b8a6d1c44
-Grey-Webhook-Timestamp: 1750334400
 Grey-Webhook-Signature: t=1750334400,v1=<hex HMAC-SHA256>
 traceparent: 00-<trace-id>-<span-id>-01
 ```
+
+The signed timestamp is carried in the `t=` field of the signature header, so there is no separate
+timestamp header.
 
 When Grey has an OpenTelemetry pipeline configured it also propagates its trace context on each
 delivery as W3C `traceparent` (and `tracestate`) headers, so a receiver that records traces can
@@ -157,6 +159,10 @@ filter: 'entity.type == "cron" && state.healthy == false'
 ## Additional headers
 The `headers` map attaches extra headers to every delivery — for example an `Authorization` token
 the receiving platform expects. They are sent alongside Grey's own signature and metadata headers.
+
+These headers are **not** covered by the signature, which authenticates only the timestamp and the
+request body. Treat them as transport-level conveniences (such as routing or auth tokens the receiver
+checks itself), not as authenticated data — a receiver should not assume they arrived unmodified.
 
 ## Behaviour in a cluster
 A webhook event represents the cluster's converged view of an entity, not a single node's
