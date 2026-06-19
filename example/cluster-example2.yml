@@ -24,8 +24,8 @@ probes:
       retries: 3
     target: !Dns
       domain: google.com
-    validators:
-      dns.answers: !NotEquals []
+    checks:
+      - dns.answers != []
     tags:
       domain: google.com
       service: Common Probes
@@ -36,8 +36,8 @@ probes:
       retries: 3
     target: !Dns
       domain: google.com
-    validators:
-      dns.answers: !NotEquals []
+    checks:
+      - dns.answers != []
     tags:
       domain: google.com
       service: Agent 2
@@ -48,8 +48,8 @@ probes:
       retries: 3
     target: !Dns
       domain: bing.com
-    validators:
-      dns.answers: !NotEquals []
+    checks:
+      - dns.answers != []
     tags:
       domain: bing.com
       service: Agent 2

@@ -23,7 +23,6 @@ mod state;
 mod targets;
 mod api;
 mod utils;
-mod validators;
 
 pub use config::Config;
 pub use engine::Engine;
@@ -31,7 +30,6 @@ pub use policy::Policy;
 pub use probe::Probe;
 pub use sample::{Sample, SampleValue};
 pub use targets::Target;
-pub use validators::Validator;
 
 pub const HISTORY_SIZE: usize = 24;
 

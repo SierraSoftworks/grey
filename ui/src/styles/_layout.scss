@@ -101,17 +101,6 @@
     &.probe {
         border-bottom: none;
     }
-
-    // Notice-specific styling
-    &.notice {
-        &.warning {
-            border-left-color: $color-status-warn;
-        }
-
-        &.error {
-            border-left-color: $color-status-error;
-        }
-    }
 }
 
 // Mobile layout adjustments

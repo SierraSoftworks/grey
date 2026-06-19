@@ -14,7 +14,6 @@ pub mod probe_history;
 pub mod service_list;
 pub mod skeleton;
 pub mod status_dot;
-pub mod timeline;
 
 pub use banner::{Banner, BannerKind};
 pub use cluster_status::ClusterStatus;
@@ -29,7 +28,3 @@ pub use probe_history::ProbeHistory;
 pub use service_list::ServiceList;
 pub use skeleton::IncidentBlockSkeleton;
 pub use status_dot::StatusDot;
-pub use timeline::Timeline;
-
-// Re-export UI types from the API library
-pub use grey_api::{NoticeLevel, UiNotice};

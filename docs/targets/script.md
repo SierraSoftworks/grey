@@ -2,7 +2,7 @@
 The `!Script` target type allows you to write custom JavaScript probes to conduct complex health
 evaluations against your service. This includes executing complex workflows
 like signing into a website, or implementing more powerful validation than
-is possible with the standard [validators](../validators/README.md).
+is possible with the standard [checks](../checks/README.md).
 
 ## Example
 A good example here would be an interactive authentication flow which requires
@@ -47,10 +47,10 @@ probes:
             const profilePayload = await profile.json()
             output["profile.username"] = profilePayload.username
         }
-    validators:
-      auth.status: !Equals 200
-      profile.status: !Equals 200
-      profile.username: !Equals "test-user"
+    checks:
+      - auth.status == 200
+      - profile.status == 200
+      - profile.username == "test-user"
 ```
 
 ## Inputs
@@ -101,7 +101,7 @@ successfully and non-zero if it failed.
 If you wish to expose additional outputs from your script, you can do so using
 the `setOutput(key, value)` function in the script environment. This function
 will set an output which may then be checked by one or more of the
-[validators](../validators/README.md).
+[checks](../checks/README.md).
 
 ```js
 output["my.value"] = 42;
@@ -136,7 +136,7 @@ from remote endpoints.
 
 ### `output[key: string] = value`
 This method allows you to emit a new output value from your probe which
-can then be interrogated by the [validators](../validators/README.md)
+can then be interrogated by the [checks](../checks/README.md)
 that you have defined in your Grey configuration.
 
 ::: warning

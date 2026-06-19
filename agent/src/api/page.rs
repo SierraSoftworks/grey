@@ -45,7 +45,6 @@ pub async fn index(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpRe
     let title = config.ui.title.clone();
     let app_props = AppProps {
         config: (&config.ui).into(),
-        notices: config.ui.notices.clone(),
         probes,
         crons,
         // Cluster topology is operator-only: it is never part of the server-rendered payload and is
