@@ -94,6 +94,7 @@ export default defineUserConfig({
             `/guide/configuration.md`,
             '/guide/clustering.md',
             '/guide/crons.md',
+            '/guide/webhooks.md',
             '/guide/telemetry.md',
             '/guide/azure-msi.md',
           ]

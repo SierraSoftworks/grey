@@ -38,6 +38,9 @@ boa_runtime = { workspace = true, features = ["reqwest-blocking"], optional = tr
 futures.workspace = true
 futures-concurrency.workspace = true
 futures-lite.workspace = true
+hex.workspace = true
+hmac.workspace = true
+human-errors.workspace = true
 http.workspace = true
 humantime.workspace = true
 humantime-serde.workspace = true
@@ -48,12 +51,14 @@ openssl-sys = { workspace = true, optional = true }
 rand.workspace = true
 reqwest.workspace = true
 serde_yaml.workspace = true
+sha2.workspace = true
 tonic.workspace = true
 tonic-health.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-batteries.workspace = true
 trust-dns-resolver.workspace = true
+uuid.workspace = true
 
 [features]
 default = ["scripts"]

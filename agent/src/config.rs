@@ -16,6 +16,11 @@ pub struct Config {
     #[serde(default)]
     pub crons: Vec<CronConfig>,
 
+    /// Webhook endpoints notified when a probe or cron changes state. Each receives the JSON event
+    /// payload, signed with its shared secret, for every event its filter matches.
+    #[serde(default)]
+    pub webhooks: Vec<WebhookConfig>,
+
     #[serde(default)]
     pub ui: UiConfig,
 
@@ -93,6 +98,65 @@ impl CronConfig {
     }
 }
 
+/// A webhook endpoint notified when a probe or cron changes state. The agent posts the JSON event
+/// payload to `endpoint`, signs it with `secret` (see the HMAC scheme on [`WebhookConfig::secret`]),
+/// and only delivers events for which `filter` evaluates to true.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct WebhookConfig {
+    /// A descriptive name for this webhook, used in logs and traces. Defaults to the endpoint when
+    /// omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    /// The destination endpoint that receives the JSON event payload via an HTTP `POST`.
+    pub endpoint: String,
+
+    /// An optional shared secret. When set, every delivery carries a `Grey-Webhook-Signature` header
+    /// of the form `t=<unix-seconds>,v1=<hex>`, where the signature is the HMAC-SHA256 of
+    /// `"<timestamp>.<raw-json-body>"` keyed by the secret — the scheme documented for Tailscale
+    /// webhooks (<https://tailscale.com/docs/features/webhooks#verifying-an-event-signature>). The
+    /// receiver recomputes it to authenticate the payload. When unset, deliveries are unsigned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret: Option<String>,
+
+    /// Additional headers attached to every delivery (for example an `Authorization` token expected
+    /// by the receiving platform). These are sent alongside Grey's own signature/metadata headers,
+    /// but they are **not** covered by the signature (which authenticates only the timestamp and
+    /// body), so a receiver must not treat them as authenticated or rely on them being unmodified in
+    /// transit.
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+
+    /// A `filt-rs` expression — the same language as probe `checks` — evaluated against each event to
+    /// decide whether it is delivered to this endpoint. The available fields are documented in
+    /// `docs/guide/webhooks.md` (`event`, `entity.type`, `entity.name`, `entity.tags.<key>`,
+    /// `state.current`, `state.previous`, `state.healthy`, `state.was_healthy`, and
+    /// `state.availability`). Defaults to matching every event.
+    #[serde(default = "default_webhook_filter")]
+    pub filter: filt_rs::Filter,
+
+    /// The per-delivery HTTP timeout.
+    #[serde(default = "default_webhook_timeout", with = "humantime_serde")]
+    pub timeout: std::time::Duration,
+}
+
+impl WebhookConfig {
+    /// A label for logs/traces: the configured `name`, falling back to the endpoint.
+    pub fn label(&self) -> &str {
+        self.name.as_deref().unwrap_or(&self.endpoint)
+    }
+}
+
+/// The default webhook filter matches every event, so a webhook with no `filter` receives all state
+/// changes.
+fn default_webhook_filter() -> filt_rs::Filter {
+    filt_rs::Filter::new("true").expect("the match-all webhook filter must parse")
+}
+
+fn default_webhook_timeout() -> std::time::Duration {
+    std::time::Duration::from_secs(10)
+}
+
 impl Config {
     #[cfg(test)]
     pub fn test(temp_dir: &PathBuf) -> Self {
@@ -101,6 +165,7 @@ impl Config {
                 Probe::test(),
             ],
             crons: vec![],
+            webhooks: vec![],
             ui: UiConfig::default(),
             cluster: ClusterConfig::default(),
             state: temp_dir.join("test_state.redb"),
@@ -117,7 +182,34 @@ impl Config {
 
         let config: Self = serde_yaml::from_str(&config)?;
         config.validate_crons()?;
+        config.validate_webhooks()?;
         Ok(config)
+    }
+
+    /// Validates each webhook's destination: an endpoint must be present and an absolute `http(s)`
+    /// URL, so a typo fails the load rather than silently dropping every notification. The `filter`
+    /// expression is already validated during deserialization (it is a parsed [`filt_rs::Filter`]).
+    fn validate_webhooks(&self) -> Result<(), Box<dyn std::error::Error>> {
+        for webhook in &self.webhooks {
+            let endpoint = webhook.endpoint.trim();
+            if endpoint.is_empty() {
+                return Err(format!(
+                    "Webhook '{}' must declare a non-empty `endpoint`.",
+                    webhook.label()
+                )
+                .into());
+            }
+
+            if !(endpoint.starts_with("http://") || endpoint.starts_with("https://")) {
+                return Err(format!(
+                    "Webhook '{}' has an invalid `endpoint` '{}'; it must be an http(s) URL.",
+                    webhook.label(),
+                    webhook.endpoint
+                )
+                .into());
+            }
+        }
+        Ok(())
     }
 
     /// Validates that each cron declares exactly one of `interval` / `schedule`, that any crontab
@@ -451,6 +543,81 @@ mod tests {
             .await
             .unwrap();
         assert!(Config::load_from_path(&ok).await.is_ok());
+    }
+
+    /// The shipped `webhooks` example must parse through the real configuration loader, guarding the
+    /// example against drift and exercising the `WebhookConfig` (filt-rs filter + humantime timeout)
+    /// deserialization.
+    #[tokio::test]
+    async fn loads_webhooks_example() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../example/webhooks.yml");
+        let config = Config::load_from_path(&path)
+            .await
+            .expect("example/webhooks.yml should load");
+
+        assert_eq!(config.webhooks.len(), 3);
+
+        let pagerduty = config
+            .webhooks
+            .iter()
+            .find(|w| w.name.as_deref() == Some("pagerduty"))
+            .expect("the pagerduty webhook should be present");
+        assert!(pagerduty.secret.is_some());
+        assert_eq!(pagerduty.filter.raw(), "state.healthy == false");
+        assert_eq!(
+            pagerduty.headers.get("Authorization").map(String::as_str),
+            Some("Token token=xxxxxxxxxxxxxxxxxxxx")
+        );
+        // The default timeout applies when none is configured.
+        assert_eq!(pagerduty.timeout, std::time::Duration::from_secs(10));
+
+        // An explicit timeout is honoured.
+        let chat = config
+            .webhooks
+            .iter()
+            .find(|w| w.name.as_deref() == Some("platform-chat"))
+            .expect("the platform-chat webhook should be present");
+        assert_eq!(chat.timeout, std::time::Duration::from_secs(5));
+
+        // A webhook with no filter defaults to matching everything, and one with no secret is
+        // unsigned.
+        let orchestrator = config
+            .webhooks
+            .iter()
+            .find(|w| w.name.as_deref() == Some("job-orchestrator"))
+            .expect("the job-orchestrator webhook should be present");
+        assert!(orchestrator.secret.is_none());
+    }
+
+    /// A webhook with a missing or non-http(s) endpoint must fail to load rather than silently
+    /// dropping every notification.
+    #[tokio::test]
+    async fn rejects_invalid_webhook_endpoints() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let cases = [
+            // Empty endpoint.
+            "webhooks:\n  - endpoint: ''\n",
+            // Not an http(s) URL.
+            "webhooks:\n  - endpoint: 'ftp://example.com/hook'\n",
+        ];
+
+        for (i, body) in cases.iter().enumerate() {
+            let path = dir.path().join(format!("bad-webhook-{i}.yml"));
+            tokio::fs::write(&path, body).await.unwrap();
+            assert!(
+                Config::load_from_path(&path).await.is_err(),
+                "webhook config #{i} should be rejected: {body}"
+            );
+        }
+
+        // A well-formed webhook loads, defaulting its filter to match-all.
+        let ok = dir.path().join("ok.yml");
+        tokio::fs::write(&ok, "webhooks:\n  - endpoint: https://example.com/hook\n")
+            .await
+            .unwrap();
+        let config = Config::load_from_path(&ok).await.expect("a valid webhook should load");
+        assert_eq!(config.webhooks[0].filter.raw(), "true");
     }
 
     /// A cron may not share a name with a probe: gossip keys replicated state by the bare entity

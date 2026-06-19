@@ -51,6 +51,17 @@ impl Engine {
             });
         }
 
+        // Watch for probe/cron state transitions and deliver webhook notifications. Always started:
+        // it continuously tracks the baseline state (cheaply when no webhooks are configured), so a
+        // webhook added by a later config reload begins notifying on the next transition rather than
+        // replaying everything already in flight.
+        {
+            let state = self.state.clone();
+            tokio::task::spawn_local(async move {
+                crate::notify::Notifier::new(state).run().await;
+            });
+        }
+
         // Start probe runners
         for probe in self.probes.read().unwrap().values().cloned() {
             self.start_probe_runner(probe);

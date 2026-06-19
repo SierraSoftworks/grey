@@ -1,0 +1,69 @@
+---
+# This example demonstrates `webhooks`: state-change notifications that let Grey integrate
+# with incident-management platforms and other automation.
+#
+# Whenever a probe flips between passing and failing, or a cron changes health (succeeded,
+# failed, missing, overrunning, ...), Grey delivers a JSON event to each configured endpoint
+# whose `filter` matches it. The body and headers are documented in docs/guide/webhooks.md;
+# in short, every delivery carries:
+#
+#   POST <endpoint>
+#   Content-Type: application/json
+#   Grey-Webhook-Event: probe.state_changed        # or cron.state_changed
+#   Grey-Webhook-Delivery: <unique event id>
+#   Grey-Webhook-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<timestamp>.<body>">
+#
+# The signature follows the scheme Tailscale documents for its webhooks
+# (https://tailscale.com/docs/features/webhooks#verifying-an-event-signature): recompute the
+# HMAC-SHA256 of "<timestamp>.<raw-body>" with the shared `secret` and compare it to `v1`.
+ui:
+  enabled: true
+  listen: 127.0.0.1:3002
+
+probes:
+  - name: example.web
+    policy:
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    target: !Http
+      url: https://example.com
+    checks:
+      - http.status >= 200 && http.status < 300
+    tags:
+      service: Example
+      team: Platform
+
+crons:
+  - name: backup.nightly
+    schedule: '0 2 * * *'
+    max_duration: 30m
+    grace: 1h
+    tags:
+      service: Backups
+      team: Platform
+
+webhooks:
+  # Page the on-call team for any *unhealthy* transition (a probe failing, or a cron that
+  # failed / went missing / is overrunning). The `filter` uses the same filt-rs language as
+  # probe `checks`.
+  - name: pagerduty
+    endpoint: https://events.pagerduty.com/integration/abc123/enqueue
+    secret: 'a-long-random-shared-secret'
+    filter: 'state.healthy == false'
+    headers:
+      Authorization: 'Token token=xxxxxxxxxxxxxxxxxxxx'
+
+  # Mirror every state change for one team into a chat channel, signed so the receiver can
+  # authenticate it. Omitting `filter` would match every event from every entity.
+  - name: platform-chat
+    endpoint: https://chat.example.com/hooks/grey
+    secret: 'another-shared-secret'
+    filter: 'entity.tags.team == "Platform"'
+    timeout: 5s
+
+  # Forward only cron problems to a job-orchestration tool, unsigned (the endpoint is on a
+  # trusted network).
+  - name: job-orchestrator
+    endpoint: http://127.0.0.1:9000/grey/crons
+    filter: 'entity.type == "cron" && state.healthy == false'
