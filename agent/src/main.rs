@@ -13,6 +13,7 @@ mod engine;
 mod js;
 #[macro_use]
 mod macros;
+mod notify;
 mod policy;
 mod probe;
 mod probe_runner;

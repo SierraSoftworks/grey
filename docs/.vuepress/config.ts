@@ -103,6 +103,8 @@ export default defineUserConfig({
           children: [
             '/guide/README.md',
             `/guide/configuration.md`,
+            '/guide/crons.md',
+            '/guide/webhooks.md',
             '/guide/clustering.md',
             '/guide/telemetry.md',
             '/guide/azure-msi.md',

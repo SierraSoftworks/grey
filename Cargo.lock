@@ -2205,6 +2205,8 @@ dependencies = [
  "gethostname",
  "grey-api",
  "grey-ui",
+ "hex",
+ "hmac",
  "http 1.4.2",
  "humantime",
  "humantime-serde",
@@ -2220,6 +2222,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2 0.10.9",
  "sys_traits",
  "tempfile",
  "tokio",
@@ -2228,6 +2231,7 @@ dependencies = [
  "tracing",
  "tracing-batteries",
  "trust-dns-resolver",
+ "uuid",
  "wiremock",
  "yew",
 ]
@@ -5591,6 +5595,7 @@ version = "1.23.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "144d6b123cef80b301b8f72a9e2ca4370ddec21950d0a103dd22c437006d2db7"
 dependencies = [
+ "getrandom 0.4.2",
  "js-sys",
  "serde_core",
  "wasm-bindgen",

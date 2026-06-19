@@ -51,6 +51,12 @@ impl Probe {
         }
     }
 
+    /// The derived status token used to describe the probe in notifications: `"passing"` or
+    /// `"failing"`. This is the probe analogue of [`crate::CronHealth::as_str`].
+    pub fn status_token(&self) -> &'static str {
+        if self.passing() { "passing" } else { "failing" }
+    }
+
     /// Calculate recent availability percentage based on successful vs total samples
     pub fn recent(&self, max_hours: usize) -> Observation {
         self

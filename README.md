@@ -12,6 +12,7 @@ they fail.
 - Native OpenTelemetry integration, including trace propagation.
 - Supports multiple health probes, including HTTP, gRPC, TCP, DNS, and custom JavaScript scripts.
 - Passive cron monitoring (a "deadman's switch") for scheduled jobs that check in instead of being probed.
+- Webhook notifications on probe/cron state changes, signed with a shared secret and filtered with the same expression language as checks, for integration with incident-management and automation tools.
 
 ## Usage
 Grey is a self contained binary which is expected to be executed with a YAML
