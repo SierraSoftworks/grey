@@ -93,12 +93,16 @@ pub fn referenced_fields(check: &Filter) -> Vec<&str> {
     collector.fields
 }
 
-/// Renders the sample fields a check consulted and the values they held, to aid
-/// debugging when the check fails — for example
-/// `http.status=503, http.header.content-type="text/html…"`.
+/// Renders the sample fields a check consulted and the values they held, one
+/// per line, to aid debugging when the check fails — for example:
+///
+/// ```text
+/// http.status=503
+/// http.header.content-type="text/html…"
+/// ```
 ///
 /// Returns an empty string when the check references no fields (e.g. a constant
-/// expression), so callers can omit the "observed" clause entirely.
+/// expression), so callers can fall back to a generic message.
 pub fn observed_fields(check: &Filter, sample: &Sample) -> String {
     observed_fields_with_limits(check, sample, DEFAULT_MAX_FIELDS, DEFAULT_MAX_VALUE_LEN)
 }
@@ -128,26 +132,39 @@ fn observed_fields_with_limits(
         parts.push(format!("and {} more", fields.len() - max_fields));
     }
 
-    parts.join(", ")
+    parts.join("\n")
 }
 
-/// Builds the `(probe-level message, per-check detail)` pair for a failed check.
+/// The failure message stored for a check that evaluated to `false`.
 ///
-/// The probe-level message names the check so the top-line probe status has
-/// context for which expression failed. The per-check detail deliberately omits
-/// the expression — it is the key in the validations map, so repeating it would
-/// be redundant — and both append the observed field values to aid debugging.
-pub fn describe_failure(check: &Filter, sample: &Sample, reason: String) -> (String, String) {
+/// The UI already shows the check expression (it is the validations map key) and
+/// the failed state (the `pass` flag), so the message carries only what those
+/// can't: the sample fields the check consulted and the values they held. When
+/// the check references no fields there is nothing useful to add, so a terse
+/// generic note is used instead.
+pub fn unmatched_message(check: &Filter, sample: &Sample) -> String {
     let observed = observed_fields(check, sample);
-    let suffix = if observed.is_empty() {
-        String::new()
+    if observed.is_empty() {
+        "The check did not pass.".to_string()
     } else {
-        format!(" Observed {observed}.")
-    };
+        observed
+    }
+}
 
-    let probe_message = format!("The check '{check}' {reason}.{suffix}");
-    let detail = format!("{}.{suffix}", capitalise_first(&reason));
-    (probe_message, detail)
+/// The failure message stored for a check that could not be evaluated at all
+/// (for example a type error in the expression). Here the error is the relevant
+/// information, followed by any fields the check referenced.
+pub fn evaluation_error_message(
+    check: &Filter,
+    sample: &Sample,
+    error: impl std::fmt::Display,
+) -> String {
+    let observed = observed_fields(check, sample);
+    if observed.is_empty() {
+        format!("The check could not be evaluated: {error}.")
+    } else {
+        format!("The check could not be evaluated: {error}.\n{observed}")
+    }
 }
 
 /// Truncates `value` to at most `max_len` characters (respecting char
@@ -158,15 +175,6 @@ fn truncate(value: &str, max_len: usize) -> String {
     } else {
         let kept: String = value.chars().take(max_len).collect();
         format!("{kept}…")
-    }
-}
-
-/// Upper-cases the first character of `s`, leaving the rest untouched.
-fn capitalise_first(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().chain(chars).collect(),
-        None => String::new(),
     }
 }
 
@@ -228,7 +236,7 @@ mod tests {
         let check = filter(r#"http.status == 200 && http.header.content-type == "application/json""#);
         assert_eq!(
             observed_fields(&check, &sample),
-            r#"http.status=503, http.header.content-type="text/html""#
+            "http.status=503\nhttp.header.content-type=\"text/html\""
         );
     }
 
@@ -253,7 +261,7 @@ mod tests {
         let sample = Sample::default();
         let check = filter("a == 1 && b == 2 && c == 3");
         let summary = observed_fields_with_limits(&check, &sample, 2, 64);
-        assert_eq!(summary, "a=null, b=null, and 1 more");
+        assert_eq!(summary, "a=null\nb=null\nand 1 more");
     }
 
     #[test]
@@ -263,32 +271,49 @@ mod tests {
     }
 
     #[test]
-    fn describe_failure_names_the_check_only_in_the_probe_message() {
-        let sample = Sample::default().with("http.status", 503);
-        let check = filter("http.status == 200");
-        let (probe_message, detail) = describe_failure(&check, &sample, "did not pass".to_string());
+    fn unmatched_message_is_just_the_observed_fields() {
+        let sample = Sample::default()
+            .with("http.status", 503)
+            .with("http.header.content-type", "text/html");
+        let check =
+            filter(r#"http.status == 200 && http.header.content-type == "application/json""#);
+        let message = unmatched_message(&check, &sample);
 
         assert_eq!(
-            probe_message,
-            "The check 'http.status == 200' did not pass. Observed http.status=503."
+            message,
+            "http.status=503\nhttp.header.content-type=\"text/html\""
         );
-        assert_eq!(detail, "Did not pass. Observed http.status=503.");
-        // The per-check detail must not repeat the expression (it is the map key).
-        assert!(!detail.contains("http.status == 200"));
+        // The UI already shows the expression (the map key) and the failed state, so the message
+        // must not restate either.
+        assert!(!message.contains("http.status == 200"));
+        assert!(!message.to_lowercase().contains("did not"));
     }
 
     #[test]
-    fn describe_failure_omits_the_observed_clause_without_fields() {
+    fn unmatched_message_falls_back_when_no_fields_are_referenced() {
         let sample = Sample::default();
-        let check = filter("true");
-        let (probe_message, detail) = describe_failure(&check, &sample, "did not pass".to_string());
-        assert_eq!(probe_message, "The check 'true' did not pass.");
-        assert_eq!(detail, "Did not pass.");
+        assert_eq!(
+            unmatched_message(&filter("true"), &sample),
+            "The check did not pass."
+        );
     }
 
     #[test]
-    fn capitalise_first_handles_empty_and_non_empty_input() {
-        assert_eq!(capitalise_first(""), "");
-        assert_eq!(capitalise_first("did not pass"), "Did not pass");
+    fn evaluation_error_message_includes_the_error_and_fields() {
+        let sample = Sample::default().with("http.status", 503);
+        let check = filter("http.status == 200");
+        assert_eq!(
+            evaluation_error_message(&check, &sample, "type mismatch"),
+            "The check could not be evaluated: type mismatch.\nhttp.status=503"
+        );
+    }
+
+    #[test]
+    fn evaluation_error_message_without_fields() {
+        let sample = Sample::default();
+        assert_eq!(
+            evaluation_error_message(&filter("true"), &sample, "boom"),
+            "The check could not be evaluated: boom."
+        );
     }
 }
