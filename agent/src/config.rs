@@ -199,9 +199,6 @@ pub struct UiConfig {
     pub logo: String,
 
     #[serde(default)]
-    pub notices: Vec<grey_api::UiNotice>,
-
-    #[serde(default)]
     pub links: Vec<grey_api::UiLink>,
 
     #[serde(default = "default::ui::reload_interval")]
@@ -222,7 +219,6 @@ impl Default for UiConfig {
             listen: default::ui::listen(),
             title: default::ui::title(),
             logo: default::ui::logo(),
-            notices: vec![],
             links: vec![],
             reload_interval: default::ui::reload_interval(),
             admin: None,
@@ -383,18 +379,15 @@ mod tests {
             .expect("example.checks probe should be present");
         assert_eq!(probe.checks.len(), 2);
 
-        // The probe that mixes a classic validator with a check round-trips both.
-        let mixed = config
+        // A check renders as its raw expression, which is what gets reported.
+        let github = config
             .probes
             .iter()
             .find(|p| p.name == "github.repo")
             .expect("github.repo probe should be present");
-        assert_eq!(mixed.validators.len(), 1);
-        assert_eq!(mixed.checks.len(), 1);
-
-        // A check renders as its raw expression, which is what gets reported.
+        assert_eq!(github.checks.len(), 2);
         assert_eq!(
-            mixed.checks[0].to_string(),
+            github.checks[1].to_string(),
             r#"http.header.content-type matches r"^text/html""#
         );
     }

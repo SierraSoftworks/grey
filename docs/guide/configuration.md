@@ -87,21 +87,6 @@ does not match.
 You can read more about the expression language and the available operators in the
 [Checks](../checks/README.md) section of the documentation.
 
-### Validators
-
-::: warning Deprecated
-The `validators` property is deprecated in favour of [checks](#checks). It continues to work,
-but new probes should use checks and existing probes should migrate when convenient — see
-[Migrating from validators](../checks/README.md#migrating-from-validators).
-:::
-
-The `validators` property defines a set of per-field validators that will be used to assert
-that the target is healthy. Each validator targets a specific field and accepts a distinct
-set of configuration options which are documented on their respective pages.
-
-You can read more about the various validators in the [Validators](../validators/README.md)
-section of the documentation.
-
 ::: tip
 You can read more about the fields available for each target in the [Targets](../targets/README.md)
 section of the documentation.

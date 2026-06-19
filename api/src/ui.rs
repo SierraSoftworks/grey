@@ -46,27 +46,6 @@ pub struct UiAuthConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct UiNotice {
-    pub title: String,
-    
-    pub description: String,
-    
-    #[serde(default)]
-    pub timestamp: Option<chrono::DateTime<chrono::Utc>>,
-    
-    #[serde(default)]
-    pub level: Option<NoticeLevel>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum NoticeLevel {
-    Ok,
-    Warning,
-    Error,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct UiLink {
     pub title: String,
     pub url: String,

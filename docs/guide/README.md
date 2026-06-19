@@ -40,9 +40,8 @@ probes:
 
 ::: tip
 `checks` are validation expressions written in the
-[`filt-rs`](https://docs.rs/filt-rs/latest/filt_rs/) language and are the recommended way to
-assert that a target is healthy. The older per-field [validators](../validators/README.md)
-are deprecated but still supported. See the [Checks](../checks/README.md) guide for the full
+[`filt-rs`](https://docs.rs/filt-rs/latest/filt_rs/) language and are the way to
+assert that a target is healthy. See the [Checks](../checks/README.md) guide for the full
 expression language.
 :::
 

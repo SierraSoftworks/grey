@@ -17,9 +17,9 @@ probes:
     target: !Grpc
       url: https://api.example.com:443
       service: "myservice.v1.MyService"
-    validators:
-      grpc.status: !Equals "SERVING"
-      grpc.status_code: !Equals 1
+    checks:
+      - grpc.status == "SERVING"
+      - grpc.status_code == 1
 ```
 
 You can also check the overall server health by omitting the `service` field:
@@ -33,8 +33,8 @@ probes:
       retries: 2
     target: !Grpc
       url: https://api.example.com:443
-    validators:
-      grpc.status: !Equals "SERVING"
+    checks:
+      - grpc.status == "SERVING"
 ```
 
 ## Inputs
@@ -92,7 +92,7 @@ The `grpc.status_code` field contains the numeric representation of the health s
 - `2` - NOT_SERVING
 - `3` - SERVICE_UNKNOWN
 
-This can be useful for numeric comparisons in validators.
+This can be useful for numeric comparisons in checks.
 
 ## Protocol Details
 
@@ -123,15 +123,15 @@ probes:
     target: !Grpc
       url: https://user-service:443
       service: "users.v1.UserService"
-    validators:
-      grpc.status: !Equals "SERVING"
+    checks:
+      - grpc.status == "SERVING"
       
   - name: order-service  
     target: !Grpc
       url: https://order-service:443
       service: "orders.v1.OrderService"
-    validators:
-      grpc.status: !Equals "SERVING"
+    checks:
+      - grpc.status == "SERVING"
 ```
 
 ### Load Balancer Backend Health
@@ -142,14 +142,14 @@ probes:
   - name: backend-1
     target: !Grpc
       url: https://backend-1.internal:443
-    validators:
-      grpc.status: !OneOf ["SERVING", "UNKNOWN"]
+    checks:
+      - grpc.status in ["SERVING", "UNKNOWN"]
       
   - name: backend-2
     target: !Grpc
       url: https://backend-2.internal:443  
-    validators:
-      grpc.status: !OneOf ["SERVING", "UNKNOWN"]
+    checks:
+      - grpc.status in ["SERVING", "UNKNOWN"]
 ```
 
 ### Development Environment Checks
@@ -163,8 +163,8 @@ probes:
       service: "api.v1.ApiService"
     policy:
       interval: 2000
-    validators:
-      grpc.status: !Equals "SERVING"
+    checks:
+      - grpc.status == "SERVING"
 ```
 
 ### Private CA or Self-Signed Certificates
@@ -185,6 +185,6 @@ probes:
         ZXJuZXQgV2lkZ2l0cyBQdHkgTHRkMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIB
         CgKCAQEAwvKCS138dhybOhWHKlXLO8kB+2pQYOF4zWXJX7SiE0EWCKmNbLrKKZk7
         -----END CERTIFICATE-----
-    validators:
-      grpc.status: !Equals "SERVING"
+    checks:
+      - grpc.status == "SERVING"
 ```

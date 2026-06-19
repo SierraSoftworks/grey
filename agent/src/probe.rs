@@ -2,7 +2,7 @@ use std::{collections::HashMap, time::Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Policy, targets::TargetType, utils::random_start_offset, validators::ValidatorType};
+use crate::{Policy, targets::TargetType, utils::random_start_offset};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Probe {
@@ -11,12 +11,10 @@ pub struct Probe {
     pub target: TargetType,
     #[serde(default)]
     pub tags: HashMap<String, String>,
-    #[serde(default)]
-    pub validators: HashMap<String, ValidatorType>,
-    /// `filt-rs` expression checks evaluated against the whole sample, offered
-    /// alongside the per-field `validators` as a more expressive way to assert
-    /// on a probe's result. Each expression is parsed at config-load time and
-    /// reported as its own validation.
+    /// `filt-rs` expression checks evaluated against the whole sample as the way
+    /// to assert on a probe's result. Each expression is parsed at config-load
+    /// time and reported as its own validation. A probe fails as soon as any one
+    /// of its checks does not match.
     #[serde(default)]
     pub checks: Vec<filt_rs::Filter>,
 }
@@ -29,7 +27,6 @@ impl Probe {
             policy: crate::Policy { interval: std::time::Duration::from_secs(60), timeout: std::time::Duration::from_secs(5), retries: Some(3) },
             target: crate::targets::TargetType::test(),
             tags: HashMap::new(),
-            validators: vec![("output.test".into(), crate::validators::ValidatorType::test())].into_iter().collect(),
             checks: vec![filt_rs::Filter::new("output.test == true").unwrap()],
         }
     }

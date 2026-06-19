@@ -6,7 +6,7 @@ use std::{
 use tracing_batteries::prelude::{opentelemetry::trace::Status as OpenTelemetryStatus, *};
 
 use crate::{
-    Probe, Validator,
+    Probe,
     result::ProbeResult,
     state::{ProbeStore, State},
 };
@@ -129,7 +129,7 @@ impl ProbeRunner {
             .record("probe.policy.timeout", debug(&probe.policy.timeout))
             .record("probe.policy.retries", probe.policy.retries.unwrap_or(2))
             .record("probe.target", probe.target.to_string())
-            .record("probe.validators", debug(&probe.validators))
+            .record("probe.checks", debug(&probe.checks))
             .record("probe.tags", debug(&probe.tags));
 
         let result = async {
@@ -212,36 +212,6 @@ impl ProbeRunner {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let sample = probe.target.run(&self.cancel).await?;
         debug!(?sample, "Probe sample collected successfully.");
-        for (path, validator) in &probe.validators {
-            let name = format!("{} {}", path, validator);
-            let span = info_span!(
-                "probe.validate",
-                otel.name=name,
-                field=%path,
-                validator=%validator,
-                otel.status_code=?OpenTelemetryStatus::Unset,
-                otel.status_message=EmptyField
-            )
-            .entered();
-
-            match validator.validate(path, sample.get(path)) {
-                Ok(_) => {
-                    span.record("otel.status_code", "Ok");
-                    result
-                        .validations
-                        .insert(path.to_owned(), ValidationResult::pass(validator));
-                }
-                Err(err) => {
-                    span.record("otel.status_code", "Error")
-                        .record("otel.status_message", err.to_string());
-                    error!(error = err, "{}", err);
-                    result
-                        .validations
-                        .insert(path.to_owned(), ValidationResult::fail(validator, &err));
-                    return Err(err);
-                }
-            }
-        }
 
         for check in &probe.checks {
             let name = format!("check {}", check);

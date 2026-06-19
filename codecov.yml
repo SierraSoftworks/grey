@@ -1,0 +1,15 @@
+# Codecov configuration.
+#
+# The project status tolerates a small decrease in total coverage so that removing
+# well-tested code (for example during a refactor or feature removal) doesn't fail
+# CI even though no real coverage gap was introduced. The patch status stays strict,
+# so newly added or modified lines must still be covered by tests.
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: auto

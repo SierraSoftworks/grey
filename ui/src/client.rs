@@ -21,7 +21,6 @@ use super::components::{ErrorBanner, Header};
 #[derive(Default, Properties, PartialEq)]
 pub struct AppProps {
     pub config: grey_api::UiConfig,
-    pub notices: Vec<grey_api::UiNotice>,
     pub probes: Vec<grey_api::Probe>,
     #[prop_or_default]
     pub crons: Vec<grey_api::Cron>,
@@ -50,7 +49,6 @@ impl AppProps {
 
         Ok(Self {
             config,
-            notices: Vec::new(),
             probes: Vec::new(),
             crons: Vec::new(),
             incidents: Vec::new(),
@@ -69,9 +67,6 @@ impl AppProps {
         let config_data = app_element
             .get_attribute("data-config")
             .ok_or("#app[data-config] not found")?;
-        let notices_data = app_element
-            .get_attribute("data-notices")
-            .ok_or("#app[data-notices] not found")?;
         let probes_data = app_element
             .get_attribute("data-probes")
             .ok_or("#app[data-probes] not found")?;
@@ -80,7 +75,6 @@ impl AppProps {
         let crons_data = app_element.get_attribute("data-crons");
 
         let config: UiConfig = serde_json::from_str(&config_data)?;
-        let notices: Vec<grey_api::UiNotice> = serde_json::from_str(&notices_data)?;
         let probes: Vec<grey_api::Probe> = serde_json::from_str(&probes_data)?;
         let incidents: Vec<grey_api::IncidentView> = incidents_data
             .and_then(|data| serde_json::from_str(&data).ok())
@@ -91,7 +85,6 @@ impl AppProps {
 
         Ok(Self {
             config,
-            notices,
             probes,
             crons,
             incidents,
@@ -106,7 +99,6 @@ impl AppProps {
 #[function_component(App)]
 pub fn app(props: &AppProps) -> Html {
     let config_json = serde_json::to_string(&props.config).unwrap_or_default();
-    let notices_json = serde_json::to_string(&props.notices).unwrap_or_default();
     let probes_json = serde_json::to_string(&props.probes).unwrap_or_default();
     let crons_json = serde_json::to_string(&props.crons).unwrap_or_default();
     let incidents_json = serde_json::to_string(&props.incidents).unwrap_or_default();
@@ -114,14 +106,12 @@ pub fn app(props: &AppProps) -> Html {
     html! {
         <div id="app"
             data-config={config_json}
-            data-notices={notices_json}
             data-probes={probes_json}
             data-crons={crons_json}
             data-incidents={incidents_json}
         >
             <StoreProvider
                 config={props.config.clone()}
-                notices={props.notices.clone()}
                 probes={props.probes.clone()}
                 crons={props.crons.clone()}
                 incidents={props.incidents.clone()}
