@@ -186,6 +186,21 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v7
 
+      # Set up the cache before fetching the versioned Cargo.toml.
+      # Swatinem/rust-cache derives its cache key from the contents of
+      # Cargo.toml/Cargo.lock, so restoring the version-bumped Cargo.toml first
+      # would change the key on release builds and prevent any cache from being
+      # restored, forcing a full rebuild every time.
+      - name: Setup Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Give each matrix entry its own cache scope. Without this, every
+          # entry in the matrix shares the same automatic cache key (derived
+          # from the job name + Cargo.lock), so the jobs clobber one another's
+          # caches and targets like aarch64 (built via cross) never get a
+          # usable cache restored, forcing a full rebuild on every run.
+          key: ${{ matrix.target }}
+
       - name: Fetch Versioned Cargo.toml
         uses: actions/download-artifact@v8
         with:
@@ -196,16 +211,6 @@ jobs:
         with:
           name: ui-build
           path: ./ui/dist
-
-      - name: Setup Cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          # Give each matrix entry its own cache scope. Without this, every
-          # entry in the matrix shares the same automatic cache key (derived
-          # from the job name + Cargo.lock), so the jobs clobber one another's
-          # caches and targets like aarch64 (built via cross) never get a
-          # usable cache restored, forcing a full rebuild on every run.
-          key: ${{ matrix.target }}
 
       - name: Install cross
         if: ${{ matrix.cross }}
