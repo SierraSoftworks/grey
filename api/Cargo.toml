@@ -13,6 +13,16 @@ chrono.workspace = true
 croner.workspace = true
 humantime-serde.workspace = true
 
+# Server-side glue (the `impl Into<HttpResponse>` for `ApiError`, etc.) lives behind the `server`
+# feature so the UI can depend on this crate for its shared domain types without pulling actix-web
+# (and its transitive dependencies) into the WASM build.
+actix-web = { workspace = true, optional = true }
+
+[features]
+# Compiles the server-only conveniences: turning an `ApiError` into an actix `HttpResponse`/response
+# error so handlers can return it directly. The agent enables this; the UI does not.
+server = ["dep:actix-web"]
+
 [dev-dependencies]
 rmp-serde.workspace = true
 serde_json.workspace = true

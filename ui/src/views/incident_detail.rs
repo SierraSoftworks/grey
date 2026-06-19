@@ -1,8 +1,13 @@
 use grey_api::Identifier;
 use yew::prelude::*;
 
-use crate::components::{IncidentBlock, StatusDot};
+use crate::components::IncidentBlock;
 use crate::contexts::use_store;
+// `StatusDot` and `time_format` are only used by the wasm-only admin editor below, so they are
+// unused in the SSR build.
+#[cfg(not(feature = "ssr"))]
+use crate::components::StatusDot;
+#[cfg(not(feature = "ssr"))]
 use crate::formatters::time_format;
 
 /// The `/incidents/{id}` page. Public visitors see the read-only incident; signed-in administrators
@@ -289,7 +294,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                         <div class="incident-timeline__body">
                             <div class="incident-timeline__time">
                                 <select onchange={on_new_impact}>
-                                    { for [Impact::Offline, Impact::Degraded, Impact::None, Impact::Hidden].into_iter().map(|opt| html! {
+                                    { for Impact::ALL.into_iter().map(|opt| html! {
                                         <option value={opt.as_str()} selected={opt.as_str() == *new_impact}>{opt.label()}</option>
                                     }) }
                                 </select>

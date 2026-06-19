@@ -16,6 +16,9 @@
 //! Everything the browser calls is same-origin (the agent), so the provider never needs to permit
 //! cross-origin requests. Browser-only; the SSR build gets inert stubs.
 
+// Consumed by the wasm `browser` implementation and by the non-SSR stubs; the SSR build references
+// neither, so the import is excluded there to stay warning-free.
+#[cfg(any(feature = "wasm", not(feature = "ssr")))]
 use grey_api::UiAuthConfig;
 
 #[cfg(feature = "wasm")]
@@ -310,27 +313,39 @@ pub use browser::{
 // Inert SSR stubs so the shared component tree compiles without the browser-only dependencies.
 #[cfg(not(feature = "wasm"))]
 mod stub {
+    // Only the sign-out path runs during server rendering; every other entrypoint is reached solely
+    // from `#[cfg(feature = "wasm")]` code, so those stubs are excluded from the SSR build (where they
+    // would otherwise be flagged as dead code) via `not(feature = "ssr")`.
+    #[cfg(not(feature = "ssr"))]
     use super::UiAuthConfig;
 
+    pub fn clear_token() {}
+
+    #[cfg(not(feature = "ssr"))]
     pub fn stored_token() -> Option<String> {
         None
     }
-    pub fn clear_token() {}
+    #[cfg(not(feature = "ssr"))]
     pub fn has_pending_callback() -> bool {
         false
     }
+    #[cfg(not(feature = "ssr"))]
     pub async fn begin_login(_config: &UiAuthConfig) -> Result<Option<String>, String> {
         Ok(None)
     }
+    #[cfg(not(feature = "ssr"))]
     pub async fn complete_callback(_config: &UiAuthConfig) -> Result<Option<String>, String> {
         Ok(None)
     }
+    #[cfg(not(feature = "ssr"))]
     pub async fn refresh_session() -> Result<String, String> {
         Err("session renewal is unavailable during server rendering".into())
     }
 }
 
 #[cfg(not(feature = "wasm"))]
+pub use stub::clear_token;
+#[cfg(all(not(feature = "wasm"), not(feature = "ssr")))]
 pub use stub::{
-    begin_login, clear_token, complete_callback, has_pending_callback, refresh_session, stored_token,
+    begin_login, complete_callback, has_pending_callback, refresh_session, stored_token,
 };

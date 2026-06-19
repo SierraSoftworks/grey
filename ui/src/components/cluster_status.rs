@@ -15,12 +15,13 @@ pub fn cluster_status() -> Html {
         return html! {};
     }
 
-    // Current node first, then healthiest, then by id for a stable order.
+    // Current node first, then healthiest (PeerHealth is ordered healthiest-first), then by id for a
+    // stable order.
     let mut members = store.peers().to_vec();
     members.sort_by(|a, b| {
         b.current
             .cmp(&a.current)
-            .then_with(|| health_rank(a.health).cmp(&health_rank(b.health)))
+            .then_with(|| a.health.cmp(&b.health))
             .then_with(|| a.id.cmp(&b.id))
     });
 
@@ -62,28 +63,9 @@ fn render_member(peer: &Peer) -> Html {
                     <span class="peer__current-tag">{"this node"}</span>
                 }
             </div>
-            <span class={format!("peer__health {class}")}>{health_label(peer.health)}</span>
+            <span class={format!("peer__health {class}")}>{peer.health.label()}</span>
             <span class="peer__last-seen">{relative_time(peer.last_seen)}</span>
         </div>
-    }
-}
-
-/// Sort key placing healthier peers first.
-fn health_rank(health: PeerHealth) -> u8 {
-    match health {
-        PeerHealth::Online => 0,
-        PeerHealth::Transitive => 1,
-        PeerHealth::Suspect => 2,
-        PeerHealth::Offline => 3,
-    }
-}
-
-fn health_label(health: PeerHealth) -> &'static str {
-    match health {
-        PeerHealth::Online => "Online",
-        PeerHealth::Transitive => "Transitive",
-        PeerHealth::Suspect => "Suspect",
-        PeerHealth::Offline => "Offline",
     }
 }
 
@@ -173,21 +155,6 @@ mod tests {
         .await;
         assert!(html.contains("cluster-status error"), "expected an offline member to error, got: {html}");
         assert!(html.contains("1/2 online"), "expected the online summary, got: {html}");
-    }
-
-    #[test]
-    fn test_health_rank_orders_healthiest_first() {
-        assert!(health_rank(PeerHealth::Online) < health_rank(PeerHealth::Transitive));
-        assert!(health_rank(PeerHealth::Transitive) < health_rank(PeerHealth::Suspect));
-        assert!(health_rank(PeerHealth::Suspect) < health_rank(PeerHealth::Offline));
-    }
-
-    #[test]
-    fn test_health_labels() {
-        assert_eq!(health_label(PeerHealth::Online), "Online");
-        assert_eq!(health_label(PeerHealth::Transitive), "Transitive");
-        assert_eq!(health_label(PeerHealth::Suspect), "Suspect");
-        assert_eq!(health_label(PeerHealth::Offline), "Offline");
     }
 
     #[test]
