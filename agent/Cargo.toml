@@ -40,6 +40,7 @@ futures-concurrency.workspace = true
 futures-lite.workspace = true
 hex.workspace = true
 hmac.workspace = true
+human-errors.workspace = true
 http.workspace = true
 humantime.workspace = true
 humantime-serde.workspace = true

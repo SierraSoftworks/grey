@@ -145,12 +145,6 @@ impl State {
         self.members.clone()
     }
 
-    /// This node's stable identifier, stamped onto the webhook events it emits so a downstream
-    /// consumer can attribute an observation to the node that made it.
-    pub fn node_id(&self) -> NodeID {
-        self.node_id
-    }
-
     /// Loads this instance's persistent [`NodeID`] from the database, generating and storing a fresh
     /// one on first run. Persisting the identity means a restart (via [`State::new`]) resumes the
     /// same node — continuing to advertise its probe state — instead of appearing as a new node

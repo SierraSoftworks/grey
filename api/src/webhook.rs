@@ -6,6 +6,11 @@
 //! transition under [`WebhookState`] for easy filtering and routing, alongside the full entity
 //! snapshot (the [`Probe`] — with its streak, history, observations and tags — or the [`Cron`] — with
 //! its runs and last check-in) so a consumer has everything it needs without a follow-up read.
+//!
+//! The payload mirrors the probe/cron API representation rather than any single node's view: the
+//! transition is derived from the cluster-converged [`crate::Streak`] (so recovery settling is
+//! already accounted for), and the embedded snapshot carries the observations reported by *every*
+//! observer. There is therefore no per-node identity on the event.
 
 use std::collections::HashMap;
 
@@ -99,9 +104,6 @@ pub struct WebhookEvent {
     /// When the event was generated.
     pub timestamp: DateTime<Utc>,
 
-    /// The node that observed the transition and emitted the event.
-    pub node: String,
-
     /// The entity whose state changed.
     pub entity: WebhookEntity,
 
@@ -118,12 +120,12 @@ pub struct WebhookEvent {
 }
 
 impl WebhookEvent {
-    /// Builds a `probe.state_changed` event from a (cluster-pooled) probe snapshot, given the status
-    /// it transitioned away from. The current state is derived from the snapshot.
+    /// Builds a `probe.state_changed` event from the cluster-pooled probe snapshot, given the status
+    /// it transitioned away from. The current state is derived from the snapshot's converged streak,
+    /// and the embedded snapshot carries every observer's observations.
     pub fn for_probe(
         id: impl Into<String>,
         timestamp: DateTime<Utc>,
-        node: impl Into<String>,
         probe: &Probe,
         previous_token: impl Into<String>,
         previous_healthy: bool,
@@ -132,7 +134,6 @@ impl WebhookEvent {
             id: id.into(),
             event: WebhookEventKind::ProbeStateChanged,
             timestamp,
-            node: node.into(),
             entity: WebhookEntity {
                 entity_type: WebhookEntityType::Probe,
                 name: probe.name.clone(),
@@ -151,12 +152,11 @@ impl WebhookEvent {
         }
     }
 
-    /// Builds a `cron.state_changed` event from a (cluster-pooled) cron snapshot evaluated at `now`,
+    /// Builds a `cron.state_changed` event from the cluster-pooled cron snapshot evaluated at `now`,
     /// given the status it transitioned away from.
     pub fn for_cron(
         id: impl Into<String>,
         timestamp: DateTime<Utc>,
-        node: impl Into<String>,
         cron: &Cron,
         now: DateTime<Utc>,
         previous_token: impl Into<String>,
@@ -167,7 +167,6 @@ impl WebhookEvent {
             id: id.into(),
             event: WebhookEventKind::CronStateChanged,
             timestamp,
-            node: node.into(),
             entity: WebhookEntity {
                 entity_type: WebhookEntityType::Cron,
                 name: cron.name.clone(),
@@ -215,7 +214,7 @@ mod tests {
     #[test]
     fn probe_event_summarises_the_transition_and_carries_the_snapshot() {
         let probe = failing_probe("web.prod");
-        let event = WebhookEvent::for_probe("evt-1", ts(1_000), "node-a", &probe, "passing", true);
+        let event = WebhookEvent::for_probe("evt-1", ts(1_000), &probe, "passing", true);
 
         assert_eq!(event.event, WebhookEventKind::ProbeStateChanged);
         assert_eq!(event.entity.entity_type, WebhookEntityType::Probe);
@@ -243,7 +242,7 @@ mod tests {
         cron.push_run(CronRun { started_at: ts(100), status: CronStatus::Failed, duration: Some(Duration::from_secs(5)) });
         cron.last_checkin = Some(CheckIn { at: ts(105), status: CronStatus::Failed, message: "boom".into() });
 
-        let event = WebhookEvent::for_cron("evt-2", ts(200), "node-b", &cron, ts(200), "succeeded", true);
+        let event = WebhookEvent::for_cron("evt-2", ts(200), &cron, ts(200), "succeeded", true);
 
         assert_eq!(event.event, WebhookEventKind::CronStateChanged);
         assert_eq!(event.entity.entity_type, WebhookEntityType::Cron);
@@ -258,7 +257,7 @@ mod tests {
     #[test]
     fn serialises_with_a_stable_external_shape() {
         let probe = failing_probe("web.prod");
-        let event = WebhookEvent::for_probe("evt-1", ts(1_000), "node-a", &probe, "passing", true);
+        let event = WebhookEvent::for_probe("evt-1", ts(1_000), &probe, "passing", true);
         let json = serde_json::to_value(&event).unwrap();
 
         assert_eq!(json["event"], "probe.state_changed");
@@ -270,5 +269,7 @@ mod tests {
         assert!(json["probe"]["streak"].is_object());
         assert!(json["probe"]["observations"].is_object());
         assert!(json.get("cron").is_none(), "the cron field is omitted for probe events");
+        // The payload matches the probe/cron API shape: there is no per-node identity on it.
+        assert!(json.get("node").is_none(), "events carry no node field");
     }
 }

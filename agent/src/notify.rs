@@ -8,11 +8,17 @@
 //! grace elapses. Re-deriving the displayed state on a fixed cadence (the same derivation the UI
 //! renders) captures both event- and time-driven transitions with one mechanism.
 //!
-//! The last-seen status is tracked per node, in memory. On startup the first pass seeds the baseline
-//! silently, so a restart never replays the state every entity is already in — only genuine
-//! transitions observed thereafter are notified. In a cluster each node evaluates its own pooled view
-//! and notifies independently; operators who want a single notification should configure webhooks on
-//! one node (or de-duplicate downstream on the `Grey-Webhook-Delivery`/entity identity).
+//! Transitions are read from the cluster-converged [`grey_api::Streak`] (probes) and the derived cron
+//! health, both of which already fold in every observer's reports and the recovery settling window —
+//! so an event represents the *cluster's* view of an entity, not a single node's observation, and the
+//! published payload mirrors the probe/cron API shape (it carries no node identity). The emitted
+//! snapshot includes the observations reported by every observer.
+//!
+//! The last-seen status is tracked in memory. On startup the first pass seeds the baseline silently,
+//! so a restart never replays the state every entity is already in — only genuine transitions
+//! observed thereafter are notified. Because the converged state is identical on every node,
+//! operators typically configure webhooks on a single node; the `Grey-Webhook-Delivery` header still
+//! lets a consumer de-duplicate if the same webhook is configured on several nodes.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -84,7 +90,6 @@ impl Notifier {
     /// the state every entity is already in.
     async fn evaluate(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let config = self.state.get_config();
-        let node = self.state.node_id().to_string();
         let now = Utc::now();
 
         let probes = self.state.get_probe_states().await?;
@@ -92,7 +97,6 @@ impl Notifier {
 
         let events = detect_transitions(
             &mut self.last,
-            &node,
             now,
             &probes,
             &crons,
@@ -154,7 +158,6 @@ impl Notifier {
 /// its token actually changed — so the first time an entity is seen it is seeded silently.
 fn detect_transitions(
     last: &mut HashMap<String, Status>,
-    node: &str,
     now: DateTime<Utc>,
     probes: &HashMap<String, Probe>,
     crons: &HashMap<String, Cron>,
@@ -164,6 +167,7 @@ fn detect_transitions(
 
     for (name, probe) in probes {
         let key = format!("probe:{name}");
+        // The token is derived from the cluster-converged streak (recovery settling included).
         let token = probe.status_token();
         let healthy = probe.passing();
 
@@ -174,7 +178,6 @@ fn detect_transitions(
             events.push(WebhookEvent::for_probe(
                 new_id(),
                 now,
-                node,
                 probe,
                 previous.token.clone(),
                 previous.healthy,
@@ -197,7 +200,6 @@ fn detect_transitions(
             events.push(WebhookEvent::for_cron(
                 new_id(),
                 now,
-                node,
                 cron,
                 now,
                 previous.token.clone(),
@@ -217,10 +219,21 @@ fn new_id() -> String {
 }
 
 /// Whether `filter` matches `event`, evaluating the expression against the event's exposed fields.
-fn event_matches(filter: &Filter, event: &WebhookEvent) -> Result<bool, Box<dyn std::error::Error>> {
-    filter
-        .matches(&WebhookEventFilter(event))
-        .map_err(|e| format!("{e}").into())
+///
+/// `filt-rs` already returns a [`human_errors::Error`] (carrying actionable advice); we wrap it with
+/// the offending expression and pointers to the documented fields so an operator can fix a bad filter
+/// in their configuration without reading the source.
+fn event_matches(filter: &Filter, event: &WebhookEvent) -> Result<bool, filt_rs::Error> {
+    filter.matches(&WebhookEventFilter(event)).map_err(|e| {
+        human_errors::wrap_user(
+            e,
+            format!("Failed to evaluate the webhook filter '{}'.", filter.raw()),
+            &[
+                "Check that the filter expression in your webhook configuration is valid filt-rs syntax.",
+                "Only the fields documented in docs/guide/webhooks.md (event, entity.*, state.*) are available to a webhook filter.",
+            ],
+        )
+    })
 }
 
 /// Delivers one event to one webhook: POSTs the (already serialized) JSON body with Grey's
@@ -251,7 +264,7 @@ async fn deliver(
     webhook: &WebhookConfig,
     event: &WebhookEvent,
     body: Vec<u8>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), human_errors::Error> {
     // Sign and stamp with the event's own timestamp so the `t=` a receiver verifies against matches
     // the `timestamp` in the payload.
     let timestamp = event.timestamp.timestamp();
@@ -275,11 +288,28 @@ async fn deliver(
         request = request.header(name.as_str(), value.as_str());
     }
 
-    let response = request
-        .body(body)
-        .send()
-        .await
-        .map_err(|e| format!("failed to send the request to {}: {e}", webhook.endpoint))?;
+    // Propagate the current (`webhook.deliver`) trace context via W3C `traceparent`/`tracestate`, so a
+    // receiver that records traces can stitch its handling onto Grey's delivery span. With no
+    // telemetry pipeline configured the propagator is a no-op and the carrier stays empty.
+    let mut carrier = HashMap::new();
+    tracing_batteries::prelude::opentelemetry::global::get_text_map_propagator(|propagator| {
+        propagator.inject_context(&Span::current().context(), &mut carrier)
+    });
+    for (name, value) in carrier {
+        request = request.header(name, value);
+    }
+
+    let response = request.body(body).send().await.map_err(|e| {
+        // A transport failure (DNS, connection, TLS, timeout) is an environmental/system problem.
+        human_errors::wrap_system(
+            e,
+            format!("Could not deliver a webhook notification to '{}'.", webhook.endpoint),
+            &[
+                "Check that the endpoint URL is correct and reachable from this host (DNS, firewall, TLS).",
+                "If the endpoint is healthy this is likely transient; the next state change will be delivered.",
+            ],
+        )
+    })?;
 
     let status = response.status();
     Span::current().record("http.status_code", status.as_u16());
@@ -287,8 +317,31 @@ async fn deliver(
     if status.is_success() {
         debug!(name: "webhook.delivered", { webhook = webhook.label(), event.id = event.id, entity = event.entity.name, http.status_code = status.as_u16() }, "Delivered webhook event.");
         Ok(())
+    } else if status.is_client_error() {
+        // A 4xx is almost always a configuration problem at the Grey end (wrong URL, missing or
+        // invalid auth header, a payload the endpoint won't accept).
+        Err(human_errors::user(
+            format!(
+                "The webhook endpoint '{}' rejected the notification with HTTP {status}.",
+                webhook.endpoint
+            ),
+            &[
+                "Check that the endpoint accepts an HTTP POST with a JSON body at this URL.",
+                "If the endpoint requires authentication, set the necessary header(s) under this webhook's `headers`.",
+            ],
+        ))
     } else {
-        Err(format!("the endpoint returned a non-success status ({status})").into())
+        // A 5xx (or other non-success) is a fault on the receiving side.
+        Err(human_errors::system(
+            format!(
+                "The webhook endpoint '{}' returned a server error (HTTP {status}).",
+                webhook.endpoint
+            ),
+            &[
+                "Check the health of the receiving service; Grey delivered the request but it could not process it.",
+                "This is often transient; the next state change will be delivered.",
+            ],
+        ))
     }
 }
 
@@ -304,7 +357,7 @@ fn sign(secret: &str, timestamp: i64, body: &[u8]) -> String {
 }
 
 /// Exposes a [`WebhookEvent`]'s fields to the `filt-rs` filter language. The addressable fields are:
-/// `event`, `node`, `entity.type` (alias `entity.kind`), `entity.name`, `entity.tags.<key>` (alias
+/// `event`, `entity.type` (alias `entity.kind`), `entity.name`, `entity.tags.<key>` (alias
 /// `tags.<key>`), and the `state.*` summary (`current`, `previous`, `healthy`, `was_healthy`,
 /// `availability`). Unknown keys resolve to null, matching `filt-rs`'s own convention.
 struct WebhookEventFilter<'a>(&'a WebhookEvent);
@@ -314,7 +367,6 @@ impl Filterable for WebhookEventFilter<'_> {
         let event = self.0;
         match key {
             "event" => string(event.event.as_str()),
-            "node" => string(&event.node),
             "entity.type" | "entity.kind" => string(event.entity.entity_type.as_str()),
             "entity.name" => string(&event.entity.name),
             "state.current" => string(&event.state.current),
@@ -404,11 +456,11 @@ mod tests {
         let empty_crons = HashMap::new();
 
         // First pass seeds "passing" and fires nothing.
-        let events = detect_transitions(&mut last, "node", now, &passing, &empty_crons, true);
+        let events = detect_transitions(&mut last, now, &passing, &empty_crons, true);
         assert!(events.is_empty(), "the first observation must seed silently");
 
         // The probe goes failing: one event, summarising the transition.
-        let events = detect_transitions(&mut last, "node", now, &failing, &empty_crons, true);
+        let events = detect_transitions(&mut last, now, &failing, &empty_crons, true);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].state.previous, "passing");
         assert_eq!(events[0].state.current, "failing");
@@ -416,7 +468,7 @@ mod tests {
         assert!(events[0].state.was_healthy);
 
         // No further change: nothing fires.
-        let events = detect_transitions(&mut last, "node", now, &failing, &empty_crons, true);
+        let events = detect_transitions(&mut last, now, &failing, &empty_crons, true);
         assert!(events.is_empty());
     }
 
@@ -430,12 +482,12 @@ mod tests {
         let crons = HashMap::new();
 
         // notify=false: no events, but the baseline is recorded as "failing".
-        let events = detect_transitions(&mut last, "node", now, &failing, &crons, false);
+        let events = detect_transitions(&mut last, now, &failing, &crons, false);
         assert!(events.is_empty());
 
         // Now notifying, with the same (failing) state: still nothing, because it matches the seeded
         // baseline rather than being treated as a fresh transition.
-        let events = detect_transitions(&mut last, "node", now, &failing, &crons, true);
+        let events = detect_transitions(&mut last, now, &failing, &crons, true);
         assert!(events.is_empty());
     }
 
@@ -449,8 +501,8 @@ mod tests {
         let succeeded = HashMap::from([("backup".to_string(), cron("backup", CronStatus::Succeeded))]);
         let failed = HashMap::from([("backup".to_string(), cron("backup", CronStatus::Failed))]);
 
-        assert!(detect_transitions(&mut last, "node", now, &probes, &succeeded, true).is_empty());
-        let events = detect_transitions(&mut last, "node", now, &probes, &failed, true);
+        assert!(detect_transitions(&mut last, now, &probes, &succeeded, true).is_empty());
+        let events = detect_transitions(&mut last, now, &probes, &failed, true);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].state.previous, "succeeded");
         assert_eq!(events[0].state.current, "failed");
@@ -461,7 +513,6 @@ mod tests {
         let event = WebhookEvent::for_probe(
             "id",
             Utc::now(),
-            "node-a",
             &probe("web.prod", true),
             "passing",
             true,
@@ -508,7 +559,6 @@ mod tests {
         let event = WebhookEvent::for_probe(
             "evt-1",
             Utc::now(),
-            "node-a",
             &probe("web.prod", true),
             "passing",
             true,
@@ -550,7 +600,7 @@ mod tests {
             .await;
 
         let wh = webhook(format!("{}/hook", server.uri()), None, "true");
-        let event = WebhookEvent::for_probe("evt", Utc::now(), "n", &probe("web", true), "passing", true);
+        let event = WebhookEvent::for_probe("evt", Utc::now(), &probe("web", true), "passing", true);
         let body = serde_json::to_vec(&event).unwrap();
         deliver(&reqwest::Client::new(), &wh, &event, body).await.unwrap();
 
@@ -571,7 +621,7 @@ mod tests {
             .await;
 
         let wh = webhook(format!("{}/hook", server.uri()), None, "true");
-        let event = WebhookEvent::for_probe("evt", Utc::now(), "n", &probe("web", true), "passing", true);
+        let event = WebhookEvent::for_probe("evt", Utc::now(), &probe("web", true), "passing", true);
         let body = serde_json::to_vec(&event).unwrap();
 
         let result = deliver(&reqwest::Client::new(), &wh, &event, body).await;
@@ -585,7 +635,7 @@ mod tests {
         // A reserved TEST-NET-1 address that won't accept connections; a short timeout bounds the test.
         let mut wh = webhook("http://192.0.2.1:9/hook".into(), None, "true");
         wh.timeout = Duration::from_millis(300);
-        let event = WebhookEvent::for_probe("evt", Utc::now(), "n", &probe("web", true), "passing", true);
+        let event = WebhookEvent::for_probe("evt", Utc::now(), &probe("web", true), "passing", true);
         let body = serde_json::to_vec(&event).unwrap();
 
         let result = deliver(&reqwest::Client::new(), &wh, &event, body).await;

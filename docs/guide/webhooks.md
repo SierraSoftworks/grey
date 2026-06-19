@@ -36,6 +36,11 @@ replays the state your services are already in — only genuine transitions obse
 delivered.
 
 ## The event payload
+The payload mirrors the probe/cron API representation rather than any single node's view: the
+transition is derived from the cluster-converged streak (probes) or cron health — which already fold
+in every observer's reports and the recovery settling window — and the embedded snapshot carries the
+observations from *every* observer. There is no per-node field on the event.
+
 Every delivery is an HTTP `POST` with a JSON body like this:
 
 ```json
@@ -43,7 +48,6 @@ Every delivery is an HTTP `POST` with a JSON body like this:
   "id": "0d6f1a3e-8b3b-4f9e-9b3a-2f0b8a6d1c44",
   "event": "probe.state_changed",
   "timestamp": "2026-06-19T12:00:00Z",
-  "node": "5f3c…",
   "entity": {
     "type": "probe",
     "name": "example.web",
@@ -66,7 +70,6 @@ Every delivery is an HTTP `POST` with a JSON body like this:
 | `id` | A unique identifier for the event, also sent in the `Grey-Webhook-Delivery` header. Use it to de-duplicate. |
 | `event` | `probe.state_changed` or `cron.state_changed`. |
 | `timestamp` | When the event was generated (and the value signed in the `t=` of the signature). |
-| `node` | The cluster node that observed the transition and emitted the event. |
 | `entity.type` | `probe` or `cron`. |
 | `entity.name` | The probe/cron name. |
 | `entity.tags` | The entity's configured tags. |
@@ -86,7 +89,12 @@ Grey-Webhook-Event: probe.state_changed
 Grey-Webhook-Delivery: 0d6f1a3e-8b3b-4f9e-9b3a-2f0b8a6d1c44
 Grey-Webhook-Timestamp: 1750334400
 Grey-Webhook-Signature: t=1750334400,v1=<hex HMAC-SHA256>
+traceparent: 00-<trace-id>-<span-id>-01
 ```
+
+When Grey has an OpenTelemetry pipeline configured it also propagates its trace context on each
+delivery as W3C `traceparent` (and `tracestate`) headers, so a receiver that records traces can
+stitch its handling onto Grey's delivery span.
 
 The signature scheme is the one [Tailscale documents for its
 webhooks](https://tailscale.com/docs/features/webhooks#verifying-an-event-signature): the `v1` value
@@ -124,7 +132,6 @@ The following fields are available to a filter:
 | Field | Type | Example |
 | ----- | ---- | ------- |
 | `event` | string | `event == "cron.state_changed"` |
-| `node` | string | the emitting node's id |
 | `entity.type` (alias `entity.kind`) | string | `entity.type == "probe"` |
 | `entity.name` | string | `entity.name matches r"^prod\."` |
 | `entity.tags.<key>` (alias `tags.<key>`) | string | `entity.tags.team == "Platform"` |
@@ -152,11 +159,14 @@ The `headers` map attaches extra headers to every delivery — for example an `A
 the receiving platform expects. They are sent alongside Grey's own signature and metadata headers.
 
 ## Behaviour in a cluster
-Each Grey node evaluates its own cluster-pooled view of probe and cron state and delivers
-notifications independently. If you configure the same webhook on several nodes, the endpoint will
-receive a delivery from each node that observes the transition (with a distinct `node` and
-`Grey-Webhook-Delivery`). To receive a single notification per transition, either configure the
-webhook on just one node, or de-duplicate downstream using the entity name and `state.current`.
+A webhook event represents the cluster's converged view of an entity, not a single node's
+observation: transitions are read from the gossiped streak / cron health (which every node converges
+on identically), and the snapshot carries every observer's data. You therefore don't need to run
+webhooks on every node — configuring them on a single node is sufficient and authoritative.
+
+If you do configure the same webhook on several nodes, the endpoint will receive one delivery per
+node on each transition; de-duplicate downstream using the `Grey-Webhook-Delivery` header or the
+entity name and `state.current`.
 
 ## Reliability
 Each delivery is attempted once, bounded by the per-webhook `timeout` (default 10s). Failures and
