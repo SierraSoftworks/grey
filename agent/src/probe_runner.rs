@@ -7,6 +7,7 @@ use tracing_batteries::prelude::{opentelemetry::trace::Status as OpenTelemetrySt
 
 use crate::{
     Probe,
+    checks::describe_failure,
     result::ProbeResult,
     state::{ProbeStore, State},
 };
@@ -218,34 +219,41 @@ impl ProbeRunner {
             let span = info_span!(
                 "probe.validate",
                 otel.name=name,
-                field=%check,
-                validator=%check,
+                check=%check,
                 otel.status_code=?OpenTelemetryStatus::Unset,
                 otel.status_message=EmptyField
             )
             .entered();
 
-            let outcome = match check.matches(&sample) {
-                Ok(true) => Ok(()),
-                Ok(false) => Err(format!("The check '{}' did not pass.", check)),
-                Err(e) => Err(format!("The check '{}' could not be evaluated: {}", check, e)),
+            // On failure, `describe_failure` builds a `(probe-level message, per-check detail)`
+            // pair: the probe-level message names the check for top-line context, while the detail
+            // stored in the validation result omits it (the check expression is the map key) and
+            // both append the sample fields the check consulted.
+            let failure = match check.matches(&sample) {
+                Ok(true) => None,
+                Ok(false) => Some(describe_failure(check, &sample, "did not pass".to_string())),
+                Err(e) => Some(describe_failure(
+                    check,
+                    &sample,
+                    format!("could not be evaluated: {e}"),
+                )),
             };
 
-            match outcome {
-                Ok(_) => {
+            match failure {
+                None => {
                     span.record("otel.status_code", "Ok");
                     result
                         .validations
-                        .insert(check.to_string(), ValidationResult::pass(check));
+                        .insert(check.to_string(), ValidationResult::pass());
                 }
-                Err(message) => {
-                    let err: Box<dyn std::error::Error> = message.into();
+                Some((probe_message, detail)) => {
                     span.record("otel.status_code", "Error")
-                        .record("otel.status_message", err.to_string());
+                        .record("otel.status_message", detail.as_str());
+                    let err: Box<dyn std::error::Error> = probe_message.into();
                     error!(error = err, "{}", err);
                     result
                         .validations
-                        .insert(check.to_string(), ValidationResult::fail(check, &err));
+                        .insert(check.to_string(), ValidationResult::fail(detail));
                     return Err(err);
                 }
             }

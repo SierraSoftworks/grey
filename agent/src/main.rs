@@ -6,6 +6,7 @@ use std::sync::atomic::AtomicBool;
 
 use clap::Parser;
 
+mod checks;
 mod cluster;
 mod config;
 mod cron;
