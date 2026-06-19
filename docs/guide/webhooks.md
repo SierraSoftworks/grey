@@ -45,6 +45,7 @@ Every delivery is an HTTP `POST` with a JSON body like this:
 
 ```json
 {
+  "version": "v1",
   "id": "0d6f1a3e-8b3b-4f9e-9b3a-2f0b8a6d1c44",
   "event": "probe.state_changed",
   "timestamp": "2026-06-19T12:00:00Z",
@@ -67,6 +68,7 @@ Every delivery is an HTTP `POST` with a JSON body like this:
 
 | Field | Description |
 | ----- | ----------- |
+| `version` | The payload schema version (`"v1"` today). Branch on it to handle future schema changes. |
 | `id` | A unique identifier for the event, also sent in the `Grey-Webhook-Delivery` header. Use it to de-duplicate. |
 | `event` | `probe.state_changed` or `cron.state_changed`. |
 | `timestamp` | When the event was generated (and the value signed in the `t=` of the signature). |

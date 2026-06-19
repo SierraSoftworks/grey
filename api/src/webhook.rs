@@ -19,6 +19,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Cron, Probe};
 
+/// The schema version stamped onto every [`WebhookEvent`]. Bump this when the payload shape changes
+/// in a way consumers need to discriminate; a consumer can branch on `version` to handle multiple
+/// schemas during a migration.
+pub const WEBHOOK_SCHEMA_VERSION: &str = "v1";
+
+/// The default schema version, used when deserializing a payload that predates the `version` field.
+fn default_schema_version() -> String {
+    WEBHOOK_SCHEMA_VERSION.to_string()
+}
+
 /// The kind of state-change event. The wire value is a dotted `"<entity>.state_changed"` token so a
 /// consumer can route on it directly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,6 +104,11 @@ pub struct WebhookState {
 /// A state-change notification for a single probe or cron, as delivered to a webhook endpoint.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WebhookEvent {
+    /// The payload schema version (`"v1"` today). Lets a consumer discriminate between schema
+    /// versions as the payload evolves; see [`WEBHOOK_SCHEMA_VERSION`].
+    #[serde(default = "default_schema_version")]
+    pub version: String,
+
     /// A unique identifier for this event, also echoed in the `Grey-Webhook-Delivery` header so a
     /// consumer can de-duplicate retried or fan-out deliveries.
     pub id: String,
@@ -131,6 +146,7 @@ impl WebhookEvent {
         previous_healthy: bool,
     ) -> Self {
         Self {
+            version: WEBHOOK_SCHEMA_VERSION.to_string(),
             id: id.into(),
             event: WebhookEventKind::ProbeStateChanged,
             timestamp,
@@ -164,6 +180,7 @@ impl WebhookEvent {
     ) -> Self {
         let health = cron.health(now);
         Self {
+            version: WEBHOOK_SCHEMA_VERSION.to_string(),
             id: id.into(),
             event: WebhookEventKind::CronStateChanged,
             timestamp,
@@ -260,6 +277,7 @@ mod tests {
         let event = WebhookEvent::for_probe("evt-1", ts(1_000), &probe, "passing", true);
         let json = serde_json::to_value(&event).unwrap();
 
+        assert_eq!(json["version"], "v1");
         assert_eq!(json["event"], "probe.state_changed");
         assert_eq!(json["entity"]["type"], "probe");
         assert_eq!(json["entity"]["name"], "web.prod");
