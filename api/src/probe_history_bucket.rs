@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Display};
+use std::collections::HashMap;
 
 use crate::Mergeable;
 use crate::observation::Observation;
@@ -67,26 +67,30 @@ impl Mergeable for ProbeHistoryBucket {
     }
 }
 
-/// Validation result within a probe result
+/// The outcome of evaluating a single check against a probe sample.
+///
+/// The check expression itself is the key in the [`ProbeHistoryBucket::validations`]
+/// map, so it is deliberately not duplicated here: this captures only the pass/fail
+/// status and an optional descriptive message (populated on failure, typically with
+/// the sample fields the check consulted).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct ValidationResult {
-    pub condition: String,
     pub pass: bool,
     pub message: Option<String>,
 }
 
 impl ValidationResult {
-    pub fn pass<P: Display>(probe: P) -> Self {
+    /// A passing check, with no message.
+    pub fn pass() -> Self {
         Self {
-            condition: probe.to_string(),
             pass: true,
             message: None,
         }
     }
 
-    pub fn fail<P: Display, M: ToString>(probe: P, message: M) -> Self {
+    /// A failing check carrying a descriptive message.
+    pub fn fail<M: ToString>(message: M) -> Self {
         Self {
-            condition: probe.to_string(),
             pass: false,
             message: Some(message.to_string()),
         }
@@ -121,7 +125,7 @@ mod tests {
             pass: false,
             message: "Timeout".into(),
             validations: vec![
-                ("response_time".into(), ValidationResult::fail("response_time", "Exceeded threshold")),
+                ("response_time".into(), ValidationResult::fail("Exceeded threshold")),
             ].into_iter().collect(),
             observations: vec![
                 ("observer2".into(), Observation { total_samples: 5, successful_samples: 3, total_retries: 2, total_latency: std::time::Duration::from_millis(700) }),
@@ -141,17 +145,15 @@ mod tests {
     
     #[test]
     fn test_validation_result_constructors() {
-        let pass_result = ValidationResult::pass("status_code_200");
+        let pass_result = ValidationResult::pass();
         assert!(pass_result.pass);
-        assert_eq!(pass_result.condition, "status_code_200");
         assert!(pass_result.message.is_none());
-        
-        let fail_result = ValidationResult::fail("status_code_200", "Received 500");
+
+        let fail_result = ValidationResult::fail("Received 500");
         assert!(!fail_result.pass);
-        assert_eq!(fail_result.condition, "status_code_200");
         assert_eq!(fail_result.message.unwrap(), "Received 500");
-        
-        let updated_result = ValidationResult::pass("status_code_200").with_message("Received 404");
+
+        let updated_result = ValidationResult::pass().with_message("Received 404");
         assert_eq!(updated_result.message.unwrap(), "Received 404");
     }
     
@@ -186,8 +188,8 @@ mod tests {
             pass: true,
             message: "All good".into(),
             validations: vec![
-                ("status_code".into(), ValidationResult::pass("status_code")),
-                ("response_time".into(), ValidationResult::fail("response_time", "Too slow")),
+                ("status_code".into(), ValidationResult::pass()),
+                ("response_time".into(), ValidationResult::fail("Too slow")),
             ].into_iter().collect(),
             observations: vec![
                 ("observer1".into(), Observation { total_samples: 10, successful_samples: 9, total_retries: 1, total_latency: std::time::Duration::from_millis(900) }),

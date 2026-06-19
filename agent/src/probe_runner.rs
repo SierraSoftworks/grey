@@ -6,7 +6,7 @@ use std::{
 use tracing_batteries::prelude::{opentelemetry::trace::Status as OpenTelemetryStatus, *};
 
 use crate::{
-    Probe,
+    Probe, checks,
     result::ProbeResult,
     state::{ProbeStore, State},
 };
@@ -218,34 +218,47 @@ impl ProbeRunner {
             let span = info_span!(
                 "probe.validate",
                 otel.name=name,
-                field=%check,
-                validator=%check,
+                check=%check,
                 otel.status_code=?OpenTelemetryStatus::Unset,
                 otel.status_message=EmptyField
             )
             .entered();
 
-            let outcome = match check.matches(&sample) {
-                Ok(true) => Ok(()),
-                Ok(false) => Err(format!("The check '{}' did not pass.", check)),
-                Err(e) => Err(format!("The check '{}' could not be evaluated: {}", check, e)),
+            // The check expression is the validations map key and the UI shows the pass/fail state,
+            // so the public failure message carries only what those can't: the sample fields the
+            // check consulted. The raw evaluation error is operator-only — it can expose internal
+            // detail and the message is served publicly — so it is kept to telemetry alone.
+            let (failure, otel_detail) = match check.matches(&sample) {
+                Ok(true) => (None, None),
+                Ok(false) => (Some(checks::unmatched_message(check, &sample)), None),
+                Err(e) => (
+                    Some(checks::evaluation_error_message(check, &sample)),
+                    Some(e.to_string()),
+                ),
             };
 
-            match outcome {
-                Ok(_) => {
+            match failure {
+                None => {
                     span.record("otel.status_code", "Ok");
                     result
                         .validations
-                        .insert(check.to_string(), ValidationResult::pass(check));
+                        .insert(check.to_string(), ValidationResult::pass());
                 }
-                Err(message) => {
-                    let err: Box<dyn std::error::Error> = message.into();
+                Some(message) => {
+                    // Telemetry gets the public message plus any operator-only detail (the raw
+                    // evaluation error); the status page (validation result + probe error) gets the
+                    // public message alone.
+                    let otel_message = match otel_detail {
+                        Some(detail) => format!("{message} ({detail})"),
+                        None => message.clone(),
+                    };
                     span.record("otel.status_code", "Error")
-                        .record("otel.status_message", err.to_string());
-                    error!(error = err, "{}", err);
+                        .record("otel.status_message", otel_message.as_str());
+                    error!(check = %check, "{otel_message}");
                     result
                         .validations
-                        .insert(check.to_string(), ValidationResult::fail(check, &err));
+                        .insert(check.to_string(), ValidationResult::fail(&message));
+                    let err: Box<dyn std::error::Error> = message.into();
                     return Err(err);
                 }
             }
