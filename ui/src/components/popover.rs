@@ -34,7 +34,7 @@ pub struct PopoverProps {
     /// How the popover anchors over its trigger.
     #[prop_or_default]
     pub align: PopoverAlign,
-    /// Colour class for the status dot (`ok`/`warn`/`error`/`unknown`/`draft`).
+    /// Colour class for the status dot (`ok`/`warn`/`error`/`running`/`unknown`/`draft`).
     pub status_class: AttrValue,
     /// The short status label shown next to the dot.
     pub status: AttrValue,

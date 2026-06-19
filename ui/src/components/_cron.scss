@@ -44,6 +44,7 @@
     &.ok { border-color: $color-status-ok; color: $color-status-ok; }
     &.warn { border-color: $color-status-warn; color: $color-status-warn; }
     &.error { border-color: $color-status-error; color: $color-status-error; }
+    &.running { border-color: $color-status-running; color: $color-status-running; }
     &.unknown { border-color: $color-status-unknown; color: $color-status-unknown; }
 }
 
@@ -107,6 +108,7 @@
     &.ok { background-color: $color-status-ok; }
     &.warn { background-color: $color-status-warn; }
     &.error { background-color: $color-status-error; }
+    &.running { background-color: $color-status-running; }
 }
 
 .cron__no-runs {

@@ -1,7 +1,8 @@
 use yew::prelude::*;
 
 /// A small, coloured status dot used across the UI. The `class` is the colour modifier (`ok`,
-/// `warn`, `error`, `unknown`, or `draft`), matching the status colour classes used elsewhere.
+/// `warn`, `error`, `running`, `unknown`, or `draft`), matching the status colour classes used
+/// elsewhere.
 /// `active` toggles the pulse animation, and `size` controls the diameter in pixels.
 #[derive(Properties, PartialEq)]
 pub struct StatusDotProps {
