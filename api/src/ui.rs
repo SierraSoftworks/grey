@@ -66,6 +66,18 @@ pub enum NoticeLevel {
     Error,
 }
 
+impl NoticeLevel {
+    /// The lowercase token matching the serde representation, which doubles as the CSS modifier class
+    /// for the notice (`ok` / `warning` / `error`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            NoticeLevel::Ok => "ok",
+            NoticeLevel::Warning => "warning",
+            NoticeLevel::Error => "error",
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct UiLink {
     pub title: String,
@@ -82,4 +94,20 @@ fn default_ui_logo() -> String {
 
 fn default_reload_interval() -> std::time::Duration {
     std::time::Duration::from_secs(60)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn notice_level_as_str_matches_the_serde_token() {
+        // The CSS class is the serde token, so the two must stay in lockstep.
+        for level in [NoticeLevel::Ok, NoticeLevel::Warning, NoticeLevel::Error] {
+            let token = serde_json::to_value(&level).unwrap();
+            assert_eq!(token, serde_json::Value::String(level.as_str().to_string()));
+        }
+        // In particular the warning class is "warning", not "warn".
+        assert_eq!(NoticeLevel::Warning.as_str(), "warning");
+    }
 }

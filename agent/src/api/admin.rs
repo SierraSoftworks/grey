@@ -1,7 +1,7 @@
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, Result, http::header, web};
 use grey_api::{
     AdminUser, ApiError, CreateIncident, CreateUpdate, Identifier, IncidentUpdateId, PutIncident,
-    PutUpdate,
+    PutUpdate, parse_if_match, version_etag,
 };
 use serde_json::{Map, Value};
 use std::str::FromStr;
@@ -30,15 +30,11 @@ fn too_large() -> HttpResponse {
         .into()
 }
 
-/// The ETag for an entity is its version, quoted per RFC 7232.
-fn etag(version: u64) -> String {
-    format!("\"{version}\"")
-}
-
-/// Parses the version out of an `If-Match` header (`"3"` or `W/"3"`), if present and numeric.
+/// Parses the version out of an `If-Match` header (`"3"` or `W/"3"`), if present and numeric. The
+/// header extraction stays here; the [`grey_api::parse_if_match`] codec owns the wire format.
 fn if_match_version(req: &HttpRequest) -> Option<u64> {
     let raw = req.headers().get(header::IF_MATCH)?.to_str().ok()?;
-    raw.trim().trim_start_matches("W/").trim_matches('"').parse::<u64>().ok()
+    parse_if_match(raw)
 }
 
 fn precondition_required() -> HttpResponse {
@@ -51,7 +47,7 @@ fn version_conflict(current: u64) -> HttpResponse {
     // Carries the current ETag alongside the standard 412 body so the client can retry the
     // check-and-set without a separate reload.
     HttpResponse::PreconditionFailed()
-        .insert_header((header::ETAG, etag(current)))
+        .insert_header((header::ETAG, version_etag(current)))
         .json(
             ApiError::precondition_failed("The resource was modified by someone else.")
                 .with_advice("Reload to see the latest version, then try again."),
@@ -109,7 +105,7 @@ pub async fn get_incident(
     };
     match data.state.get_incident(id).await? {
         Some(view) => Ok(HttpResponse::Ok()
-            .insert_header((header::ETAG, etag(view.incident.version)))
+            .insert_header((header::ETAG, version_etag(view.incident.version)))
             .json(view)),
         None => Ok(not_found()),
     }
@@ -126,7 +122,7 @@ pub async fn create_incident(
     }
     let view = data.state.create_incident(input.title, input.impact, input.message).await?;
     Ok(HttpResponse::Created()
-        .insert_header((header::ETAG, etag(view.incident.version)))
+        .insert_header((header::ETAG, version_etag(view.incident.version)))
         .json(view))
 }
 
@@ -147,7 +143,7 @@ pub async fn put_incident(
 
     match data.state.put_incident(id, expected, body.into_inner()).await? {
         CasOutcome::Updated(version, view) => Ok(HttpResponse::Ok()
-            .insert_header((header::ETAG, etag(version)))
+            .insert_header((header::ETAG, version_etag(version)))
             .json(view)),
         CasOutcome::VersionMismatch(current) => Ok(version_conflict(current)),
         CasOutcome::NotFound => Ok(not_found()),
@@ -189,7 +185,7 @@ pub async fn create_update(
     }
     match data.state.create_update(id, input).await? {
         Some((version, view)) => Ok(HttpResponse::Created()
-            .insert_header((header::ETAG, etag(version)))
+            .insert_header((header::ETAG, version_etag(version)))
             .json(view)),
         None => Ok(not_found()),
     }
@@ -216,7 +212,7 @@ pub async fn put_update(
     }
     match data.state.put_update(uid, expected, input).await? {
         CasOutcome::Updated(version, view) => Ok(HttpResponse::Ok()
-            .insert_header((header::ETAG, etag(version)))
+            .insert_header((header::ETAG, version_etag(version)))
             .json(view)),
         CasOutcome::VersionMismatch(current) => Ok(version_conflict(current)),
         CasOutcome::NotFound => Ok(not_found()),
@@ -291,7 +287,7 @@ mod tests {
         // PUT with the right If-Match -> 200, version bumped.
         let req = test::TestRequest::put()
             .uri(&format!("/incidents/{}", created.id()))
-            .insert_header(("If-Match", etag(v0)))
+            .insert_header(("If-Match", version_etag(v0)))
             .set_json(serde_json::json!({ "title": "Outage (renamed)" }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -303,7 +299,7 @@ mod tests {
         // PUT again with the stale version -> 412.
         let req = test::TestRequest::put()
             .uri(&format!("/incidents/{}", created.id()))
-            .insert_header(("If-Match", etag(v0)))
+            .insert_header(("If-Match", version_etag(v0)))
             .set_json(serde_json::json!({ "title": "x" }))
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status(), StatusCode::PRECONDITION_FAILED);
@@ -326,7 +322,7 @@ mod tests {
         let new_update = with_update.updates.iter().find(|u| u.impact == Impact::None).unwrap().clone();
         let req = test::TestRequest::put()
             .uri(&format!("/incidents/{}/updates/{}", created.id(), new_update.id))
-            .insert_header(("If-Match", etag(new_update.version)))
+            .insert_header(("If-Match", version_etag(new_update.version)))
             .set_json(serde_json::json!({ "message": "All clear" }))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -337,11 +333,32 @@ mod tests {
         // Delete the incident -> 204, then a GET is 404.
         let req = test::TestRequest::delete()
             .uri(&format!("/incidents/{}", created.id()))
-            .insert_header(("If-Match", etag(v1)))
+            .insert_header(("If-Match", version_etag(v1)))
             .to_request();
         assert_eq!(test::call_service(&app, req).await.status(), StatusCode::NO_CONTENT);
         let req = test::TestRequest::get().uri(&format!("/incidents/{}", created.id())).to_request();
         assert_eq!(test::call_service(&app, req).await.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[actix_web::test]
+    async fn oversized_messages_are_rejected_with_413() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::test(dir.path().to_path_buf()).await;
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(state))
+                .route("/incidents", web::post().to(create_incident))
+                .route("/incidents/{id}/updates", web::post().to(create_update)),
+        )
+        .await;
+
+        // A create whose opening update exceeds the cap is refused before any storage write.
+        let huge = "x".repeat(MAX_MESSAGE_BYTES + 1);
+        let req = test::TestRequest::post()
+            .uri("/incidents")
+            .set_json(serde_json::json!({ "title": "Outage", "impact": "offline", "message": huge }))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 
     #[actix_web::test]

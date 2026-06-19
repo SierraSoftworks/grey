@@ -29,12 +29,7 @@ pub struct NoticeProps {
 
 #[function_component(Notice)]
 pub fn notice(props: &NoticeProps) -> Html {
-    let level_class = match props.notice.level {
-        Some(NoticeLevel::Ok) => "ok",
-        Some(NoticeLevel::Warning) => "warning",
-        Some(NoticeLevel::Error) => "error",
-        None => "",
-    };
+    let level_class = props.notice.level.as_ref().map(NoticeLevel::as_str).unwrap_or("");
 
     let timestamp_display = if let Some(timestamp) = props.notice.timestamp {
         format!("{}", timestamp.format("%Y-%m-%d %H:%M UTC"))

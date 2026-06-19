@@ -64,6 +64,43 @@ pub enum CronStatus {
     Failed,
 }
 
+impl CronStatus {
+    /// The lowercase token matching the serde (`rename_all = "lowercase"`) representation — the value
+    /// a job reports at check-in.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CronStatus::Running => "running",
+            CronStatus::Succeeded => "succeeded",
+            CronStatus::Failed => "failed",
+        }
+    }
+
+    /// A human-readable label for display.
+    pub fn label(self) -> &'static str {
+        match self {
+            CronStatus::Running => "Running",
+            CronStatus::Succeeded => "Succeeded",
+            CronStatus::Failed => "Failed",
+        }
+    }
+}
+
+impl std::str::FromStr for CronStatus {
+    type Err = ();
+
+    /// Parses a status from its [`CronStatus::as_str`] token. Unlike [`Impact`](crate::Impact) this is
+    /// **strict**: an unrecognised token is an error rather than a default, so a check-in carrying a
+    /// bogus status is rejected with a clean `400` rather than silently coerced.
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "running" => Ok(CronStatus::Running),
+            "succeeded" => Ok(CronStatus::Succeeded),
+            "failed" => Ok(CronStatus::Failed),
+            _ => Err(()),
+        }
+    }
+}
+
 /// The derived, displayed health of a cron — what the UI renders "as if it were an active probe".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -503,6 +540,21 @@ mod tests {
         assert!(!CronHealth::Stuck.passing());
         assert_eq!(CronHealth::Stuck.label(), "Overrunning");
         assert_eq!(CronHealth::Missing.as_str(), "missing");
+    }
+
+    #[test]
+    fn cron_status_tokens_round_trip_and_reject_unknown() {
+        use std::str::FromStr;
+
+        for status in [CronStatus::Running, CronStatus::Succeeded, CronStatus::Failed] {
+            assert_eq!(CronStatus::from_str(status.as_str()), Ok(status));
+            assert!(!status.label().is_empty());
+        }
+        assert_eq!(CronStatus::Running.as_str(), "running");
+        assert_eq!(CronStatus::Succeeded.label(), "Succeeded");
+        // Strictness is load-bearing: an unknown token must error (so the check-in API returns 400).
+        assert_eq!(CronStatus::from_str("bogus"), Err(()));
+        assert_eq!(CronStatus::from_str(""), Err(()));
     }
 
     #[test]

@@ -294,7 +294,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                         <div class="incident-timeline__body">
                             <div class="incident-timeline__time">
                                 <select onchange={on_new_impact}>
-                                    { for [Impact::Offline, Impact::Degraded, Impact::None, Impact::Hidden].into_iter().map(|opt| html! {
+                                    { for Impact::ALL.into_iter().map(|opt| html! {
                                         <option value={opt.as_str()} selected={opt.as_str() == *new_impact}>{opt.label()}</option>
                                     }) }
                                 </select>

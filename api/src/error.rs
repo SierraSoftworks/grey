@@ -39,6 +39,17 @@ impl ApiError {
         self
     }
 
+    /// Fills in the status code only if one has not already been set (`code == 0`). Unlike
+    /// [`with_code`](Self::with_code), which always overwrites, this lets a caller stamp a
+    /// transport-derived status (e.g. the HTTP response code) onto a body without clobbering a code the
+    /// server already supplied — used on the client read path, where the body's own code wins.
+    pub fn ensure_code(mut self, code: u16) -> Self {
+        if self.code == 0 {
+            self.code = code;
+        }
+        self
+    }
+
     /// Appends a single piece of advice, returning the error for chaining.
     pub fn with_advice(mut self, advice: impl Into<String>) -> Self {
         self.advice.push(advice.into());
@@ -126,7 +137,9 @@ mod server {
         }
 
         fn error_response(&self) -> HttpResponse {
-            HttpResponse::build(self.status_code_or_internal()).json(self)
+            // Route through `status_code()` (rather than the inherent helper) so the trait method is
+            // the single place the body's code becomes the response status.
+            HttpResponse::build(self.status_code()).json(self)
         }
     }
 
@@ -176,6 +189,14 @@ mod tests {
         let parsed: ApiError = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, error);
         assert_eq!(parsed.advice.len(), 2);
+    }
+
+    #[test]
+    fn ensure_code_fills_only_when_unset() {
+        // An explicit code on the body is preserved; a transport status only fills an unset one.
+        assert_eq!(ApiError::new("x").ensure_code(503).code, 503);
+        assert_eq!(ApiError::not_found("x").ensure_code(503).code, 404);
+        assert_eq!(ApiError::new("x").with_code(0).ensure_code(500).code, 500);
     }
 
     #[test]

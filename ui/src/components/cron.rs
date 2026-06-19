@@ -129,14 +129,6 @@ fn align_for(index: usize, len: usize) -> PopoverAlign {
     }
 }
 
-fn status_label(status: CronStatus) -> &'static str {
-    match status {
-        CronStatus::Running => "Running",
-        CronStatus::Succeeded => "Succeeded",
-        CronStatus::Failed => "Failed",
-    }
-}
-
 fn render_run_popover(run: &CronRun, align: PopoverAlign) -> Html {
     let timestamp = run.started_at.format("%Y-%m-%d %H:%M:%S UTC").to_string();
     let duration = match run.duration {
@@ -151,7 +143,7 @@ fn render_run_popover(run: &CronRun, align: PopoverAlign) -> Html {
         <Popover
             {align}
             status_class={cron_run_class(run.status)}
-            status={status_label(run.status)}
+            status={run.status.label()}
             timestamp={timestamp}
         >
             <div class="tooltip__details">

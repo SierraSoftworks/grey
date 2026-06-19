@@ -35,8 +35,21 @@ struct NewIncidentFormProps {
 #[function_component(NewIncidentForm)]
 fn new_incident_form(props: &NewIncidentFormProps) -> Html {
     use crate::routes::Route;
+    use grey_api::Impact;
     use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
     use yew_router::prelude::*;
+
+    // The `<select>` captions are richer than `Impact::label()` ("Operational (no impact)" rather
+    // than "Operational"), so the order/value list comes from `Impact::ALL` while the wording stays
+    // here.
+    fn impact_caption(impact: Impact) -> &'static str {
+        match impact {
+            Impact::Offline => "Offline",
+            Impact::Degraded => "Degraded",
+            Impact::None => "Operational (no impact)",
+            Impact::Hidden => "Hidden (draft)",
+        }
+    }
 
     let title = use_state(String::new);
     let impact = use_state(|| "offline".to_string());
@@ -120,10 +133,9 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
                 </label>
                 <label>{"Initial impact"}
                     <select onchange={on_impact}>
-                        <option value="offline" selected={*impact == "offline"}>{"Offline"}</option>
-                        <option value="degraded" selected={*impact == "degraded"}>{"Degraded"}</option>
-                        <option value="none" selected={*impact == "none"}>{"Operational (no impact)"}</option>
-                        <option value="hidden" selected={*impact == "hidden"}>{"Hidden (draft)"}</option>
+                        { for Impact::ALL.into_iter().map(|opt| html! {
+                            <option value={opt.as_str()} selected={*impact == opt.as_str()}>{impact_caption(opt)}</option>
+                        }) }
                     </select>
                 </label>
                 <label>{"Initial update"}

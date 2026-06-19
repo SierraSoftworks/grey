@@ -27,15 +27,6 @@ pub struct CronCheckinParams {
     pub token: Option<String>,
 }
 
-fn parse_status(status: &str) -> Option<CronStatus> {
-    match status {
-        "running" => Some(CronStatus::Running),
-        "succeeded" => Some(CronStatus::Succeeded),
-        "failed" => Some(CronStatus::Failed),
-        _ => None,
-    }
-}
-
 /// A length-revealing but content-constant-time byte comparison, so a wrong token can't be recovered
 /// by timing the comparison.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -79,7 +70,7 @@ async fn record(
     name: String,
     params: CronCheckinParams,
 ) -> Result<HttpResponse> {
-    let Some(status) = params.status.as_deref().and_then(parse_status) else {
+    let Some(status) = params.status.as_deref().and_then(|s| s.parse::<CronStatus>().ok()) else {
         return Ok(ApiError::bad_request(
             "A 'status' of 'running', 'succeeded' or 'failed' is required.",
         )
