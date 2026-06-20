@@ -9,8 +9,12 @@ pub async fn index(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpRe
     // Resolve the viewer's auth context so the server-rendered snapshot honours each entity's
     // `visible` filter. A normal browser navigation carries no `Authorization` header, so this is
     // anonymous in practice — admin-only probes/crons are therefore never embedded in the delivered
-    // HTML and instead appear after sign-in, when the SPA's authenticated polls fetch them.
-    let ctx = super::auth::resolve_auth_context(&req, &data).await;
+    // HTML and instead appear after sign-in, when the SPA's authenticated polls fetch them. A request
+    // that somehow carries an invalid token can't renew it mid-render, so it falls back to the
+    // anonymous view rather than failing the whole page (the public read endpoints return the 401).
+    let ctx = super::auth::resolve_auth_context(&req, &data)
+        .await
+        .unwrap_or_default();
     let config = data.state.get_config();
 
     let probe_histories = data.state.get_probe_states().await?;

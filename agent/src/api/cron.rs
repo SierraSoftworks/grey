@@ -120,7 +120,12 @@ async fn record(
 /// `/probes`: a cron restricted with e.g. `visible: auth.admin` is returned only once a matching
 /// bearer token is presented.
 pub async fn get_crons(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpResponse> {
-    let ctx = super::auth::resolve_auth_context(&req, &data).await;
+    let ctx = match super::auth::resolve_auth_context(&req, &data).await {
+        Ok(ctx) => ctx,
+        // Mirror `/probes`: a stale/invalid token is a 401 so the SPA renews and retries, rather than
+        // a silent downgrade that would hide the viewer's restricted crons.
+        Err(err) => return Ok(err.into()),
+    };
     let config = data.state.get_config();
 
     let crons = data.state.get_cron_states().await?;
@@ -239,6 +244,34 @@ mod tests {
         let crons: Vec<Cron> = serde_json::from_slice(&test::read_body(resp).await).unwrap();
         let names: Vec<&str> = crons.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(names, vec!["public.cron"], "the admin-only cron must be hidden from anonymous viewers");
+    }
+
+    /// A bearer token the agent can't validate yields a 401 from the public cron listing rather than a
+    /// silent downgrade to the anonymous view, mirroring `/probes`. The SPA renews the session on the
+    /// 401 and retries, so a signed-in viewer's crons don't collapse to the public subset when their
+    /// token lapses. The OIDC endpoint is unreachable, so validation fails as it would for an expired
+    /// token.
+    #[actix_web::test]
+    async fn invalid_bearer_token_is_rejected_not_downgraded() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = format!(
+            "ui:\n  enabled: true\n  listen: 127.0.0.1:0\n  admin:\n    oidc:\n      endpoint: http://127.0.0.1:1\n      client_id: grey\n      client_secret: secret\ncrons:\n  - name: public.cron\n    interval: 60s\nstate: {}\nprobes: []\n",
+            dir.path().join("state.redb").display().to_string().replace('\\', "/")
+        );
+        let config_path = dir.path().join("config.yml");
+        tokio::fs::write(&config_path, config).await.unwrap();
+        let state = AppState::new(State::new(&config_path).await.unwrap());
+        let app = test::init_service(
+            App::new().app_data(web::Data::new(state)).configure(configure),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/api/v1/crons")
+            .insert_header(("Authorization", "Bearer not-a-real-token"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[actix_web::test]

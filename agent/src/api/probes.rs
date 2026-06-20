@@ -9,7 +9,12 @@ use crate::state::ProbeStore;
 /// everyone), while a probe restricted with e.g. `visible: auth.admin` is returned only once a
 /// matching bearer token is presented.
 pub async fn get_probes(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpResponse> {
-    let ctx = resolve_auth_context(&req, &data).await;
+    let ctx = match resolve_auth_context(&req, &data).await {
+        Ok(ctx) => ctx,
+        // A stale/invalid token is a 401 (not a silent public-only listing), so the SPA renews the
+        // session and retries rather than quietly dropping the viewer's restricted probes.
+        Err(err) => return Ok(err.into()),
+    };
     let config = data.state.get_config();
 
     let api_probes = data.state.get_probe_states().await?;
@@ -68,5 +73,31 @@ mod tests {
 
         let names: Vec<&str> = probes.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["public.probe"], "the admin-only probe must be hidden from anonymous viewers");
+    }
+
+    /// A request that presents a bearer token the agent can't validate (an expired or otherwise
+    /// invalid session) is rejected with a 401 rather than being silently downgraded to the anonymous
+    /// listing. The SPA reacts to the 401 by renewing the session and retrying, so a signed-in
+    /// viewer's probes don't quietly collapse to the public subset when their token lapses (e.g. while
+    /// the tab was backgrounded). The OIDC endpoint is unreachable, so validation fails — exactly as
+    /// it would for a genuinely expired token.
+    #[actix_web::test]
+    async fn invalid_bearer_token_is_rejected_not_downgraded() {
+        let dir = tempdir().unwrap();
+        let config = format!(
+            "ui:\n  enabled: true\n  listen: 127.0.0.1:0\n  admin:\n    oidc:\n      endpoint: http://127.0.0.1:1\n      client_id: grey\n      client_secret: secret\nprobes:\n  - name: public.probe\n    policy: {{ interval: 60s, timeout: 5s }}\n    target: !Http\n      url: https://example.com\nstate: {}\n",
+            dir.path().join("state.redb").display().to_string().replace('\\', "/")
+        );
+        let config_path = dir.path().join("config.yml");
+        tokio::fs::write(&config_path, config).await.unwrap();
+        let app_state = AppState::new(State::new(&config_path).await.unwrap());
+
+        let req = TestRequest::default()
+            .insert_header(("Authorization", "Bearer not-a-real-token"))
+            .to_http_request();
+        let resp = get_probes(req, web::Data::new(app_state))
+            .await
+            .expect("the handler renders the error as a response rather than returning Err");
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 }
