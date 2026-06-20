@@ -2301,6 +2301,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "chrono",
+ "futures",
  "gloo 0.12.0",
  "gloo-console 0.4.0",
  "gloo-net 0.7.0",

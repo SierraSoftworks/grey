@@ -25,6 +25,9 @@ use grey_api::UiAuthConfig;
 mod browser {
     use super::UiAuthConfig;
     use base64::prelude::*;
+    use futures::FutureExt;
+    use futures::future::{LocalBoxFuture, Shared};
+    use std::cell::{Cell, RefCell};
     use std::time::Duration;
     use web_sys::window;
 
@@ -273,10 +276,65 @@ mod browser {
         Ok(Some(token))
     }
 
-    /// Renews the session from the stored refresh token, returning a fresh ID token. The agent uses
-    /// its server-held secret to perform the refresh, so the browser only supplies the refresh token.
-    /// On failure the stored session is dropped so the UI can prompt for an interactive sign-in.
+    thread_local! {
+        /// The renewal currently in flight, shared by every caller that needs a fresh token while it
+        /// runs, so a single refresh-token redemption serves them all (see [`refresh_session`]). The
+        /// generation tags each attempt so a caller only retires the slot if it still holds the very
+        /// attempt it started, never a newer one.
+        static REFRESH_IN_FLIGHT: RefCell<
+            Option<(u64, Shared<LocalBoxFuture<'static, Result<String, String>>>)>,
+        > = const { RefCell::new(None) };
+        static REFRESH_GEN: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// Renews the session from the stored refresh token, returning a fresh ID token.
+    ///
+    /// Concurrent callers are coalesced into a single renewal: the first caller starts the refresh and
+    /// the rest await its result. This matters because providers may *rotate* the refresh token —
+    /// redeeming it returns a new one and invalidates the old. The SPA polls several endpoints on
+    /// independent loops (the public entities and the cluster peers), and those loops wake together
+    /// (e.g. the catch-up fetch when a backgrounded tab regains focus), so a lapsed ID token makes
+    /// them all hit a 401 and reach for a refresh at once. Were each to redeem the stored refresh
+    /// token independently, only the first would succeed; the rest would present the now-rotated token,
+    /// fail, drop the freshly minted session, and surface a spurious "session expired" error even
+    /// though the session had just been renewed. Sharing one redemption avoids that race.
     pub async fn refresh_session() -> Result<String, String> {
+        let (generation, shared) = REFRESH_IN_FLIGHT.with(|cell| {
+            let mut slot = cell.borrow_mut();
+            if let Some((generation, existing)) = slot.as_ref() {
+                (*generation, existing.clone())
+            } else {
+                let generation = REFRESH_GEN.with(|g| {
+                    let next = g.get().wrapping_add(1);
+                    g.set(next);
+                    next
+                });
+                let shared = do_refresh_session().boxed_local().shared();
+                *slot = Some((generation, shared.clone()));
+                (generation, shared)
+            }
+        });
+
+        let result = shared.await;
+
+        // Retire this attempt so the next lapse starts a fresh refresh, but only if no later attempt
+        // has already replaced it — otherwise we'd strand the newer one and let a second concurrent
+        // redemption start, reintroducing the rotation race.
+        REFRESH_IN_FLIGHT.with(|cell| {
+            let mut slot = cell.borrow_mut();
+            if matches!(slot.as_ref(), Some((g, _)) if *g == generation) {
+                *slot = None;
+            }
+        });
+
+        result
+    }
+
+    /// Performs a single session renewal against the agent. The agent uses its server-held secret to
+    /// perform the refresh, so the browser only supplies the refresh token. On failure the stored
+    /// session is dropped so the UI can prompt for an interactive sign-in. Callers go through
+    /// [`refresh_session`], which coalesces concurrent renewals onto one invocation of this.
+    async fn do_refresh_session() -> Result<String, String> {
         let refresh = stored_refresh_token().ok_or("no refresh token is available")?;
         let request = serde_json::json!({ "refresh_token": refresh }).to_string();
         let response = gloo::net::http::Request::post("/api/v1/auth/refresh")
