@@ -395,25 +395,42 @@ impl Filterable for VisibilityFilter<'_> {
     }
 }
 
-/// Resolves the [`AuthContext`] for a request to a public read endpoint. The context is anonymous
-/// when admin auth is not configured, or when no/invalid bearer token is presented. A valid token
+/// Resolves the [`AuthContext`] for a request to a public read endpoint.
+///
+/// Returns an anonymous context when admin auth is not configured, or when the request carries no
+/// bearer token at all — such a viewer sees only the entities visible to everyone. A *valid* token
 /// populates the claims and marks the request authenticated; the configured admin ACL is then
 /// evaluated (against the same `method`/`path`/`claims` fields [`require_admin`] uses) to decide
 /// whether the viewer also counts as an administrator.
-pub async fn resolve_auth_context(req: &HttpRequest, data: &AppState) -> AuthContext {
+///
+/// A token that is *present but invalid or expired* is reported as an [`Err`] (a `401`) rather than
+/// being silently downgraded to the anonymous view. A viewer who presents a token is asking for their
+/// authenticated set; quietly returning the smaller public set instead would make a signed-in
+/// administrator's probes and crons vanish the moment their token lapsed — e.g. while the tab sat
+/// backgrounded and polling was paused — with no 401 to prompt the SPA to renew it. Surfacing the
+/// 401 lets the client refresh the session and retry (its existing reaction to a 401), restoring the
+/// authenticated set. The SSR page render, where a token can't be renewed mid-request, opts back into
+/// the anonymous fallback via `.unwrap_or_default()`.
+pub async fn resolve_auth_context(
+    req: &HttpRequest,
+    data: &AppState,
+) -> Result<AuthContext, ApiError> {
     let config = data.state.get_config();
     let Some(admin) = config.ui.admin.as_ref() else {
-        return AuthContext::default();
+        return Ok(AuthContext::default());
     };
 
     let Some(token) = bearer_token(req.headers()) else {
-        return AuthContext::default();
+        return Ok(AuthContext::default());
     };
 
-    // An invalid or expired token on a public endpoint is treated as anonymous rather than an error:
-    // the viewer still sees everything visible to the public, exactly as if they had presented none.
-    let Ok(claims) = data.oidc.validate(&admin.oidc, &token).await else {
-        return AuthContext::default();
+    let claims = match data.oidc.validate(&admin.oidc, &token).await {
+        Ok(claims) => claims,
+        Err(e) => {
+            info!("Rejected a public read carrying an invalid bearer token: {e}");
+            return Err(ApiError::unauthorized("Your session is invalid or has expired.")
+                .with_advice("Sign in again to continue."));
+        }
     };
 
     let is_admin = admin
@@ -425,11 +442,11 @@ pub async fn resolve_auth_context(req: &HttpRequest, data: &AppState) -> AuthCon
         })
         .unwrap_or(false);
 
-    AuthContext {
+    Ok(AuthContext {
         authenticated: true,
         admin: is_admin,
         claims,
-    }
+    })
 }
 
 /// Drops the probes the given viewer may not see, honouring each probe's configured `visible` filter.
