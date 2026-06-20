@@ -13,8 +13,14 @@ setup is a great place to start.
 :::
 
 ## Step #1: Installation
-You can download the latest version of Grey from our [GitHub releases][release] page.
-We include pre-compiled binaries for many different platforms, including Windows, Linux,
+On macOS and Linux you can install Grey with [Homebrew](https://brew.sh):
+
+```sh
+brew install sierrasoftworks/tap/grey
+```
+
+Alternatively, you can download the latest version of Grey from our [GitHub releases][release]
+page. We include pre-compiled binaries for many different platforms, including Windows, Linux,
 and MacOS in both `amd64` and `arm64` variants.
 
 ## Step #2: Configuration
