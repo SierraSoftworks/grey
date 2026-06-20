@@ -10,6 +10,16 @@ Grey is small enough to run on every server in your fleet, and its built-in
 [clustering](#clustering) lets those instances pool their results so that many vantage
 points contribute to a single, shared view of your platform's health.
 
+## Installation
+Install with [Homebrew](https://brew.sh):
+
+```sh
+brew install sierrasoftworks/tap/grey
+```
+
+Pre-compiled binaries for other platforms are available from the
+[GitHub releases](https://github.com/SierraSoftworks/grey/releases) page.
+
 ## Highlights
 - **Clustered probing.** Run Grey on as many machines as you like and have them
   cooperate: every node probes independently and gossips its results, so the cluster
