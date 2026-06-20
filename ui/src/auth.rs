@@ -21,13 +21,140 @@
 #[cfg(any(feature = "wasm", not(feature = "ssr")))]
 use grey_api::UiAuthConfig;
 
+/// A single-flight coordinator: it collapses concurrent runs of an async operation onto one shared
+/// execution so the operation runs at most once at a time, no matter how many callers ask for it
+/// together (see [`refresh_session`] for why that matters). Browser-only — it stores its state in an
+/// `Rc`/`RefCell`, so it lives behind a `thread_local` rather than a lock.
+#[cfg(feature = "wasm")]
+mod single_flight {
+    use std::cell::{Cell, RefCell};
+    use std::future::Future;
+    use std::rc::Rc;
+
+    use futures::FutureExt;
+    use futures::future::{LocalBoxFuture, Shared};
+
+    struct Inner<T: Clone> {
+        /// The run currently in flight, tagged with the generation that started it; cloned for every
+        /// caller that joins it and cleared once it settles, so the next call starts a fresh run.
+        current: RefCell<Option<(u64, Shared<LocalBoxFuture<'static, T>>)>>,
+        generation: Cell<u64>,
+    }
+
+    pub struct SingleFlight<T: Clone> {
+        inner: Rc<Inner<T>>,
+    }
+
+    impl<T: Clone + 'static> SingleFlight<T> {
+        pub fn new() -> Self {
+            Self {
+                inner: Rc::new(Inner {
+                    current: RefCell::new(None),
+                    generation: Cell::new(0),
+                }),
+            }
+        }
+
+        /// Runs the future produced by `start`, unless a run begun by an earlier, still-unsettled
+        /// call is already in flight — in which case that one is joined instead and `start` is never
+        /// invoked. The returned future is self-contained (it owns a handle to the shared state), so
+        /// it can be awaited outside the borrow that produced it.
+        pub fn run<F>(&self, start: F) -> impl Future<Output = T> + use<F, T>
+        where
+            F: FnOnce() -> LocalBoxFuture<'static, T>,
+        {
+            let inner = self.inner.clone();
+            async move {
+                let (generation, shared) = {
+                    let mut current = inner.current.borrow_mut();
+                    if let Some((generation, existing)) = current.as_ref() {
+                        (*generation, existing.clone())
+                    } else {
+                        let generation = inner.generation.get().wrapping_add(1);
+                        inner.generation.set(generation);
+                        let shared = start().shared();
+                        *current = Some((generation, shared.clone()));
+                        (generation, shared)
+                    }
+                };
+
+                let result = shared.await;
+
+                // Retire this run so the next call starts afresh, but only if a later run hasn't
+                // already replaced it — otherwise we'd strand the newer one and let a second
+                // concurrent run start.
+                let mut current = inner.current.borrow_mut();
+                if matches!(current.as_ref(), Some((g, _)) if *g == generation) {
+                    *current = None;
+                }
+                result
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::SingleFlight;
+        use futures::FutureExt;
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        /// Yields control back to the executor exactly once, so a future spans more than a single
+        /// poll and concurrent callers have a window in which to join the in-flight run.
+        async fn yield_once() {
+            use std::task::Poll;
+            let mut yielded = false;
+            std::future::poll_fn(move |cx| {
+                if yielded {
+                    Poll::Ready(())
+                } else {
+                    yielded = true;
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                }
+            })
+            .await
+        }
+
+        #[tokio::test]
+        async fn coalesces_concurrent_runs_then_resets() {
+            let runs = Rc::new(Cell::new(0u32));
+            let flight = SingleFlight::<u32>::new();
+
+            // Each invocation bumps the run counter, then suspends, so two overlapping callers can
+            // observe whether they shared a single run.
+            let start = {
+                let runs = runs.clone();
+                move || {
+                    let runs = runs.clone();
+                    async move {
+                        runs.set(runs.get() + 1);
+                        yield_once().await;
+                        runs.get()
+                    }
+                    .boxed_local()
+                }
+            };
+
+            // Two callers that overlap collapse onto one run and both see its result.
+            let (a, b) = futures::join!(flight.run(start.clone()), flight.run(start.clone()));
+            assert_eq!(runs.get(), 1, "overlapping callers must share a single run");
+            assert_eq!((a, b), (1, 1));
+
+            // Once that run has settled, a fresh call starts a new run rather than reusing the old.
+            let c = flight.run(start).await;
+            assert_eq!(runs.get(), 2, "a call after the previous run settled starts a new run");
+            assert_eq!(c, 2);
+        }
+    }
+}
+
 #[cfg(feature = "wasm")]
 mod browser {
     use super::UiAuthConfig;
+    use super::single_flight::SingleFlight;
     use base64::prelude::*;
     use futures::FutureExt;
-    use futures::future::{LocalBoxFuture, Shared};
-    use std::cell::{Cell, RefCell};
     use std::time::Duration;
     use web_sys::window;
 
@@ -277,57 +404,26 @@ mod browser {
     }
 
     thread_local! {
-        /// The renewal currently in flight, shared by every caller that needs a fresh token while it
-        /// runs, so a single refresh-token redemption serves them all (see [`refresh_session`]). The
-        /// generation tags each attempt so a caller only retires the slot if it still holds the very
-        /// attempt it started, never a newer one.
-        static REFRESH_IN_FLIGHT: RefCell<
-            Option<(u64, Shared<LocalBoxFuture<'static, Result<String, String>>>)>,
-        > = const { RefCell::new(None) };
-        static REFRESH_GEN: Cell<u64> = const { Cell::new(0) };
+        /// Coalesces the concurrent, 401-driven refreshes onto a single redemption of the stored
+        /// refresh token (see [`refresh_session`]).
+        static REFRESH: SingleFlight<Result<String, String>> = SingleFlight::new();
     }
 
     /// Renews the session from the stored refresh token, returning a fresh ID token.
     ///
-    /// Concurrent callers are coalesced into a single renewal: the first caller starts the refresh and
-    /// the rest await its result. This matters because providers may *rotate* the refresh token —
+    /// Concurrent callers are coalesced onto a single renewal: the first starts the refresh and the
+    /// rest await its result. This matters because providers may *rotate* the refresh token —
     /// redeeming it returns a new one and invalidates the old. The SPA polls several endpoints on
     /// independent loops (the public entities and the cluster peers), and those loops wake together
     /// (e.g. the catch-up fetch when a backgrounded tab regains focus), so a lapsed ID token makes
     /// them all hit a 401 and reach for a refresh at once. Were each to redeem the stored refresh
-    /// token independently, only the first would succeed; the rest would present the now-rotated token,
-    /// fail, drop the freshly minted session, and surface a spurious "session expired" error even
-    /// though the session had just been renewed. Sharing one redemption avoids that race.
+    /// token independently, only the first would succeed; the rest would present the now-rotated
+    /// token, fail, drop the freshly minted session, and surface a spurious "session expired" error
+    /// even though the session had just been renewed. Sharing one redemption avoids that race.
     pub async fn refresh_session() -> Result<String, String> {
-        let (generation, shared) = REFRESH_IN_FLIGHT.with(|cell| {
-            let mut slot = cell.borrow_mut();
-            if let Some((generation, existing)) = slot.as_ref() {
-                (*generation, existing.clone())
-            } else {
-                let generation = REFRESH_GEN.with(|g| {
-                    let next = g.get().wrapping_add(1);
-                    g.set(next);
-                    next
-                });
-                let shared = do_refresh_session().boxed_local().shared();
-                *slot = Some((generation, shared.clone()));
-                (generation, shared)
-            }
-        });
-
-        let result = shared.await;
-
-        // Retire this attempt so the next lapse starts a fresh refresh, but only if no later attempt
-        // has already replaced it — otherwise we'd strand the newer one and let a second concurrent
-        // redemption start, reintroducing the rotation race.
-        REFRESH_IN_FLIGHT.with(|cell| {
-            let mut slot = cell.borrow_mut();
-            if matches!(slot.as_ref(), Some((g, _)) if *g == generation) {
-                *slot = None;
-            }
-        });
-
-        result
+        REFRESH
+            .with(|flight| flight.run(|| do_refresh_session().boxed_local()))
+            .await
     }
 
     /// Performs a single session renewal against the agent. The agent uses its server-held secret to
