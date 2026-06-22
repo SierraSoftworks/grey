@@ -27,7 +27,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use filt_rs::{Filter, FilterValue, Filterable};
 use grey_api::{Cron, Probe, WebhookEvent};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use tracing_batteries::prelude::*;
 
