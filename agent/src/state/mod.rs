@@ -237,15 +237,10 @@ impl State {
     }
 
     fn generate_example_key(&self) -> String {
-        use aes_gcm::{
-            Aes256Gcm,
-            aead::{KeyInit, OsRng},
-        };
         use base64::prelude::*;
 
-        let example_key = Aes256Gcm::generate_key(OsRng);
-        let key: &[u8] = example_key.as_slice();
-        BASE64_STANDARD.encode(key)
+        let example_key: [u8; 32] = rand::random();
+        BASE64_STANDARD.encode(example_key)
     }
 
     fn parse_secret_key(&self, secret: &str) -> Result<[u8; 32], Box<dyn std::error::Error>> {
