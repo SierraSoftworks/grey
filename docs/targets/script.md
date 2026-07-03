@@ -151,6 +151,47 @@ output['http.status_code'] = resp.status;
 output['http.body'] = await resp.text();
 ```
 
+### `sessionStorage`
+The `sessionStorage` global provides a [Web Storage](https://developer.mozilla.org/en-US/docs/Web/API/Storage)-like
+API which persists data across invocations of the same probe. This is
+particularly useful for caching things like access tokens so that they do not
+need to be fetched on every probe invocation.
+
+The following methods and properties are supported (property-style access like
+`sessionStorage.myKey = "value"` is **not** supported):
+
+- `sessionStorage.getItem(key: string): string | null`
+- `sessionStorage.setItem(key: string, value: string)`
+- `sessionStorage.removeItem(key: string)`
+- `sessionStorage.clear()`
+- `sessionStorage.key(index: number): string | null`
+- `sessionStorage.length: number`
+
+```js
+let token = sessionStorage.getItem("example.token");
+if (token === null) {
+    const auth = await fetch("https://example.com/api/v1/login", { method: "POST", /* ... */ });
+    token = (await auth.json()).token;
+    sessionStorage.setItem("example.token", token);
+}
+
+const resp = await fetch("https://example.com/api/v1/profile", {
+    headers: {
+        "Authorization": `Bearer ${token}`
+    }
+});
+output["profile.status"] = resp.status;
+```
+
+::: warning
+Storage is isolated per probe: values written by one probe are never visible to
+scripts running under a different probe, even when they share the same script
+code. Both keys and values are always coerced to strings. Values are held in
+memory only and are discarded whenever the probe's configuration is modified
+(via a config reload) or the Grey process restarts — always handle the case
+where a key is missing.
+:::
+
 ### `getTraceId(): string`
 This method retrieves the current OpenTelemetry Trace ID for your probe
 execution, allowing you to pass this information along in requests to

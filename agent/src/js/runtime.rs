@@ -9,6 +9,7 @@ use tracing_batteries::prelude::*;
 
 pub fn setup_runtime(
     context: &mut Context,
+    storage: super::SessionStorage,
     args: Vec<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     boa_runtime::register(
@@ -19,6 +20,8 @@ pub fn setup_runtime(
         None,
         context,
     )?;
+
+    storage.register(context)?;
 
     context.register_global_property(
         js_string!("output"),
