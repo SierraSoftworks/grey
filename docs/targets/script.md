@@ -168,18 +168,31 @@ The following methods and properties are supported (property-style access like
 - `sessionStorage.length: number`
 
 ```js
-let token = sessionStorage.getItem("example.token");
-if (token === null) {
-    const auth = await fetch("https://example.com/api/v1/login", { method: "POST", /* ... */ });
-    token = (await auth.json()).token;
-    sessionStorage.setItem("example.token", token);
+async function getToken() {
+    let token = sessionStorage.getItem("example.token");
+    if (token === null) {
+        const auth = await fetch("https://example.com/api/v1/login", { method: "POST", /* ... */ });
+        token = (await auth.json()).token;
+        sessionStorage.setItem("example.token", token);
+    }
+    return token;
 }
 
-const resp = await fetch("https://example.com/api/v1/profile", {
-    headers: {
-        "Authorization": `Bearer ${token}`
-    }
-});
+async function getProfile() {
+    return await fetch("https://example.com/api/v1/profile", {
+        headers: {
+            "Authorization": `Bearer ${await getToken()}`
+        }
+    });
+}
+
+let resp = await getProfile();
+if (resp.status === 401) {
+    // The cached token has expired — evict it, fetch a fresh one, and retry once
+    sessionStorage.removeItem("example.token");
+    resp = await getProfile();
+}
+
 output["profile.status"] = resp.status;
 ```
 
