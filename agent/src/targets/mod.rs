@@ -32,7 +32,9 @@ pub enum TargetType {
 impl TargetType {
     #[cfg(test)]
     pub fn test() -> Self {
-        TargetType::Script(script::ScriptTarget { code: "output.test = true".into(), args: vec![] })
+        let mut target = script::ScriptTarget::default();
+        target.code = "output.test = true".into();
+        TargetType::Script(target)
     }
 
     pub async fn run(&self, cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>> {
