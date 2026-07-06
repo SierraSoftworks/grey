@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::str::FromStr;
@@ -152,37 +153,10 @@ where
         self.membership.bump_heartbeat();
         self.membership.sweep(now);
 
-        // Build the gossip target set. Prefer healthy peers up to `gossip_factor`, reserve one slot
-        // to retry an unhealthy peer that is due (so recovery is detected), and always include the
-        // configured seeds — a node forgotten after a long partition can only rejoin via a live seed.
-        let candidates = self.membership.gossip_candidates(now);
-        let mut healthy = Vec::new();
-        let mut unhealthy = Vec::new();
-        for candidate in candidates {
-            if !candidate.due {
-                continue;
-            }
-            if candidate.liveness == Liveness::Healthy {
-                healthy.push((candidate.id, candidate.address));
-            } else {
-                unhealthy.push((candidate.id, candidate.address));
-            }
-        }
-
-        let mut targets: Vec<(Option<S::Id>, T::Address)> = Vec::new();
-        for (id, addr) in sample_peers(healthy, self.gossip_factor) {
-            targets.push((Some(id), addr));
-        }
-        for (id, addr) in sample_peers(unhealthy, 1) {
-            targets.push((Some(id), addr));
-        }
         // The resolved seed addresses are maintained by the background resolver loop so we never
-        // block the gossip hot path on DNS resolution here. Seeds have no known NodeID yet.
-        for addr in self.resolved_seed_peers.read().await.iter().cloned() {
-            targets.push((None, addr));
-        }
-
-        let targets = unique_by_address(targets);
+        // block the gossip hot path on DNS resolution here.
+        let seed_addresses = self.resolved_seed_peers.read().await.clone();
+        let targets = self.build_targets(now, &seed_addresses);
         if targets.is_empty() {
             return Ok(());
         }
@@ -231,6 +205,67 @@ where
         }
 
         Ok(())
+    }
+
+    /// Builds this round's gossip target set: healthy peers up to `gossip_factor`, one slot to
+    /// retry an unhealthy peer that is due (so recovery is detected), and always the configured
+    /// seeds — a node forgotten after a long partition can only rejoin via a live seed.
+    ///
+    /// At most one address is selected per peer. [`Membership::gossip_candidates`] chooses the
+    /// single address for every discovered peer (preferring a configured seed address unless it is
+    /// failing its retry backoff while another address is eligible), and a seed address that is
+    /// known to belong to an already-targeted member is skipped rather than producing a second Syn
+    /// to the same peer in the same round.
+    fn build_targets(
+        &self,
+        now: Instant,
+        seed_addresses: &[T::Address],
+    ) -> Vec<(Option<S::Id>, T::Address)> {
+        // The single address chosen for each known peer this round: any send to that peer —
+        // including one triggered by a seed address it owns — uses this address.
+        let mut chosen: HashMap<S::Id, T::Address> = HashMap::new();
+        let mut healthy = Vec::new();
+        let mut unhealthy = Vec::new();
+        for candidate in self.membership.gossip_candidates(now) {
+            chosen.insert(candidate.id.clone(), candidate.address.clone());
+            if !candidate.due {
+                continue;
+            }
+            if candidate.liveness == Liveness::Healthy {
+                healthy.push((candidate.id, candidate.address));
+            } else {
+                unhealthy.push((candidate.id, candidate.address));
+            }
+        }
+
+        let mut targets: Vec<(Option<S::Id>, T::Address)> = Vec::new();
+        let mut targeted: HashSet<S::Id> = HashSet::new();
+        for (id, addr) in sample_peers(healthy, self.gossip_factor) {
+            targeted.insert(id.clone());
+            targets.push((Some(id), addr));
+        }
+        for (id, addr) in sample_peers(unhealthy, 1) {
+            targeted.insert(id.clone());
+            targets.push((Some(id), addr));
+        }
+
+        for addr in seed_addresses {
+            match self.membership.owner_of(addr) {
+                Some(owner) => {
+                    // The seed belongs to a discovered member: contact it once, at the member's
+                    // chosen address, and attribute the send so the address's link health (and
+                    // retry backoff) is tracked.
+                    if !targeted.insert(owner.clone()) {
+                        continue;
+                    }
+                    let addr = chosen.get(&owner).cloned().unwrap_or_else(|| addr.clone());
+                    targets.push((Some(owner), addr));
+                }
+                None => targets.push((None, addr.clone())),
+            }
+        }
+
+        unique_by_address(targets)
     }
 
     async fn receive_loop(&self) {
@@ -577,6 +612,139 @@ mod tests {
             ma.liveness_of(&nb, Instant::now()),
             Some(Liveness::Unreachable),
             "A should detect that B is online but not responding to its messages"
+        );
+    }
+
+    // ---- Per-peer target selection (one address per peer per round) ------------------------------
+
+    /// A peer that is both a configured seed and a discovered member (with a different advertised
+    /// address) must receive exactly one Syn per round, at its configured (seed) address.
+    #[tokio::test]
+    async fn build_targets_selects_a_single_address_per_peer() {
+        let a: SocketAddr = "127.0.0.1:23001".parse().unwrap();
+        let seed_b: SocketAddr = "127.0.0.1:23002".parse().unwrap();
+        let advertised_b: SocketAddr = "10.0.0.2:23002".parse().unwrap();
+        let (na, nb) = (NodeID::new(), NodeID::new());
+
+        let net = MockNet::new();
+        let ma = socket_membership(na, a);
+        ma.set_seed_addresses([seed_b]);
+        let client = mock_client(&net, na, a, vec![seed_b], ma.clone());
+
+        let now = Instant::now();
+        ma.record_inbound(&nb, seed_b, now);
+        ma.record_inbound(&nb, advertised_b, now);
+
+        let targets = client.build_targets(now, &[seed_b]);
+        assert_eq!(
+            targets,
+            vec![(Some(nb), seed_b)],
+            "the peer must be targeted exactly once, at its configured address"
+        );
+    }
+
+    /// When the configured address is failing its retry backoff and another discovered address is
+    /// eligible, the peer is contacted (once) at the eligible address instead.
+    #[tokio::test]
+    async fn build_targets_uses_discovered_address_when_seed_is_backing_off() {
+        let a: SocketAddr = "127.0.0.1:23011".parse().unwrap();
+        let seed_b: SocketAddr = "127.0.0.1:23012".parse().unwrap();
+        let advertised_b: SocketAddr = "10.0.0.2:23012".parse().unwrap();
+        let (na, nb) = (NodeID::new(), NodeID::new());
+
+        let net = MockNet::new();
+        let ma = socket_membership(na, a);
+        ma.set_seed_addresses([seed_b]);
+        let client = mock_client(&net, na, a, vec![seed_b], ma.clone());
+
+        let base = Instant::now();
+        ma.record_inbound(&nb, seed_b, base);
+        ma.record_inbound(&nb, advertised_b, base);
+
+        // An unanswered send to the seed address trips its backoff once the reply timeout passes.
+        ma.record_send(&nb, &seed_b, base + Duration::from_millis(10));
+        let later = base + Duration::from_millis(500);
+        ma.sweep(later);
+
+        let targets = client.build_targets(later, &[seed_b]);
+        assert_eq!(
+            targets,
+            vec![(Some(nb), advertised_b)],
+            "the eligible discovered address must be used, and the seed must not add a second Syn"
+        );
+    }
+
+    /// Multiple configured addresses that all belong to the same discovered peer must still result
+    /// in a single Syn per round.
+    #[tokio::test]
+    async fn build_targets_collapses_multiple_seed_addresses_of_one_peer() {
+        let a: SocketAddr = "127.0.0.1:23021".parse().unwrap();
+        let seed1_b: SocketAddr = "127.0.0.1:23022".parse().unwrap();
+        let seed2_b: SocketAddr = "10.0.0.2:23022".parse().unwrap();
+        let (na, nb) = (NodeID::new(), NodeID::new());
+
+        let net = MockNet::new();
+        let ma = socket_membership(na, a);
+        ma.set_seed_addresses([seed1_b, seed2_b]);
+        let client = mock_client(&net, na, a, vec![seed1_b, seed2_b], ma.clone());
+
+        let base = Instant::now();
+        ma.record_inbound(&nb, seed1_b, base + Duration::from_millis(10));
+        ma.record_inbound(&nb, seed2_b, base);
+
+        let targets = client.build_targets(base + Duration::from_millis(10), &[seed1_b, seed2_b]);
+        assert_eq!(
+            targets,
+            vec![(Some(nb), seed1_b)],
+            "both configured addresses belong to the same peer, so only one may be contacted"
+        );
+    }
+
+    /// A seed address that cannot be attributed to any discovered member is still always contacted
+    /// (it is the only way a forgotten node can rejoin the cluster).
+    #[tokio::test]
+    async fn build_targets_keeps_unattributed_seed_addresses() {
+        let a: SocketAddr = "127.0.0.1:23031".parse().unwrap();
+        let seed: SocketAddr = "127.0.0.1:23032".parse().unwrap();
+        let na = NodeID::new();
+
+        let net = MockNet::new();
+        let ma = socket_membership(na, a);
+        ma.set_seed_addresses([seed]);
+        let client = mock_client(&net, na, a, vec![seed], ma.clone());
+
+        let targets = client.build_targets(Instant::now(), &[seed]);
+        assert_eq!(
+            targets,
+            vec![(None, seed)],
+            "an unknown seed address must be contacted anonymously as before"
+        );
+    }
+
+    /// A seed-owning member that was not picked by the random per-round sampling is still contacted
+    /// every round (seeds are never skipped), attributed to the member so its link health is
+    /// tracked.
+    #[tokio::test]
+    async fn build_targets_attributes_unsampled_seed_members() {
+        let a: SocketAddr = "127.0.0.1:23041".parse().unwrap();
+        let seed_b: SocketAddr = "127.0.0.1:23042".parse().unwrap();
+        let (na, nb) = (NodeID::new(), NodeID::new());
+
+        let net = MockNet::new();
+        let ma = socket_membership(na, a);
+        ma.set_seed_addresses([seed_b]);
+        // A gossip factor of zero means the healthy sampling never picks the peer, leaving the
+        // seed loop as the only path that can contact it.
+        let client = mock_client(&net, na, a, vec![seed_b], ma.clone()).with_gossip_factor(0);
+
+        let now = Instant::now();
+        ma.record_inbound(&nb, seed_b, now);
+
+        let targets = client.build_targets(now, &[seed_b]);
+        assert_eq!(
+            targets,
+            vec![(Some(nb), seed_b)],
+            "the seed contact must be attributed to its member so sends feed its link health"
         );
     }
 }

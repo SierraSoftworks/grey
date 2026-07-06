@@ -254,7 +254,9 @@ pub struct GossipCandidate<Id, Addr> {
     pub id: Id,
     pub address: Addr,
     pub liveness: Liveness,
-    /// False when this address is currently in backoff and should only be retried opportunistically.
+    /// False when this address is currently in backoff and should only be retried
+    /// opportunistically. Because eligible addresses are always selected first, this is only
+    /// false when *every* known address for the peer is in backoff.
     pub due: bool,
 }
 
@@ -563,18 +565,27 @@ where
         sample
     }
 
-    /// The peers (and the single best address for each) we should consider gossiping with this round,
-    /// annotated with liveness and whether the address is out of backoff.
+    /// The peers (and the single address selected for each) we should consider gossiping with this
+    /// round, annotated with liveness and whether the address is out of backoff.
+    ///
+    /// Exactly one address is selected per peer, so a peer discovered at several addresses is never
+    /// sent more than one message per round. A configured seed address always wins while it is
+    /// eligible (out of retry backoff); when it is failing that check and another address is
+    /// eligible, the eligible address is selected instead, and when no address is eligible at all
+    /// the seed address wins again. Remaining ties are broken by the most recent positive signal.
     pub fn gossip_candidates(&self, now: Instant) -> Vec<GossipCandidate<Id, Addr>> {
         let members = self.members.read().unwrap();
+        let seeds = self.seeds.read().unwrap();
         let window = self.working_window(members.len());
         let mut out = Vec::new();
         for (id, member) in members.iter() {
-            // Pick the best address: prefer working ones, ranked by the most recent good signal.
-            let best = member
-                .addresses
-                .iter()
-                .max_by_key(|(_, h)| h.last_good());
+            let best = member.addresses.iter().max_by_key(|(addr, health)| {
+                (
+                    now >= health.backoff_until,
+                    seeds.contains(addr),
+                    health.last_good(),
+                )
+            });
             if let Some((addr, health)) = best {
                 out.push(GossipCandidate {
                     id: id.clone(),
@@ -585,6 +596,15 @@ where
             }
         }
         out
+    }
+
+    /// The member known to own `addr`, if any — used to attribute a configured seed address to an
+    /// already-discovered peer so that peer is not gossiped more than once per round.
+    pub fn owner_of(&self, addr: &Addr) -> Option<Id> {
+        let members = self.members.read().unwrap();
+        members
+            .iter()
+            .find_map(|(id, member)| member.addresses.contains_key(addr).then(|| id.clone()))
     }
 
     /// Per-round maintenance: account for unconfirmed sends (advancing per-address backoff), emit
@@ -1009,6 +1029,91 @@ mod tests {
             !advertised.contains(&stale.to_string()),
             "an address sent to long ago must not be confirmed by an unrelated reply"
         );
+    }
+
+    #[test]
+    fn gossip_candidates_select_one_address_per_peer_preferring_seeds() {
+        let m = membership();
+        let base = Instant::now();
+        let seed = addr("10.0.0.2:8888");
+        let advertised = addr("10.1.0.2:8888");
+        m.set_seed_addresses([seed]);
+
+        // The advertised address has the freshest signal, but the configured seed address is
+        // eligible, so it must still be the one selected.
+        m.record_inbound(&nid(2), seed, base);
+        m.record_inbound(&nid(2), advertised, base + Duration::from_secs(1));
+
+        let candidates = m.gossip_candidates(base + Duration::from_secs(1));
+        assert_eq!(candidates.len(), 1, "exactly one address per peer per round");
+        assert_eq!(
+            candidates[0].address, seed,
+            "a configured seed address must be preferred while it is eligible"
+        );
+        assert!(candidates[0].due);
+    }
+
+    #[test]
+    fn gossip_candidates_fall_back_when_seed_address_is_backing_off() {
+        let m = membership();
+        let base = Instant::now();
+        let seed = addr("10.0.0.2:8888");
+        let advertised = addr("10.1.0.2:8888");
+        m.set_seed_addresses([seed]);
+
+        m.record_inbound(&nid(2), seed, base);
+        m.record_inbound(&nid(2), advertised, base);
+
+        // A send to the seed address that goes unanswered past the reply timeout trips its retry
+        // backoff (the circuit-breaker check for that address)...
+        m.record_send(&nid(2), &seed, base + Duration::from_millis(10));
+        let later = base + Duration::from_secs(2);
+        m.sweep(later);
+
+        // ...so the other, still-eligible address must be selected in its place.
+        let candidates = m.gossip_candidates(later);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(
+            candidates[0].address, advertised,
+            "an eligible discovered address must replace a seed address that is backing off"
+        );
+        assert!(candidates[0].due);
+    }
+
+    #[test]
+    fn gossip_candidates_return_seed_address_when_no_address_is_eligible() {
+        let m = membership();
+        let base = Instant::now();
+        let seed = addr("10.0.0.2:8888");
+        let advertised = addr("10.1.0.2:8888");
+        m.set_seed_addresses([seed]);
+
+        m.record_inbound(&nid(2), seed, base);
+        m.record_inbound(&nid(2), advertised, base);
+        m.record_send(&nid(2), &seed, base + Duration::from_millis(10));
+        m.record_send(&nid(2), &advertised, base + Duration::from_millis(10));
+        let later = base + Duration::from_secs(2);
+        m.sweep(later);
+
+        let candidates = m.gossip_candidates(later);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(
+            candidates[0].address, seed,
+            "with every address in backoff the configured address is still the one to retry"
+        );
+        assert!(
+            !candidates[0].due,
+            "a peer with no eligible address is only an opportunistic target"
+        );
+    }
+
+    #[test]
+    fn owner_of_attributes_known_addresses_to_their_member() {
+        let m = membership();
+        let a = addr("10.0.0.2:8888");
+        m.record_inbound(&nid(2), a, Instant::now());
+        assert_eq!(m.owner_of(&a), Some(nid(2)));
+        assert_eq!(m.owner_of(&addr("10.9.9.9:1")), None);
     }
 
     #[test]
