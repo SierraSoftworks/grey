@@ -8,17 +8,18 @@ impl EncryptionProvider for Aes256Gcm {
     type Key = [u8; 32];
 
     fn encrypt_with(&self, key: Self::Key, plaintext: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
-        use aes_gcm::aead::{Aead, AeadCore, OsRng};
+        use aes_gcm::aead::{Aead, Nonce};
         use aes_gcm::{Aes256Gcm, Key, KeyInit};
 
         let key: &Key<Aes256Gcm> = &key.into();
         let cipher = Aes256Gcm::new(&key);
 
-        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
-        let ciphertext = cipher.encrypt(&nonce, plaintext)
+        let nonce_bytes: [u8; 12] = rand::random();
+        let nonce = Nonce::<Aes256Gcm>::from_slice(&nonce_bytes);
+        let ciphertext = cipher.encrypt(nonce, plaintext)
             .map_err(|e| format!("Failed to encrypt gossip packet, ensure that you have provided a valid shared secret: {e:?}"))?;
 
-        let mut result = nonce.to_vec();
+        let mut result = nonce_bytes.to_vec();
         result.reserve_exact(ciphertext.len());
         result.extend(ciphertext);
         Ok(result)

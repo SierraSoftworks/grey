@@ -5,13 +5,27 @@ use tracing::instrument;
 use tracing_batteries::prelude::*;
 
 use crate::{Sample, js::JobQueue, targets::Target};
-use crate::js::JsInto;
+use crate::js::{JsInto, SessionStorage};
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ScriptTarget {
     pub code: String,
     #[serde(default)]
     pub args: Vec<String>,
+    /// Runtime cache backing the script's `sessionStorage` global. Clones share the
+    /// same store, so state persists across the per-run clones taken by the probe
+    /// runner and lasts until a config reload rebuilds this target.
+    #[serde(skip)]
+    session: SessionStorage,
+}
+
+/// Equality covers only the configured fields — the session store is runtime cache,
+/// not configuration. The config reloader relies on this comparison to decide when a
+/// probe has changed and needs its target (and therefore its cache) rebuilt.
+impl PartialEq for ScriptTarget {
+    fn eq(&self, other: &Self) -> bool {
+        self.code == other.code && self.args == other.args
+    }
 }
 
 impl Target for ScriptTarget {
@@ -25,7 +39,7 @@ impl Target for ScriptTarget {
             .job_executor(executor.clone())
             .build()?;
 
-        crate::js::setup_runtime(context, args)?;
+        crate::js::setup_runtime(context, self.session.clone(), args)?;
 
         let module = Module::parse(Source::from_bytes(&code), None, context)?;
 
@@ -123,6 +137,7 @@ mod tests {
         let target = ScriptTarget {
             code: r#"output.a = arguments[0]; output.b = arguments[1]"#.into(),
             args: vec!["arg1".into(), "arg2".into()],
+            ..Default::default()
         };
 
         let cancel = AtomicBool::new(false);
@@ -202,6 +217,75 @@ mod tests {
             Ok(result) => panic!("Expected timeout, but got {:?}", result),
             Err(_) => {}
         }
+    }
+
+    #[tokio::test]
+    async fn test_script_session_storage() {
+        let target = ScriptTarget {
+            code: r#"
+            const runs = parseInt(sessionStorage.getItem("runs") ?? "0", 10) + 1;
+            sessionStorage.setItem("runs", runs);
+            output.runs = sessionStorage.getItem("runs");
+            "#
+            .into(),
+            ..Default::default()
+        };
+        let cancel = AtomicBool::new(false);
+
+        // state persists across invocations, including through the per-run clones
+        // taken by the probe runner
+        let sample = target.run(&cancel).await.expect("no error to be raised");
+        assert_eq!(sample.get("runs"), &SampleValue::from("1"));
+
+        let sample = target
+            .clone()
+            .run(&cancel)
+            .await
+            .expect("no error to be raised");
+        assert_eq!(sample.get("runs"), &SampleValue::from("2"));
+
+        // ...but a separately constructed target (e.g. another probe using the same
+        // script, or this probe after a config reload) starts from an empty store
+        let fresh = ScriptTarget {
+            code: target.code.clone(),
+            ..Default::default()
+        };
+        let sample = fresh.run(&cancel).await.expect("no error to be raised");
+        assert_eq!(sample.get("runs"), &SampleValue::from("1"));
+    }
+
+    #[tokio::test]
+    async fn test_script_target_equality_ignores_session_state() {
+        let populated = ScriptTarget {
+            code: "sessionStorage.setItem('k', 'v')".into(),
+            ..Default::default()
+        };
+        let empty = ScriptTarget {
+            code: populated.code.clone(),
+            ..Default::default()
+        };
+
+        let cancel = AtomicBool::new(false);
+        populated.run(&cancel).await.expect("no error to be raised");
+
+        // the config reloader compares probes to decide what to rebuild; cached
+        // session state must not make otherwise-identical configs look different
+        assert_eq!(populated, empty);
+        assert_ne!(
+            populated,
+            ScriptTarget {
+                code: "other".into(),
+                ..Default::default()
+            }
+        );
+        assert_ne!(
+            populated,
+            ScriptTarget {
+                code: populated.code.clone(),
+                args: vec!["arg".into()],
+                ..Default::default()
+            }
+        );
     }
 
     #[tokio::test]
