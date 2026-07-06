@@ -10,6 +10,9 @@ on:
 env:
   PROTOC_VERSION: "26.0"
   VERSION: "0.0.0-dev"
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  APP_NAME: grey
 
 jobs:
   version:
@@ -237,12 +240,151 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           overwrite: "true"
 
+      # Also uploaded on releases so that the docker-build job can package the
+      # linux binaries into the container image.
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'release'
         with:
           name: grey-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.extension }}
           path: target/${{ matrix.target }}/release/grey${{ matrix.extension }}
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs:
+      - build-app
+
+    if: github.event_name == 'release'
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+
+    steps:
+      - name: set environment variables
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+
+          image="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          image="$(echo $image | tr '[:upper:]' '[:lower:]')"
+          echo "FULL_IMAGE_NAME=${image}" >> $GITHUB_ENV
+
+      - name: Setup Docker buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log into registry ${{ env.REGISTRY }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.FULL_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Pull in platform artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.APP_NAME }}-${{ env.PLATFORM_PAIR }}
+
+      - name: mark artifact as executable
+        run: |
+          chmod +x ${{ env.APP_NAME }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.FULL_IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true,annotation-index.org.opencontainers.image.description=Lightweight OpenTelemetry native health probing system
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-digest-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  docker-publish:
+    name: Docker Publish
+    runs-on: ubuntu-latest
+    needs:
+      - docker-build
+
+    if: github.event_name == 'release'
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: set environment variables
+        run: |
+          image="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          image="$(echo $image | tr '[:upper:]' '[:lower:]')"
+          echo "FULL_IMAGE_NAME=${image}" >> $GITHUB_ENV
+
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          path: /tmp/digests
+          pattern: image-digest-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.FULL_IMAGE_NAME }}
+
+      - name: Log into registry ${{ env.REGISTRY }}
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.FULL_IMAGE_NAME }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.FULL_IMAGE_NAME }}:${{ steps.meta.outputs.version }}
 
   tap:
     name: Update Homebrew Tap
