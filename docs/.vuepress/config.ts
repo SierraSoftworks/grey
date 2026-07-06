@@ -23,9 +23,10 @@ export default defineUserConfig({
     ['meta', { name: "description", content: "Documentation for Grey, a lightweight health probing agent with native OpenTelemetry integration." }],
     ['link', { rel: 'icon', href: '/favicon.ico' }],
     ["script", {
-        defer: "",
-        src: "https://analytics.sierrasoftworks.com/script.js",
-        "data-website-id": "75074736-b79c-4060-aa8e-a3297b0e61ba",
+        async: "",
+        src: "https://analytics.sierrasoftworks.com/tracker.js",
+        "data-api": "https://analytics.sierrasoftworks.com",
+        "data-auto-capture-exceptions": "true",
     }],
   ],
 
