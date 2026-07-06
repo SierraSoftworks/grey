@@ -17,6 +17,12 @@ Install with [Homebrew](https://brew.sh):
 brew install sierrasoftworks/tap/grey
 ```
 
+Or run the Docker image (published for `linux/amd64` and `linux/arm64`):
+
+```sh
+docker run -v $(pwd)/config.yaml:/config.yaml ghcr.io/sierrasoftworks/grey:latest --config /config.yaml
+```
+
 Pre-compiled binaries for other platforms are available from the
 [GitHub releases](https://github.com/SierraSoftworks/grey/releases) page.
 
