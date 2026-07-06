@@ -351,6 +351,12 @@ capabilities:
   `cluster.health.transition` event. Gossip prefers healthy links and backs off unhealthy ones, while
   always contacting seeds.
 
+A peer may be known at several addresses at once (a configured seed address, an advertised address,
+and the source addresses of its gossip). Each gossip round selects **exactly one** of them per peer,
+so a multi-homed peer never receives duplicate gossip in the same round. An address configured in
+`peers` is always preferred; only while it is failing its retry backoff *and* another known address
+is eligible does gossip route around it, returning to the configured address once it recovers.
+
 Each peer is summarised with an aggregate health, the best state across all of its addresses:
 **Online** (a confirmed two-way link), **Transitive** (alive in the cluster but no confirmed direct
 link), **Suspect** (heartbeats slowing), or **Offline** (not heard from for a long time).
