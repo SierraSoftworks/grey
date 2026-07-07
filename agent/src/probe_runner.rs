@@ -132,56 +132,56 @@ impl ProbeRunner {
             .record("probe.checks", debug(&probe.checks))
             .record("probe.tags", debug(&probe.tags));
 
-        let result = async {
-            match tokio::time::timeout(
-                probe.policy.timeout,
-                async {
-                    while !self.cancel.load(std::sync::atomic::Ordering::Relaxed)
+        let result = match tokio::time::timeout(
+            probe.policy.timeout,
+            async {
+                while !self.cancel.load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    sample.start_time = chrono::Utc::now();
+                    debug!(
+                        "Running probe attempt {}/{}...",
+                        sample.retries + 1, total_attempts,
+                    );
+                    match self.run_attempt(&probe, &mut sample).await
                     {
-                        sample.start_time = chrono::Utc::now();
-                        debug!(
-                            "Running probe attempt {}/{}...",
-                            sample.retries + 1, total_attempts,
-                        );
-                        match self.run_attempt(&probe, &mut sample).await
-                        {
-                            Ok(res) => return Ok(res),
-                            Err(err) => {
-                                debug!("Probe failed: {}", err);
-                                sample.retries += 1;
-                                sample.message = err.to_string();
-                                if sample.retries >= total_attempts {
-                                    return Err(err);
-                                }
+                        Ok(res) => return Ok(res),
+                        Err(err) => {
+                            debug!("Probe failed: {}", err);
+                            sample.retries += 1;
+                            sample.message = err.to_string();
+                            if sample.retries >= total_attempts {
+                                return Err(err);
                             }
                         }
                     }
+                }
 
-                    Err("Probe was cancelled.".into())
-            }).await {
-                Ok(Ok(res)) => return Ok(res),
-                Ok(Err(err)) => {
-                    debug!("Probe failed: {}", err);
-                    if sample.retries + 1 == total_attempts {
-                        warn!("Probe failed after {} retries: {}", sample.retries, err);
-                    }
-                    return Err(err);
+                Err("Probe was cancelled.".into())
+        }).await {
+            Ok(Ok(res)) => Ok(res),
+            Ok(Err(err)) => {
+                debug!("Probe failed: {}", err);
+                if sample.retries >= total_attempts {
+                    warn!("Probe failed after {} attempts: {}", sample.retries, err);
                 }
-                Err(err) => {
-                    debug!("Probe timed out: {}", err);
-                    if sample.retries == total_attempts {
-                        warn!("Probe timed out after {} retries: {}", sample.retries, err);
-                        if sample.message.is_empty() {
-                            sample.message = format!("Probe timed out after {} retries .", sample.retries);
-                        }
-                        return Err(format!("Probe timed out after {} retries.", sample.retries).into());
-                    }
-                }
+                Err(err)
             }
-
-            Ok(())
-        }
-        .await;
+            // The timeout bounds the whole retry loop, so when it elapses the in-flight attempt
+            // was dropped before its checks could be evaluated (and the retry counter can never
+            // have reached the attempt limit — exhaustion returns through the arm above). The
+            // probe therefore always fails here, however many attempts had completed.
+            Err(_) => {
+                let message = format!(
+                    "Probe timed out after {} (attempt {}/{}).",
+                    humantime::format_duration(probe.policy.timeout),
+                    sample.retries + 1,
+                    total_attempts
+                );
+                warn!("{message}");
+                sample.message = message.clone();
+                Err(message.into())
+            }
+        };
 
 
         Span::current().record("probe.attempts", sample.retries);
@@ -265,5 +265,41 @@ impl ProbeRunner {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::targets::TargetType;
+
+    /// A probe whose target stalls past the policy timeout must be recorded as a failure. The
+    /// timeout arm used to fall through to the success path (the retry counter can never have
+    /// reached the attempt limit once the deadline drops the in-flight attempt), so a stalled
+    /// probe — e.g. a DNS lookup against an unresponsive resolver — was stored as passing even
+    /// though none of its checks had been evaluated.
+    #[tokio::test]
+    async fn timed_out_probe_is_marked_failed() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = State::test(dir.path().to_path_buf()).await;
+
+        let mut probe = state.get_config().probes[0].clone();
+        probe.policy.timeout = std::time::Duration::from_millis(50);
+        probe.target = TargetType::Hang;
+
+        let runner = ProbeRunner::new(probe.clone(), state.clone());
+        let result = runner.run_scheduled_execution().await;
+        let err = result.expect_err("a timed-out probe must report an error").to_string();
+        assert!(err.contains("timed out"), "unexpected error: {err}");
+
+        let states = state.get_probe_states().await.unwrap();
+        let stored = states.get(&probe.name).expect("the probe state to be stored");
+        let bucket = stored.history.last().expect("a history bucket to be recorded");
+        assert!(!bucket.pass, "a timed-out probe must be recorded as failing");
+        assert!(bucket.message.contains("timed out"), "unexpected message: {}", bucket.message);
+        assert!(
+            bucket.validations.is_empty(),
+            "no checks ran before the deadline, so no validations should be recorded"
+        );
     }
 }
