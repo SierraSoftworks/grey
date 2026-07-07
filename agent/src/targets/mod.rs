@@ -21,6 +21,10 @@ pub trait Target: Display {
 pub enum TargetType {
     #[cfg(test)]
     Mock,
+    /// A test-only target that never completes, standing in for a real target that has
+    /// stalled (e.g. a DNS lookup against an unresponsive resolver).
+    #[cfg(test)]
+    Hang,
     Dns(dns::DnsTarget),
     Grpc(grpc::GrpcTarget),
     Http(http::HttpTarget),
@@ -41,6 +45,8 @@ impl TargetType {
         match self {
             #[cfg(test)]
             TargetType::Mock => Ok(Sample::default()),
+            #[cfg(test)]
+            TargetType::Hang => std::future::pending().await,
             TargetType::Dns(target) => target.run(cancel).await,
             TargetType::Grpc(target) => target.run(cancel).await,
             TargetType::Http(target) => target.run(cancel).await,
@@ -56,6 +62,8 @@ impl Display for TargetType {
         match self {
             #[cfg(test)]
             TargetType::Mock => write!(f, "Mock"),
+            #[cfg(test)]
+            TargetType::Hang => write!(f, "Hang"),
             TargetType::Dns(target) => write!(f, "{}", target),
             TargetType::Grpc(target) => write!(f, "{}", target),
             TargetType::Http(target) => write!(f, "{}", target),
@@ -71,6 +79,8 @@ impl Target for TargetType {
         match self {
             #[cfg(test)]
             TargetType::Mock => Ok(Sample::default()),
+            #[cfg(test)]
+            TargetType::Hang => std::future::pending().await,
             TargetType::Dns(target) => target.run(cancel).await,
             TargetType::Grpc(target) => target.run(cancel).await,
             TargetType::Http(target) => target.run(cancel).await,
