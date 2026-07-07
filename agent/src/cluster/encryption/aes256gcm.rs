@@ -15,8 +15,9 @@ impl EncryptionProvider for Aes256Gcm {
         let cipher = Aes256Gcm::new(&key);
 
         let nonce_bytes: [u8; 12] = rand::random();
-        let nonce = Nonce::<Aes256Gcm>::from_slice(&nonce_bytes);
-        let ciphertext = cipher.encrypt(nonce, plaintext)
+        let nonce = Nonce::<Aes256Gcm>::try_from(nonce_bytes)
+            .map_err(|e| format!("Failed to create nonce from ciphertext: {e:?}"))?;
+        let ciphertext = cipher.encrypt(&nonce, plaintext)
             .map_err(|e| format!("Failed to encrypt gossip packet, ensure that you have provided a valid shared secret: {e:?}"))?;
 
         let mut result = nonce_bytes.to_vec();
@@ -37,7 +38,8 @@ impl EncryptionProvider for Aes256Gcm {
         let cipher = Aes256Gcm::new(&key);
 
         let (nonce_bytes, ciphertext) = ciphertext.split_at(12);
-        let nonce = Nonce::<Aes256Gcm>::from_slice(nonce_bytes);
+        let nonce = Nonce::<Aes256Gcm>::try_from(nonce_bytes)
+            .map_err(|e| format!("Failed to create nonce from ciphertext: {e:?}"))?;
 
         let plaintext = cipher.decrypt(&nonce, ciphertext)
             .map_err(|e| format!("Failed to decrypt gossip packet, ensure that you have provided the correct shared secret: {e:?}"))?;
