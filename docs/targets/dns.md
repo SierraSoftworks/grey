@@ -36,6 +36,12 @@ The `record_type` property is used to specify the DNS record type which you woul
 query. The default record type, if none is provided, is `A` - corresponding to the IPv4
 address associated with the domain.
 
+### nameservers
+The `nameservers` property is used to specify a list of DNS nameservers which you would
+like to use for the query. If none are provided, the system's configured DNS resolver will
+be used. Each nameserver should be a valid IP address (such as `1.1.1.1` or `8.8.4.4`)
+and will, if provided, be used via UDP on port 53.
+
 ## Outputs
 
 ### dns.answers
