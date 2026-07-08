@@ -31,6 +31,9 @@ ui:
     links:
         - title: GitHub
             url: https://github.com/SierraSoftworks/grey
+    inject:
+      - '<script src="https://example.com/custom.js"></script>'
+      - '<link rel="stylesheet" href="https://example.com/custom.css">'
 ```
 
 :::
@@ -122,9 +125,79 @@ links:
     url: https://support.example.com
 ```
 
+### inject
+
+A list of raw HTML snippets to append to the page's `<head>` block. Each string is
+inserted verbatim, immediately before the closing `</head>` tag, on every server-rendered
+page. This lets you add custom styling, scripts, analytics, favicons, or `<meta>` tags
+without rebuilding Grey.
+
+```yaml
+ui:
+  enabled: true
+  inject: |
+    <link rel="stylesheet" href="https://example.com/custom.css">
+    <script src="https://example.com/custom.js"></script>
+    <link rel="icon" href="https://example.com/favicon.ico">
+```
+
+::: warning
+Snippets are injected exactly as written, with no escaping or sanitisation. Only inject
+markup you trust and control — a malicious or broken snippet runs in the browser of
+everyone who views your status page.
+:::
+
+### admin
+
+Optional administrative access configuration. When present, it enables the
+[incident management](./incidents.md) tooling and other admin APIs, gating them behind
+OIDC authentication and an access-control list. When omitted, the admin API is closed
+entirely and the status page remains fully public and read-only.
+
+See [Authentication](#authentication) below for the full configuration.
+
+## Authentication
+
+The status page itself is public and read-only by default. Administrative features —
+such as [declaring and managing incidents](./incidents.md) — are gated behind OIDC
+authentication, configured under `ui.admin`.
+
+```yaml
+ui:
+  enabled: true
+  admin:
+    # A filt-rs expression evaluated against the signed-in user's token claims.
+    # It must evaluate to true for a request to be allowed. Defaults to denying
+    # everyone, so the admin area is closed until you set this.
+    acl: 'claims.email == "you@example.com"'
+    oidc:
+      # Your OIDC provider's issuer / base URL.
+      endpoint: https://auth.example.com
+      # The OAuth2 client id registered for the status page.
+      client_id: grey-status-page
+      # The OAuth2 client secret. Held by the agent only; never sent to the browser.
+      client_secret: '00000000000000000000000000000000'
+      # Optional extra scopes (openid is always requested).
+      scopes: [profile, email]
+```
+
+Once configured, sign in via the **Sign in** button in the header. The browser runs the
+OIDC Authorization Code flow and hands the resulting authorization code to the agent,
+which exchanges it for a token using its configured `client_secret` and returns the token
+to the browser. The token is sent as an `Authorization: Bearer` header on admin requests —
+no cookies are used, and the client secret never reaches the browser.
+
+The same signed-in identity can also drive per-probe and per-cron
+[visibility](../guide/configuration.md#visibility), letting you hide selected entries from
+anonymous viewers.
+
+For the OIDC provider requirements, access-control (`acl`) expression syntax, and the full
+administration workflow, see [Incidents](./incidents.md).
+
 ## Security Considerations
 
  - By default, the UI listens only on `127.0.0.1` (localhost), making it accessible only from the same machine.
  - To make the status page publicly accessible, set the listen address to `0.0.0.0:3002`.
  - Consider placing the UI behind a reverse proxy with proper SSL/TLS termination for production deployments.
- - The UI does not include authentication mechanisms - it's designed to be a public status page.
+ - The public status page is read-only; administrative actions require signing in, enabled by configuring [authentication](#authentication) under `ui.admin`.
+ - Content added through `inject` is served verbatim to every viewer, so only inject markup you trust.

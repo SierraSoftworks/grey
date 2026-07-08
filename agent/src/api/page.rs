@@ -67,13 +67,21 @@ pub async fn index(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpRe
     let renderer = ServerRenderer::<App>::with_props(move || app_props).hydratable(true);
     let ssr_content = renderer.render().await;
 
-    let (index_html_before, index_html_after) = html_template.split_once("<body>").unwrap();
+    let (index_html_before_body, index_html_after_body) = html_template.split_once("<body>").unwrap();
+
+    let (index_html_before_head, index_html_after_head) = index_html_before_body.split_once("</head>").unwrap();
+
+
     let mut index_html_before =
-        index_html_before.replace("<title></title>", &format!("<title>{}</title>", title));
+        index_html_before_head.replace("<title></title>", &format!("<title>{}</title>", title));
+    
+    index_html_before.push_str(&config.ui.inject);
+    index_html_before.push_str("</head>");
+    index_html_before.push_str(index_html_after_head);
     index_html_before.push_str("<body>");
 
     Ok(HttpResponse::Ok().content_type("text/html").body(format!(
-        "{index_html_before}{ssr_content}{index_html_after}"
+        "{index_html_before}{ssr_content}{index_html_after_body}"
     )))
 }
 
