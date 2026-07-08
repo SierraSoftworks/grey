@@ -305,6 +305,9 @@ pub struct UiConfig {
     #[serde(default = "default::ui::logo")]
     pub logo: String,
 
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub inject: String,
+
     #[serde(default)]
     pub links: Vec<grey_api::UiLink>,
 
@@ -326,6 +329,7 @@ impl Default for UiConfig {
             listen: default::ui::listen(),
             title: default::ui::title(),
             logo: default::ui::logo(),
+            inject: String::new(),
             links: vec![],
             reload_interval: default::ui::reload_interval(),
             admin: None,
