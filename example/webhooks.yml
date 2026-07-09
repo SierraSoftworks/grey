@@ -2,9 +2,11 @@
 # This example demonstrates `webhooks`: state-change notifications that let Grey integrate
 # with incident-management platforms and other automation.
 #
-# Whenever a probe flips between passing and failing, or a cron changes health (succeeded,
-# failed, missing, overrunning, ...), Grey delivers a JSON event to each configured endpoint
-# whose `filter` matches it. The body and headers are documented in docs/guide/webhooks.md;
+# Whenever a probe or cron crosses between healthy and unhealthy — a probe flipping between
+# passing and failing, or a cron failing / going missing / overrunning (and recovering from any
+# of those) — Grey delivers a JSON event to each configured endpoint whose `filter` matches it.
+# A normal run of a healthy cron (succeeded -> running -> succeeded) stays healthy throughout and
+# is not notified. The body and headers are documented in docs/guide/webhooks.md;
 # in short, every delivery carries:
 #
 #   POST <endpoint>

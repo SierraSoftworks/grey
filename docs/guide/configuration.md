@@ -176,8 +176,9 @@ cluster:
 You can read more about clustering in the [Clustering](../clustering/README.md) section of the documentation.
 
 ## Webhooks
-Grey can notify external systems whenever a probe or cron changes state, which is handy for wiring
-Grey into incident-management platforms, chat tools, or your own automation. Each webhook declares a
+Grey can notify external systems whenever a probe or cron crosses between healthy and unhealthy,
+which is handy for wiring Grey into incident-management platforms, chat tools, or your own
+automation. Each webhook declares a
 destination `endpoint`, an optional shared `secret` used to sign deliveries, an optional set of extra
 `headers`, and a `filter` (in the same [`filt-rs`](../checks/README.md) language as `checks`) that
 selects which events it receives.
