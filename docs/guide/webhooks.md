@@ -18,14 +18,21 @@ A full, runnable example lives in [`example/webhooks.yml`](https://github.com/Si
 
 ## What triggers a notification
 Grey continuously re-derives the displayed state of every probe and cron — exactly the state the
-status page renders — and sends an event whenever an entity's status changes:
+status page renders — and sends an event whenever an entity crosses between **healthy** and
+**unhealthy**. Movement *within* a health class is not notified, so a healthy job running on a tight
+schedule does not produce a stream of events.
 
-- **Probes** transition between `passing` and `failing`. The `failing` state includes a probe that
-  has stopped responding: recovery is implicit, so a probe reads as failing until no failure has been
-  observed for the recovery window, then transitions back to `passing`.
-- **Crons** transition between the [cron health states](./crons.md): `pending`, `running`,
-  `succeeded`, `failed`, `missing` (a run was not started in time), and `stuck` (a run is
-  overrunning its `max_duration`).
+- **Probes** are healthy while `passing` and unhealthy while `failing`. The `failing` state includes
+  a probe that has stopped responding: recovery is implicit, so a probe reads as failing until no
+  failure has been observed for the recovery window, then transitions back to `passing`.
+- **Crons** are healthy while `pending`, `running`, or `succeeded`, and unhealthy while `failed`,
+  `missing` (a run was not started in time), or `stuck` (a run is overrunning its `max_duration`).
+  An event fires only when a cron crosses between those two groups — a normal run cycling
+  `succeeded` → `running` → `succeeded` stays healthy throughout and is silent. The specific state
+  it moved to is carried in `state.current` (and the health axis in `state.healthy`).
+
+The recovery window (probes) and the schedule grace / `max_duration` (crons) act as a settling time
+on these transitions, so a transient blip that clears within those windows never produces an event.
 
 Because state is re-derived on a short cadence, both *event-driven* changes (a fresh probe sample or
 cron check-in) and *time-driven* changes (a probe recovering, or a cron run going missing) are

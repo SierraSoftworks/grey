@@ -38,8 +38,8 @@ Pre-compiled binaries for other platforms are available from the
 - **Expressive checks.** Validate responses with [`filt-rs`](https://docs.rs/filt-rs)
   expressions: ranges, regular expressions, membership, and relationships between fields.
 - **Webhook notifications.** Deliver a signed JSON event to incident-management and
-  automation tools whenever a probe or cron changes state, filtered with the same
-  [`filt-rs`](https://docs.rs/filt-rs) expression language as checks.
+  automation tools whenever a probe or cron crosses between healthy and unhealthy, filtered
+  with the same [`filt-rs`](https://docs.rs/filt-rs) expression language as checks.
 - **Native OpenTelemetry.** Export traces (with propagation) to any OTLP endpoint.
 - **Built-in status page.** An optional, brandable status page with customer-facing
   incident management.

@@ -1,6 +1,13 @@
 //! Webhook notifications: a background task that watches the cluster-pooled probe and cron state for
-//! transitions and delivers a signed JSON [`grey_api::WebhookEvent`] to every configured endpoint
-//! whose filter matches.
+//! *health* transitions — an entity crossing between healthy and unhealthy — and delivers a signed
+//! JSON [`grey_api::WebhookEvent`] to every configured endpoint whose filter matches.
+//!
+//! Only a crossing of the health axis notifies. Movement *within* a health class does not — most
+//! importantly a cron cycling `succeeded` → `running` → `succeeded` on every run, which reads as
+//! healthy throughout (`pending`/`running`/`succeeded` are all passing) and would otherwise deliver
+//! two events per run. A frequently-scheduled job therefore produces no traffic until it actually
+//! breaks. The specific state an entity moved to is still carried on the event (`state.current` /
+//! `state.previous`); it just isn't what gates delivery.
 //!
 //! Detection is poll-based rather than event-driven, because some transitions are driven purely by
 //! the passage of time rather than by a sample or a check-in: a probe recovers once no failure has
@@ -150,11 +157,15 @@ impl Notifier {
 }
 
 /// Records the current status of every probe and cron against `last`, returning a
-/// [`WebhookEvent`] for each entity whose status token changed since the previous pass.
+/// [`WebhookEvent`] for each entity that crossed between healthy and unhealthy since the previous
+/// pass.
 ///
-/// `last` is always updated to the current status (so it tracks the pooled view continuously); events
-/// are only produced when `notify` is set, when the entity already had a recorded baseline, and when
-/// its token actually changed — so the first time an entity is seen it is seeded silently.
+/// `last` is always updated to the current status (so it tracks the pooled view continuously,
+/// including token changes that stay within one health class); events are only produced when
+/// `notify` is set, when the entity already had a recorded baseline, and when its *health* flipped —
+/// so the first time an entity is seen it is seeded silently, and same-health churn (a healthy cron
+/// moving `succeeded` ⇆ `running` as runs come and go) never notifies. The event still reports the
+/// specific tokens it moved between.
 fn detect_transitions(
     last: &mut HashMap<String, Status>,
     now: DateTime<Utc>,
@@ -166,13 +177,15 @@ fn detect_transitions(
 
     for (name, probe) in probes {
         let key = format!("probe:{name}");
-        // The token is derived from the cluster-converged streak (recovery settling included).
+        // Both the token and the healthy axis it collapses to are read from the cluster-converged
+        // streak, which already folds in the recovery settling window; delivery is gated on the
+        // healthy axis so only a genuine passing⇆failing crossing notifies.
         let token = probe.status_token();
         let healthy = probe.passing();
 
         if notify
             && let Some(previous) = last.get(&key)
-            && previous.token != token
+            && previous.healthy != healthy
         {
             events.push(WebhookEvent::for_probe(
                 new_id(),
@@ -188,13 +201,17 @@ fn detect_transitions(
 
     for (name, cron) in crons {
         let key = format!("cron:{name}");
+        // The derived health already accounts for the schedule grace and `max_duration` settling
+        // windows. Delivery is gated on the healthy axis, so the `succeeded`/`running` churn a normal
+        // run produces (all healthy) is silent — only a crossing into or out of `failed`/`missing`/
+        // `stuck` notifies.
         let health = cron.health(now);
         let token = health.as_str();
         let healthy = health.passing();
 
         if notify
             && let Some(previous) = last.get(&key)
-            && previous.token != token
+            && previous.healthy != healthy
         {
             events.push(WebhookEvent::for_cron(
                 new_id(),
@@ -432,6 +449,21 @@ mod tests {
         cron
     }
 
+    /// A cron on a fixed 60s schedule with a single run of `status` that started at `started_at`, so
+    /// its health at a chosen `now` can be steered across the health axis (a stale `succeeded` run
+    /// reads as `missing`, a `failed` run as `failed`, and so on).
+    fn cron_at(status: CronStatus, started_at: DateTime<Utc>) -> Cron {
+        let mut cron = Cron::from_config(
+            "job",
+            HashMap::new(),
+            CronSchedule::Every(Duration::from_secs(60)),
+            None,
+            None,
+        );
+        cron.push_run(CronRun { started_at, status, duration: None });
+        cron
+    }
+
     fn webhook(endpoint: String, secret: Option<&str>, filter: &str) -> WebhookConfig {
         WebhookConfig {
             name: Some("test".into()),
@@ -505,6 +537,49 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].state.previous, "succeeded");
         assert_eq!(events[0].state.current, "failed");
+    }
+
+    /// Delivery is gated on the health axis, not the specific token: a cron churning through healthy
+    /// sub-states (a normal run: succeeded → running → succeeded) stays silent, and so does churn
+    /// between unhealthy sub-states (failed → missing). Only the crossings out of and back into
+    /// healthy fire — each exactly once, carrying the specific tokens involved. This is the flood
+    /// that previously delivered two events on every run of a perfectly healthy job.
+    #[test]
+    fn notifies_only_on_health_axis_crossings() {
+        let mut last = HashMap::new();
+        let now = Utc::now();
+        let probes = HashMap::new();
+        let map = |cron: Cron| HashMap::from([("job".to_string(), cron)]);
+
+        // Seed healthy (a completed run).
+        let succeeded = map(cron_at(CronStatus::Succeeded, now));
+        assert!(detect_transitions(&mut last, now, &probes, &succeeded, true).is_empty());
+
+        // A new run starts — running is still healthy, so nothing fires...
+        let running = map(cron_at(CronStatus::Running, now));
+        assert!(detect_transitions(&mut last, now, &probes, &running, true).is_empty());
+        // ...and completing it (back to succeeded) is still healthy: still silent.
+        assert!(detect_transitions(&mut last, now, &probes, &succeeded, true).is_empty());
+
+        // The run fails: healthy -> unhealthy fires exactly one event.
+        let failed = map(cron_at(CronStatus::Failed, now));
+        let events = detect_transitions(&mut last, now, &probes, &failed, true);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].state.previous, "succeeded");
+        assert_eq!(events[0].state.current, "failed");
+
+        // A stale on-time run then reads as `missing` — unhealthy -> unhealthy is silent.
+        let missing = map(cron_at(CronStatus::Succeeded, now - chrono::Duration::seconds(120)));
+        assert_eq!(missing["job"].health(now), grey_api::CronHealth::Missing);
+        assert!(detect_transitions(&mut last, now, &probes, &missing, true).is_empty());
+
+        // Finally a fresh run succeeds: unhealthy -> healthy fires one event, reporting the specific
+        // token (`missing`) it recovered from rather than the older `failed`.
+        let recovered = map(cron_at(CronStatus::Succeeded, now));
+        let events = detect_transitions(&mut last, now, &probes, &recovered, true);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].state.previous, "missing");
+        assert_eq!(events[0].state.current, "succeeded");
     }
 
     #[test]
