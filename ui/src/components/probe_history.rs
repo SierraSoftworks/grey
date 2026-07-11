@@ -23,6 +23,11 @@ pub struct ProbeHistoryProps {
     /// segment (and its tooltip) from the live state rather than the bucket's average.
     #[prop_or_default]
     pub streak: grey_api::Streak,
+
+    /// The probe's configured debounce/recovery window, so the live segment's debounced health
+    /// matches the rest of the UI. Defaults to the streak's default window.
+    #[prop_or_else(grey_api::Streak::default_recovery_window)]
+    pub window: chrono::Duration,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -107,7 +112,7 @@ pub fn probe_history(props: &ProbeHistoryProps) -> Html {
                 // Older segments only have their averages to go on.
                 let is_current = index + 1 == props.samples.len();
                 let current_streak = (is_current && !props.streak.is_empty()).then_some(&props.streak);
-                let current_passing = current_streak.map(|s| s.passing());
+                let current_passing = current_streak.map(|s| s.healthy_at(Utc::now(), props.window));
                 let sample_class = sample_class(current_passing, sample.max_availability());
 
                 // Serialize the entire ProbeResult to JSON
@@ -125,7 +130,7 @@ pub fn probe_history(props: &ProbeHistoryProps) -> Html {
                     >
                         if is_tooltip_target {
                             if let Some(probe_result) = &tooltip_data.probe_result {
-                                {render_tooltip(probe_result, current_streak, auth_data.is_authenticated())}
+                                {render_tooltip(probe_result, current_streak, props.window, auth_data.is_authenticated())}
                             } else {
                                 // Fallback for SSR or when probe_result is None
                                 <Popover status_class="unknown" status="Loading...">
@@ -145,15 +150,17 @@ pub fn probe_history(props: &ProbeHistoryProps) -> Html {
     }
 }
 
-fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::Streak>, include_observers: bool) -> Html {
+fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::Streak>, window: chrono::Duration, include_observers: bool) -> Html {
     let (status_text, status_class) = match streak {
         Some(streak) => {
+            let now = Utc::now();
+            let healthy = streak.healthy_at(now, window);
             let since = streak
-                .since()
-                .map(|t| format!(" for {}", compact_duration(Utc::now() - t)))
+                .since_at(now, window)
+                .map(|t| format!(" for {}", compact_duration(now - t)))
                 .unwrap_or_default();
-            let label = if streak.passing() { "Passing" } else { "Failing" };
-            (format!("{label}{since}"), pass_class(streak.passing()))
+            let label = if healthy { "Passing" } else { "Failing" };
+            (format!("{label}{since}"), pass_class(healthy))
         }
         _ => (
             (if probe_result.max_availability() == 100.0 { "Passed" } else { "Failed" }).to_string(),
@@ -277,7 +284,7 @@ mod tests {
     #[function_component(Harness)]
     fn harness(props: &HarnessProps) -> Html {
         let streak = (!props.streak.is_empty()).then_some(&props.streak);
-        render_tooltip(&props.bucket, streak, true)
+        render_tooltip(&props.bucket, streak, grey_api::Streak::default_recovery_window(), true)
     }
 
     async fn render(streak: grey_api::Streak) -> String {
@@ -296,7 +303,7 @@ mod tests {
     #[tokio::test]
     async fn test_tooltip_shows_bucket_footer_and_streak_since() {
         let mut streak = grey_api::Streak::default();
-        streak.observe(true, chrono::Utc::now() - chrono::Duration::days(5));
+        streak.observe(true, chrono::Utc::now() - chrono::Duration::days(5), grey_api::Streak::default_recovery_window());
 
         let html = render(streak).await;
         assert!(html.contains("popover__time"), "expected the bucket timestamp footer, got: {html}");

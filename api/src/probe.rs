@@ -25,9 +25,25 @@ pub struct Probe {
     /// The cluster-converged record of this probe's pass/fail streaks
     #[serde(default)]
     pub streak: Streak,
+
+    /// The debounce window applied to this probe's streak-derived health (a config echo of the
+    /// probe's `alerting.debounce`, stamped by the agent). Applied symmetrically to both the onset of
+    /// a fault and the recovery from it. `None` falls back to [`Streak::default_recovery_window`],
+    /// preserving the historical 5-minute behaviour for records written before per-probe alerting
+    /// existed.
+    #[serde(default, with = "humantime_serde::option")]
+    pub debounce: Option<std::time::Duration>,
 }
 
 impl Probe {
+    /// The debounce window governing this probe's streak-derived health, falling back to the default
+    /// when the agent has not stamped a configured value.
+    pub fn window(&self) -> chrono::Duration {
+        self.debounce
+            .and_then(|w| chrono::Duration::from_std(w).ok())
+            .unwrap_or_else(Streak::default_recovery_window)
+    }
+
     /// Aggregate all observations into a single total observation
     pub fn total(&self) -> Observation {
         self.observations.values().fold(Observation::default(), |mut acc, obs| {
@@ -41,14 +57,19 @@ impl Probe {
         self.total().success_rate()
     }
 
-    /// Whether this probe is currently passing, falling back to the latest history
-    /// bucket's result when the streak record carries no observations.
+    /// Whether this probe is currently passing (debounced by its configured window), falling back to
+    /// the latest history bucket's result when the streak record carries no observations.
     pub fn passing(&self) -> bool {
         if self.streak.is_empty() {
             self.history.last().map(|h| h.pass).unwrap_or(true)
         } else {
-            self.streak.passing()
+            self.streak.healthy_at(chrono::Utc::now(), self.window())
         }
+    }
+
+    /// When the probe's current (debounced) state was entered.
+    pub fn since(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.streak.since_at(chrono::Utc::now(), self.window())
     }
 
     /// The derived status token used to describe the probe in notifications: `"passing"` or
@@ -143,6 +164,7 @@ mod tests {
                 total_latency: std::time::Duration::from_secs(5),
             })].into_iter().collect(),
             streak: Streak::default(),
+            debounce: None,
         };
 
         let probe2 = Probe {
@@ -157,6 +179,7 @@ mod tests {
                 total_latency: std::time::Duration::from_secs(3),
             })].into_iter().collect(),
             streak: Streak::default(),
+            debounce: None,
         };
 
         probe1.merge(&probe2);
@@ -190,6 +213,7 @@ mod tests {
                 }),
             ].into_iter().collect(),
             streak: Streak::default(),
+            debounce: None,
         };
 
         let total = probe.total();
@@ -221,6 +245,7 @@ mod tests {
                 }),
             ].into_iter().collect(),
             streak: Streak::default(),
+            debounce: None,
         };
 
         let availability = probe.availability();
@@ -237,6 +262,7 @@ mod tests {
             history: vec![],
             observations: HashMap::new(),
             streak: Streak::default(),
+            debounce: None,
         };
 
         // With an empty streak record (e.g. data from older agents), the probe falls
@@ -252,22 +278,37 @@ mod tests {
         });
         assert!(!probe.passing());
 
-        // A streak record with a long-standing coverage claim reports passing...
-        probe.streak.observe(true, now - chrono::Duration::days(3));
-        assert!(probe.streak.passing_at(now));
-        assert_eq!(probe.streak.since_at(now), Some(now - chrono::Duration::days(3)));
+        // A streak record with a long-standing coverage claim reports passing.
+        probe.streak.observe(true, now - chrono::Duration::days(3), Streak::default_recovery_window());
+        assert!(probe.streak.passing_at(now, Streak::default_recovery_window()));
+        assert_eq!(probe.streak.since_at(now, Streak::default_recovery_window()), Some(now - chrono::Duration::days(3)));
         assert!(probe.passing());
+    }
 
-        // ...until a failure is observed by any node, which wins immediately.
-        probe.streak.observe(false, now - chrono::Duration::minutes(1));
-        assert!(!probe.passing());
-        assert_eq!(probe.streak.since_at(now), Some(now - chrono::Duration::minutes(1)));
+    /// The streak-derived health is debounced by the window: a fault reads failing only once it has
+    /// persisted for the whole window, and reads passing again a window after the last failure. This
+    /// is evaluated at explicit instants (unlike [`Probe::passing`], which reads the wall clock).
+    #[test]
+    fn test_probe_health_is_debounced() {
+        let window = Streak::default_recovery_window();
+        let base = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        // A continuous fault: onset at `base`, still failing at `base + window`.
+        let streak = Streak {
+            failing_since: Some(base),
+            failing_until: Some(base + window),
+            covered_since: None,
+        };
 
-        // Once no failures have been seen for the recovery window, the probe reads as
-        // passing again, since the last failing observation.
-        let later = now + Streak::recovery_window();
-        assert!(probe.streak.passing_at(later));
-        assert_eq!(probe.streak.since_at(later), Some(now - chrono::Duration::minutes(1)));
+        // The onset is debounced away until the fault is a full window old.
+        assert!(streak.healthy_at(base, window), "onset must be debounced");
+        assert!(streak.healthy_at(base + window - chrono::Duration::seconds(1), window));
+        assert!(!streak.healthy_at(base + window, window), "a sustained fault trips at the window");
+        assert_eq!(streak.since_at(base + window, window), Some(base));
+
+        // Recovery is likewise debounced: still failing until a window after the last failure.
+        let last_fail = base + window;
+        assert!(!streak.healthy_at(last_fail + window - chrono::Duration::seconds(1), window));
+        assert!(streak.healthy_at(last_fail + window + chrono::Duration::seconds(1), window));
     }
 
     #[test]
@@ -288,6 +329,7 @@ mod tests {
                 failing_until: Some(chrono::DateTime::from_timestamp(1_699_999_900, 0).unwrap()),
                 covered_since: Some(chrono::DateTime::from_timestamp(1_690_000_000, 0).unwrap()),
             },
+            debounce: None,
         };
 
         let packed = rmp_serde::to_vec(&probe).unwrap();

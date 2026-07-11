@@ -22,7 +22,7 @@ impl ServiceGroup<'_> {
         }
 
         let healthy = self.probes.iter().filter(|p| p.passing()).count()
-            + self.crons.iter().filter(|c| c.passing(now)).count();
+            + self.crons.iter().filter(|c| c.passing(now, c.window())).count();
 
         let health = if healthy == total {
             "ok"
@@ -136,6 +136,7 @@ mod tests {
             history: vec![],
             observations: Default::default(),
             streak: Default::default(),
+            debounce: None,
         }
     }
 

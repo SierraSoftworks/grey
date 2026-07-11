@@ -42,6 +42,46 @@ When Grey starts it records the current state of every entity **silently**, so a
 replays the state your services are already in — only genuine transitions observed afterwards are
 delivered.
 
+## Tuning sensitivity: `alerting`
+By default a probe or cron is considered to have changed health only once the new state has held
+**continuously for five minutes** — both when it becomes unhealthy and when it recovers. This
+debounce suppresses brief flaps so a single failed sample, or a job that is a few seconds late, does
+not page anyone. You can tune it per entity with an `alerting` block:
+
+```yaml
+probes:
+  - name: example.web
+    policy: { interval: 5s, timeout: 2s }
+    target: !Http
+      url: https://example.com
+    alerting:
+      enabled: true      # deliver webhooks for this probe's transitions (the default)
+      debounce: 10m      # require the new state to hold for 10 minutes before reporting it
+
+crons:
+  - name: backup.nightly
+    schedule: '0 2 * * *'
+    alerting:
+      debounce: 0s       # report as soon as the state is derived (no debounce)
+```
+
+| Field | Default | Description |
+| ----- | ------- | ----------- |
+| `alerting.enabled` | `true` | Whether webhook notifications fire for this entity. When `false`, its health is still tracked and shown on the status page, but no webhook is delivered. |
+| `alerting.debounce` | `5m` | How long a new health state must hold before it is reported. Applied symmetrically to both the onset of a fault and the recovery from it. |
+
+The `debounce` also governs the entity's **displayed** health: a fault is shown (and a recovery
+cleared) only once it has held for this long, so the status page and the webhooks always agree. For a
+probe this replaces the previously fixed five-minute recovery window with your configured value; set
+a shorter `debounce` for faster, noisier alerting or a longer one to ride out routine flapping.
+
+### Missed and overrunning cron runs
+A cron that never checks in (a missed run — the deadman-switch case) or one that overruns its
+`max_duration` has no check-in to record, so Grey synthesises a placeholder run for it. These
+placeholders appear on the status page in grey (distinct from a job-reported failure) and progress
+the same health signal, so a missed run is debounced and alerted on exactly like a reported failure.
+
+
 ## The event payload
 The payload mirrors the probe/cron API representation rather than any single node's view: the
 transition is derived from the cluster-converged streak (probes) or cron health — which already fold

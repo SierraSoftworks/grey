@@ -35,6 +35,10 @@ probes:
     tags:
       service: Example
       team: Platform
+    # Only alert once the probe has been failing (or recovered) continuously for two minutes,
+    # riding out brief blips. `debounce` also governs the displayed health, and defaults to 5m.
+    alerting:
+      debounce: 2m
 
 crons:
   - name: backup.nightly
@@ -44,6 +48,10 @@ crons:
     tags:
       service: Backups
       team: Platform
+    # A missed nightly backup is materialised as a grey placeholder run and alerted on like a
+    # reported failure; alerting is enabled by default.
+    alerting:
+      enabled: true
 
 webhooks:
   # Page the on-call team for any *unhealthy* transition (a probe failing, or a cron that

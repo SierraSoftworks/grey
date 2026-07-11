@@ -101,12 +101,36 @@ impl Notifier {
         let probes = self.state.get_probe_states().await?;
         let crons = self.state.get_cron_states().await?;
 
+        // Whether a given entity has alerting enabled. The health axis is already debounced by the
+        // streak (via each entity's configured window); `enabled` only decides whether a genuine
+        // transition is delivered. A missing entry defaults to enabled.
+        let alerting_enabled = |key: &str| -> bool {
+            if let Some(name) = key.strip_prefix("probe:") {
+                config
+                    .probes
+                    .iter()
+                    .find(|p| p.name == name)
+                    .map(|p| p.alerting.enabled)
+                    .unwrap_or(true)
+            } else if let Some(name) = key.strip_prefix("cron:") {
+                config
+                    .crons
+                    .iter()
+                    .find(|c| c.name == name)
+                    .map(|c| c.alerting.enabled)
+                    .unwrap_or(true)
+            } else {
+                true
+            }
+        };
+
         let events = detect_transitions(
             &mut self.last,
             now,
             &probes,
             &crons,
             !config.webhooks.is_empty(),
+            &alerting_enabled,
         );
 
         if !events.is_empty() {
@@ -160,30 +184,34 @@ impl Notifier {
 /// [`WebhookEvent`] for each entity that crossed between healthy and unhealthy since the previous
 /// pass.
 ///
+/// The health axis is read from each entity's debounced, streak-derived health (`probe.passing()` /
+/// `cron.health(now, window)`), so a fault must persist for the entity's configured `alerting.debounce`
+/// before it reads unhealthy and a recovery must hold for that long before it reads healthy — the
+/// flap suppression is entirely in the streak, this function only detects the confirmed crossing.
+///
 /// `last` is always updated to the current status (so it tracks the pooled view continuously,
 /// including token changes that stay within one health class); events are only produced when
-/// `notify` is set, when the entity already had a recorded baseline, and when its *health* flipped —
-/// so the first time an entity is seen it is seeded silently, and same-health churn (a healthy cron
-/// moving `succeeded` ⇆ `running` as runs come and go) never notifies. The event still reports the
-/// specific tokens it moved between.
+/// `notify` is set, the entity's alerting is `enabled`, the entity already had a recorded baseline,
+/// and its *health* flipped — so the first time an entity is seen it is seeded silently, and
+/// same-health churn never notifies. The event still reports the specific tokens it moved between.
 fn detect_transitions(
     last: &mut HashMap<String, Status>,
     now: DateTime<Utc>,
     probes: &HashMap<String, Probe>,
     crons: &HashMap<String, Cron>,
     notify: bool,
+    enabled: &impl Fn(&str) -> bool,
 ) -> Vec<WebhookEvent> {
     let mut events = Vec::new();
 
     for (name, probe) in probes {
         let key = format!("probe:{name}");
-        // Both the token and the healthy axis it collapses to are read from the cluster-converged
-        // streak, which already folds in the recovery settling window; delivery is gated on the
-        // healthy axis so only a genuine passing⇆failing crossing notifies.
+        // The token and its healthy axis both come from the debounced, streak-derived health.
         let token = probe.status_token();
         let healthy = probe.passing();
 
         if notify
+            && enabled(&key)
             && let Some(previous) = last.get(&key)
             && previous.healthy != healthy
         {
@@ -201,15 +229,15 @@ fn detect_transitions(
 
     for (name, cron) in crons {
         let key = format!("cron:{name}");
-        // The derived health already accounts for the schedule grace and `max_duration` settling
-        // windows. Delivery is gated on the healthy axis, so the `succeeded`/`running` churn a normal
-        // run produces (all healthy) is silent — only a crossing into or out of `failed`/`missing`/
-        // `stuck` notifies.
-        let health = cron.health(now);
+        // The debounced health folds in the schedule grace / `max_duration` settling windows *and*
+        // the configured alerting debounce, so a normal run's `succeeded`/`running` churn is silent —
+        // only a confirmed crossing into or out of `failed`/`missing`/`stuck` notifies.
+        let health = cron.health(now, cron.window());
         let token = health.as_str();
         let healthy = health.passing();
 
         if notify
+            && enabled(&key)
             && let Some(previous) = last.get(&key)
             && previous.healthy != healthy
         {
@@ -419,18 +447,39 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    /// Alerting-enabled for every entity — the common case for these tests.
+    fn all_enabled(_: &str) -> bool {
+        true
+    }
+
+    /// A probe in a *confirmed* passing or failing state under the default debounce window: a failing
+    /// probe carries a sustained fault episode (onset older than the window, still failing now), so
+    /// the debounced `passing()` reads failing rather than being suppressed as a fresh blip.
     fn probe(name: &str, failing: bool) -> Probe {
         let now = Utc::now();
-        let mut probe = Probe {
+        let window = Streak::default_recovery_window();
+        let streak = if failing {
+            Streak {
+                failing_since: Some(now - window - chrono::Duration::minutes(1)),
+                failing_until: Some(now),
+                covered_since: None,
+            }
+        } else {
+            Streak {
+                failing_since: None,
+                failing_until: None,
+                covered_since: Some(now - window - chrono::Duration::minutes(1)),
+            }
+        };
+        Probe {
             name: name.into(),
             tags: vec![("service".into(), "Web".into())].into_iter().collect(),
             last_updated: now,
             history: Vec::new(),
             observations: HashMap::new(),
-            streak: Streak::default(),
-        };
-        probe.streak.observe(!failing, now);
-        probe
+            streak,
+            debounce: None,
+        }
     }
 
     fn cron(name: &str, status: CronStatus) -> Cron {
@@ -445,13 +494,15 @@ mod tests {
             started_at: Utc::now(),
             status,
             duration: Some(Duration::from_secs(1)),
+            reason: None,
         });
         cron
     }
 
     /// A cron on a fixed 60s schedule with a single run of `status` that started at `started_at`, so
     /// its health at a chosen `now` can be steered across the health axis (a stale `succeeded` run
-    /// reads as `missing`, a `failed` run as `failed`, and so on).
+    /// reads as `missing`, a `failed` run as `failed`, and so on). The streak is left empty so the
+    /// health reads instantaneously (raw), isolating the crossing logic from the debounce.
     fn cron_at(status: CronStatus, started_at: DateTime<Utc>) -> Cron {
         let mut cron = Cron::from_config(
             "job",
@@ -460,7 +511,7 @@ mod tests {
             None,
             None,
         );
-        cron.push_run(CronRun { started_at, status, duration: None });
+        cron.push_run(CronRun { started_at, status, duration: None, reason: None });
         cron
     }
 
@@ -487,11 +538,11 @@ mod tests {
         let empty_crons = HashMap::new();
 
         // First pass seeds "passing" and fires nothing.
-        let events = detect_transitions(&mut last, now, &passing, &empty_crons, true);
+        let events = detect_transitions(&mut last, now, &passing, &empty_crons, true, &all_enabled);
         assert!(events.is_empty(), "the first observation must seed silently");
 
         // The probe goes failing: one event, summarising the transition.
-        let events = detect_transitions(&mut last, now, &failing, &empty_crons, true);
+        let events = detect_transitions(&mut last, now, &failing, &empty_crons, true, &all_enabled);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].state.previous, "passing");
         assert_eq!(events[0].state.current, "failing");
@@ -499,7 +550,7 @@ mod tests {
         assert!(events[0].state.was_healthy);
 
         // No further change: nothing fires.
-        let events = detect_transitions(&mut last, now, &failing, &empty_crons, true);
+        let events = detect_transitions(&mut last, now, &failing, &empty_crons, true, &all_enabled);
         assert!(events.is_empty());
     }
 
@@ -513,12 +564,12 @@ mod tests {
         let crons = HashMap::new();
 
         // notify=false: no events, but the baseline is recorded as "failing".
-        let events = detect_transitions(&mut last, now, &failing, &crons, false);
+        let events = detect_transitions(&mut last, now, &failing, &crons, false, &all_enabled);
         assert!(events.is_empty());
 
         // Now notifying, with the same (failing) state: still nothing, because it matches the seeded
         // baseline rather than being treated as a fresh transition.
-        let events = detect_transitions(&mut last, now, &failing, &crons, true);
+        let events = detect_transitions(&mut last, now, &failing, &crons, true, &all_enabled);
         assert!(events.is_empty());
     }
 
@@ -532,8 +583,8 @@ mod tests {
         let succeeded = HashMap::from([("backup".to_string(), cron("backup", CronStatus::Succeeded))]);
         let failed = HashMap::from([("backup".to_string(), cron("backup", CronStatus::Failed))]);
 
-        assert!(detect_transitions(&mut last, now, &probes, &succeeded, true).is_empty());
-        let events = detect_transitions(&mut last, now, &probes, &failed, true);
+        assert!(detect_transitions(&mut last, now, &probes, &succeeded, true, &all_enabled).is_empty());
+        let events = detect_transitions(&mut last, now, &probes, &failed, true, &all_enabled);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].state.previous, "succeeded");
         assert_eq!(events[0].state.current, "failed");
@@ -553,33 +604,102 @@ mod tests {
 
         // Seed healthy (a completed run).
         let succeeded = map(cron_at(CronStatus::Succeeded, now));
-        assert!(detect_transitions(&mut last, now, &probes, &succeeded, true).is_empty());
+        assert!(detect_transitions(&mut last, now, &probes, &succeeded, true, &all_enabled).is_empty());
 
         // A new run starts — running is still healthy, so nothing fires...
         let running = map(cron_at(CronStatus::Running, now));
-        assert!(detect_transitions(&mut last, now, &probes, &running, true).is_empty());
+        assert!(detect_transitions(&mut last, now, &probes, &running, true, &all_enabled).is_empty());
         // ...and completing it (back to succeeded) is still healthy: still silent.
-        assert!(detect_transitions(&mut last, now, &probes, &succeeded, true).is_empty());
+        assert!(detect_transitions(&mut last, now, &probes, &succeeded, true, &all_enabled).is_empty());
 
         // The run fails: healthy -> unhealthy fires exactly one event.
         let failed = map(cron_at(CronStatus::Failed, now));
-        let events = detect_transitions(&mut last, now, &probes, &failed, true);
+        let events = detect_transitions(&mut last, now, &probes, &failed, true, &all_enabled);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].state.previous, "succeeded");
         assert_eq!(events[0].state.current, "failed");
 
         // A stale on-time run then reads as `missing` — unhealthy -> unhealthy is silent.
         let missing = map(cron_at(CronStatus::Succeeded, now - chrono::Duration::seconds(120)));
-        assert_eq!(missing["job"].health(now), grey_api::CronHealth::Missing);
-        assert!(detect_transitions(&mut last, now, &probes, &missing, true).is_empty());
+        assert_eq!(missing["job"].health(now, missing["job"].window()), grey_api::CronHealth::Missing);
+        assert!(detect_transitions(&mut last, now, &probes, &missing, true, &all_enabled).is_empty());
 
         // Finally a fresh run succeeds: unhealthy -> healthy fires one event, reporting the specific
         // token (`missing`) it recovered from rather than the older `failed`.
         let recovered = map(cron_at(CronStatus::Succeeded, now));
-        let events = detect_transitions(&mut last, now, &probes, &recovered, true);
+        let events = detect_transitions(&mut last, now, &probes, &recovered, true, &all_enabled);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].state.previous, "missing");
         assert_eq!(events[0].state.current, "succeeded");
+    }
+
+    /// The onset debounce is entirely in the streak: a probe whose fault has not yet persisted for the
+    /// window reads healthy and fires nothing; once the fault is confirmed (a continuous episode older
+    /// than the window) the passing → failing crossing fires exactly once.
+    #[test]
+    fn debounces_a_probe_onset_via_the_streak() {
+        let mut last = HashMap::new();
+        let now = Utc::now();
+        let window = Streak::default_recovery_window();
+        let empty_crons = HashMap::new();
+
+        let with_streak = |streak: Streak| {
+            let mut p = probe("web", false);
+            p.streak = streak;
+            HashMap::from([("web".to_string(), p)])
+        };
+
+        // Seed passing.
+        let passing = with_streak(Streak {
+            covered_since: Some(now - chrono::Duration::hours(1)),
+            ..Default::default()
+        });
+        assert!(detect_transitions(&mut last, now, &passing, &empty_crons, true, &all_enabled).is_empty());
+
+        // A fresh fault (onset just now) is still within the debounce window: it reads healthy, so no
+        // event fires — the sensitivity reduction we set out to add.
+        let fresh_fault = with_streak(Streak {
+            failing_since: Some(now),
+            failing_until: Some(now),
+            covered_since: Some(now - chrono::Duration::hours(1)),
+        });
+        assert!(
+            detect_transitions(&mut last, now, &fresh_fault, &empty_crons, true, &all_enabled).is_empty(),
+            "an unconfirmed fault must not alert"
+        );
+
+        // Once the fault has persisted past the window (continuous episode), it is confirmed failing
+        // and the crossing fires exactly one event.
+        let confirmed = with_streak(Streak {
+            failing_since: Some(now - window - chrono::Duration::minutes(1)),
+            failing_until: Some(now),
+            covered_since: Some(now - chrono::Duration::hours(1)),
+        });
+        let events = detect_transitions(&mut last, now, &confirmed, &empty_crons, true, &all_enabled);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].state.previous, "passing");
+        assert_eq!(events[0].state.current, "failing");
+    }
+
+    /// A per-entity `enabled: false` suppresses delivery entirely, but the baseline is still tracked
+    /// so re-enabling does not replay the state the entity is already in.
+    #[test]
+    fn disabled_entity_never_notifies_but_tracks_baseline() {
+        let mut last = HashMap::new();
+        let now = Utc::now();
+        let empty_crons = HashMap::new();
+        let disabled = |_: &str| false;
+
+        let passing = HashMap::from([("web".to_string(), probe("web", false))]);
+        let failing = HashMap::from([("web".to_string(), probe("web", true))]);
+
+        // Seed passing, then flip to failing: with alerting disabled, nothing fires...
+        assert!(detect_transitions(&mut last, now, &passing, &empty_crons, true, &disabled).is_empty());
+        assert!(detect_transitions(&mut last, now, &failing, &empty_crons, true, &disabled).is_empty());
+
+        // ...but the baseline advanced to "failing", so re-enabling on the same (failing) state does
+        // not replay it as a fresh transition.
+        assert!(detect_transitions(&mut last, now, &failing, &empty_crons, true, &all_enabled).is_empty());
     }
 
     #[test]
@@ -764,11 +884,18 @@ mod tests {
         notifier.evaluate().await.unwrap();
         assert!(server.received_requests().await.unwrap().is_empty());
 
-        // Record a failing sample so the pooled probe flips to failing.
-        let mut sample = crate::result::ProbeResult::new();
-        sample.pass = false;
-        sample.message = "boom".into();
-        state.update_probe_state("web", sample.finish()).await.unwrap();
+        // Record a *sustained* failing episode so the debounced (default 5m window) health confirms
+        // the probe as failing rather than suppressing a single fresh sample as a blip: three failing
+        // samples spanning more than the window, each within the window of the last so they stay one
+        // continuous episode.
+        let now = Utc::now();
+        for offset_mins in [8, 4, 0] {
+            let mut sample = crate::result::ProbeResult::new();
+            sample.start_time = now - chrono::Duration::minutes(offset_mins);
+            sample.pass = false;
+            sample.message = "boom".into();
+            state.update_probe_state("web", sample).await.unwrap();
+        }
 
         // The next pass detects passing -> failing and delivers a matching event.
         notifier.evaluate().await.unwrap();

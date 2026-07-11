@@ -25,6 +25,12 @@ pub struct Probe {
     /// `visible: auth.admin` restricts the probe to signed-in administrators.
     #[serde(default = "crate::config::default_visible_filter")]
     pub visible: filt_rs::Filter,
+
+    /// Controls webhook alerting for this probe: whether it is enabled and how long a health change
+    /// must persist before it is reported. The `debounce` also governs the probe's streak-derived
+    /// health hysteresis (see [`crate::config::AlertingConfig`]).
+    #[serde(default)]
+    pub alerting: crate::config::AlertingConfig,
 }
 
 impl Probe {
@@ -37,6 +43,7 @@ impl Probe {
             tags: HashMap::new(),
             checks: vec![filt_rs::Filter::new("output.test == true").unwrap()],
             visible: crate::config::default_visible_filter(),
+            alerting: crate::config::AlertingConfig::default(),
         }
     }
 
@@ -94,6 +101,7 @@ impl Into<grey_api::Probe> for &Probe {
             history: Vec::new(),
             observations: HashMap::new(),
             streak: grey_api::Streak::default(),
+            debounce: Some(self.alerting.debounce_std()),
         }
     }
 }

@@ -160,7 +160,7 @@ impl WebhookEvent {
                 previous: previous_token.into(),
                 healthy: probe.passing(),
                 was_healthy: previous_healthy,
-                since: probe.streak.since(),
+                since: probe.since(),
                 availability: Some(probe.availability()),
             },
             probe: Some(probe.clone()),
@@ -178,7 +178,7 @@ impl WebhookEvent {
         previous_token: impl Into<String>,
         previous_healthy: bool,
     ) -> Self {
-        let health = cron.health(now);
+        let health = cron.health(now, cron.window());
         Self {
             version: WEBHOOK_SCHEMA_VERSION.to_string(),
             id: id.into(),
@@ -215,17 +215,21 @@ mod tests {
 
     fn failing_probe(name: &str) -> Probe {
         let now = Utc::now();
-        let mut probe = Probe {
+        let window = Streak::default_recovery_window();
+        Probe {
             name: name.into(),
             tags: vec![("service".into(), "Web".into())].into_iter().collect(),
             last_updated: now,
             history: Vec::new(),
             observations: HashMap::new(),
-            streak: Streak::default(),
-        };
-        // A single failing observation flips the streak to failing.
-        probe.streak.observe(false, now);
-        probe
+            // A sustained fault older than the debounce window, so the debounced health reads failing.
+            streak: Streak {
+                failing_since: Some(now - window - chrono::Duration::seconds(1)),
+                failing_until: Some(now),
+                covered_since: None,
+            },
+            debounce: None,
+        }
     }
 
     #[test]
@@ -256,7 +260,7 @@ mod tests {
             None,
             None,
         );
-        cron.push_run(CronRun { started_at: ts(100), status: CronStatus::Failed, duration: Some(Duration::from_secs(5)) });
+        cron.push_run(CronRun { started_at: ts(100), status: CronStatus::Failed, duration: Some(Duration::from_secs(5)), reason: None });
         cron.last_checkin = Some(CheckIn { at: ts(105), status: CronStatus::Failed, message: "boom".into() });
 
         let event = WebhookEvent::for_cron("evt-2", ts(200), &cron, ts(200), "succeeded", true);

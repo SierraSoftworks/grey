@@ -780,6 +780,7 @@ mod tests {
             history: Vec::new(),
             observations: std::collections::HashMap::new(),
             streak: grey_api::Streak::default(),
+            debounce: None,
         };
 
         // Anonymous: only the public probe survives, but the orphan (no config entry) is kept.

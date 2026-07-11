@@ -1,7 +1,7 @@
 use super::{Popover, PopoverAlign, StatusDot};
 use crate::formatters::compact_duration;
 use crate::styles::{cron_class, cron_run_class};
-use grey_api::{CronHealth, CronRun, CronSchedule, CronStatus};
+use grey_api::{CronHealth, CronRun, CronRunReason, CronSchedule, CronStatus};
 use yew::prelude::*;
 
 #[derive(Properties, PartialEq)]
@@ -16,7 +16,7 @@ pub struct CronProps {
 pub fn cron(props: &CronProps) -> Html {
     let cron = &props.cron;
     let now = chrono::Utc::now();
-    let health = cron.health(now);
+    let health = cron.health(now, cron.window());
     let class = cron_class(health);
 
     // Which run's popover is currently open (on hover).
@@ -91,7 +91,7 @@ pub fn cron(props: &CronProps) -> Html {
                         };
                         html! {
                             <span
-                                class={classes!("cron-run", cron_run_class(run.status), is_hovered.then_some("tooltip-target"))}
+                                class={classes!("cron-run", cron_run_class(run), is_hovered.then_some("tooltip-target"))}
                                 {onmouseenter}
                                 {onmouseleave}
                             >
@@ -139,11 +139,19 @@ fn render_run_popover(run: &CronRun, align: PopoverAlign) -> Html {
         None => None,
     };
 
+    // A synthesised placeholder is labelled by its detected fault (missed/stuck) rather than the
+    // underlying status it carries to progress the streak.
+    let status = match run.reason {
+        Some(CronRunReason::Missed) => "Missed run",
+        Some(CronRunReason::Stuck) => "Overrunning",
+        None => run.status.label(),
+    };
+
     html! {
         <Popover
             {align}
-            status_class={cron_run_class(run.status)}
-            status={run.status.label()}
+            status_class={cron_run_class(run)}
+            status={status}
             timestamp={timestamp}
         >
             <div class="tooltip__details">
@@ -196,6 +204,7 @@ mod tests {
             started_at: now - chrono::Duration::seconds(30),
             status: CronStatus::Succeeded,
             duration: Some(Duration::from_secs(30)),
+            reason: None,
         });
         cron.last_checkin = Some(grey_api::CheckIn {
             at: now,
@@ -226,6 +235,7 @@ mod tests {
             started_at: chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
             status: CronStatus::Succeeded,
             duration: Some(Duration::from_secs(90)),
+            reason: None,
         };
         let html = yew::ServerRenderer::<PopoverHarness>::with_props(move || PopoverHarnessProps { run })
             .render()

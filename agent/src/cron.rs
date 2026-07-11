@@ -41,6 +41,7 @@ impl CronCheckin {
                         started_at: at,
                         status: CronStatus::Running,
                         duration: None,
+                        reason: None,
                     });
                 }
                 // Otherwise this is a heartbeat for the run already in flight: it advances
@@ -56,8 +57,15 @@ impl CronCheckin {
                         started_at: at,
                         status: self.status,
                         duration: None,
+                        reason: None,
                     });
                 }
+
+                // Only terminal outcomes progress the streak — the common health interface shared
+                // with probes. A `running` heartbeat carries no pass/fail signal and is ignored.
+                let window = cron.window();
+                cron.streak
+                    .observe(self.status == CronStatus::Succeeded, at, window);
             }
         }
 
@@ -121,6 +129,28 @@ mod tests {
         checkin(CronStatus::Succeeded, "", 160).apply(&mut c);
         assert_eq!(c.runs.len(), 2);
         assert!(c.runs.iter().all(|r| r.duration.is_none()));
+    }
+
+    /// Only terminal check-ins progress the streak: a `running` heartbeat leaves it untouched, a
+    /// `succeeded` records a passing observation, and a `failed` records a failing one.
+    #[test]
+    fn terminal_checkins_progress_the_streak() {
+        let window = grey_api::Streak::default_recovery_window();
+        let mut c = cron();
+
+        // A running heartbeat carries no pass/fail signal.
+        checkin(CronStatus::Running, "", 100).apply(&mut c);
+        assert!(c.streak.is_empty(), "running must not progress the streak");
+
+        // A terminal success records a passing observation...
+        checkin(CronStatus::Succeeded, "ok", 130).apply(&mut c);
+        assert!(!c.streak.is_empty());
+        assert!(c.streak.passing_at(ts(130), window));
+
+        // ...and a later failure records a failing observation the streak reads as failing.
+        checkin(CronStatus::Failed, "boom", 260).apply(&mut c);
+        assert!(c.streak.failing_at(ts(260), window));
+        assert_eq!(c.streak.failing_since, Some(ts(260)));
     }
 
     #[test]

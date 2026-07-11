@@ -4,9 +4,11 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::Streak;
+
 /// How many recent runs are retained per cron. This bounded list is both the displayed history and
 /// the input the detectors read (for the last run's start time).
-pub const MAX_RUNS: usize = 20;
+pub const MAX_RUNS: usize = 50;
 
 /// The grace applied to a crontab schedule when none is configured. For an `Every` schedule the
 /// default is instead a tenth of the interval (see [`Cron::effective_grace`]).
@@ -154,6 +156,37 @@ impl CronHealth {
     }
 }
 
+/// Why a run was synthesised by the agent's cron monitor rather than reported by the job itself. A
+/// run carrying a reason is a *placeholder* the monitor persisted for a detected fault (a run that
+/// never checked in, or one that overran), so the UI can render it distinctly ("grey") and the
+/// streak can count it as a failure. Absent (`None`) for genuine, job-reported runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CronRunReason {
+    /// No run started within the schedule grace — a scheduled run was missed (deadman switch).
+    Missed,
+    /// An in-flight run overran its `max_duration` without reporting completion.
+    Stuck,
+}
+
+impl CronRunReason {
+    /// The derived health this synthetic run represents.
+    pub fn health(self) -> CronHealth {
+        match self {
+            CronRunReason::Missed => CronHealth::Missing,
+            CronRunReason::Stuck => CronHealth::Stuck,
+        }
+    }
+
+    /// A lowercase token suitable for a CSS class or serialized value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CronRunReason::Missed => "missed",
+            CronRunReason::Stuck => "stuck",
+        }
+    }
+}
+
 /// One observed run of a cron job, identified by its start time.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CronRun {
@@ -163,12 +196,16 @@ pub struct CronRun {
     /// The run's duration, set once a terminal check-in arrives.
     #[serde(default, with = "humantime_serde::option")]
     pub duration: Option<Duration>,
+    /// Set when this run is a monitor-synthesised placeholder for a detected fault (missed/stuck)
+    /// rather than a job-reported run. `None` for genuine runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<CronRunReason>,
 }
 
 impl CronRun {
     /// Whether this run is still in flight (reported `running`, no terminal status yet).
     pub fn is_in_flight(&self) -> bool {
-        self.status == CronStatus::Running
+        self.status == CronStatus::Running && self.reason.is_none()
     }
 }
 
@@ -225,6 +262,20 @@ pub struct Cron {
     /// The latest check-in, for displaying the reported status and message.
     #[serde(default)]
     pub last_checkin: Option<CheckIn>,
+
+    /// The cluster-converged record of this cron's pass/fail streaks, progressed by terminal run
+    /// outcomes (succeeded/failed) and by the monitor's missed/stuck detections. This is the common
+    /// health interface shared with probes: alerting and the debounced health axis are derived from
+    /// it. Records written before crons carried a streak decode as empty and fall back to the
+    /// instantaneous [`Cron::raw_health`].
+    #[serde(default)]
+    pub streak: Streak,
+
+    /// The debounce window applied to this cron's streak-derived health (a config echo of the cron's
+    /// `alerting.debounce`, stamped by the agent). Applied symmetrically to both the onset of a fault
+    /// and the recovery from it. `None` falls back to [`Streak::default_recovery_window`].
+    #[serde(default, with = "humantime_serde::option")]
+    pub debounce: Option<Duration>,
 }
 
 impl Cron {
@@ -246,6 +297,8 @@ impl Cron {
             grace,
             runs: Vec::new(),
             last_checkin: None,
+            streak: Streak::default(),
+            debounce: None,
         }
     }
 
@@ -329,11 +382,19 @@ impl Cron {
         self.completion_deadline().map(|d| now > d).unwrap_or(false)
     }
 
-    /// The cron's displayed health at `now`.
-    pub fn health(&self, now: DateTime<Utc>) -> CronHealth {
+    /// The cron's *raw* (un-debounced) displayed health at `now`, computed analytically from the
+    /// runs and schedule. A monitor-synthesised run reports its own reason (missed/stuck); otherwise
+    /// the schedule/completion detectors and the latest run's status decide.
+    pub fn raw_health(&self, now: DateTime<Utc>) -> CronHealth {
         let Some(latest) = self.runs.last() else {
             return CronHealth::Pending;
         };
+
+        // A materialised detection placeholder reports its reason directly, so the token survives
+        // (a synthetic missed/stuck run still reads `missing`/`stuck`, not `failed`).
+        if let Some(reason) = latest.reason {
+            return reason.health();
+        }
 
         if latest.status == CronStatus::Failed {
             return CronHealth::Failed;
@@ -351,9 +412,41 @@ impl Cron {
         }
     }
 
-    /// Whether the cron currently reads as passing.
-    pub fn passing(&self, now: DateTime<Utc>) -> bool {
-        self.health(now).passing()
+    /// The debounce/recovery window governing this cron's streak-derived health, falling back to the
+    /// default when the agent has not stamped a configured value.
+    pub fn window(&self) -> chrono::Duration {
+        self.debounce
+            .and_then(|w| chrono::Duration::from_std(w).ok())
+            .unwrap_or_else(Streak::default_recovery_window)
+    }
+
+    /// The cron's displayed health at `now`, debounced by `window`. The health *axis* (pass/fail) is
+    /// taken from the streak so a fault must persist for `window` before it shows and a recovery must
+    /// hold for `window` before it clears; the specific token is the raw one when it agrees with that
+    /// axis, or a neutral token on the confirmed side during a debounce window. A cron whose streak
+    /// carries no observations (legacy records) reads its instantaneous [`Cron::raw_health`].
+    pub fn health(&self, now: DateTime<Utc>, window: chrono::Duration) -> CronHealth {
+        let raw = self.raw_health(now);
+        if self.streak.is_empty() {
+            return raw;
+        }
+        match (self.streak.healthy_at(now, window), raw.passing()) {
+            // The debounced axis and the raw token already agree — report the specific token.
+            (true, true) | (false, false) => raw,
+            // Debounced-healthy while a fresh fault has not yet been confirmed: hold healthy.
+            (true, false) => CronHealth::Succeeded,
+            // Debounced-unhealthy while the raw token has already recovered: hold the fault.
+            (false, true) => CronHealth::Failed,
+        }
+    }
+
+    /// Whether the cron currently reads as passing at `now`, debounced by `window`.
+    pub fn passing(&self, now: DateTime<Utc>, window: chrono::Duration) -> bool {
+        if self.streak.is_empty() {
+            self.raw_health(now).passing()
+        } else {
+            self.streak.healthy_at(now, window)
+        }
     }
 
     /// When the current health state was entered, computed analytically (no sampling loop or streak
@@ -383,6 +476,11 @@ mod tests {
         DateTime::from_timestamp(secs, 0).unwrap()
     }
 
+    /// The window used by tests exercising the raw (empty-streak) health path.
+    fn win() -> chrono::Duration {
+        Streak::default_recovery_window()
+    }
+
     fn every(secs: u64) -> CronSchedule {
         CronSchedule::Every(Duration::from_secs(secs))
     }
@@ -392,6 +490,7 @@ mod tests {
             started_at: ts(start),
             status,
             duration: dur.map(Duration::from_secs),
+            reason: None,
         }
     }
 
@@ -411,18 +510,18 @@ mod tests {
     #[test]
     fn cold_start_is_pending() {
         let c = Cron::from_config("c", HashMap::new(), every(60), None, None);
-        assert_eq!(c.health(ts(10_000)), CronHealth::Pending);
-        assert!(c.passing(ts(10_000)));
+        assert_eq!(c.health(ts(10_000), win()), CronHealth::Pending);
+        assert!(c.passing(ts(10_000), win()));
         assert!(!c.schedule_overdue(ts(10_000)));
         assert!(!c.completion_overdue(ts(10_000)));
-        assert_eq!(c.since(c.health(ts(10_000))), None);
+        assert_eq!(c.since(c.health(ts(10_000), win())), None);
     }
 
     #[test]
     fn a_failed_latest_run_reads_failed() {
         let c = cron_with(every(60), vec![run(100, CronStatus::Failed, Some(0))], None, None);
-        assert_eq!(c.health(ts(101)), CronHealth::Failed);
-        assert!(!c.passing(ts(101)));
+        assert_eq!(c.health(ts(101), win()), CronHealth::Failed);
+        assert!(!c.passing(ts(101), win()));
 
         // A newer run that is merely running reads as running, not the previous failure.
         let c = cron_with(
@@ -431,17 +530,56 @@ mod tests {
             None,
             None,
         );
-        assert_eq!(c.health(ts(161)), CronHealth::Running);
+        assert_eq!(c.health(ts(161), win()), CronHealth::Running);
+    }
+
+    /// A monitor-synthesised run carries a reason marker: the raw health reports the reason's token
+    /// (missing/stuck) rather than `failed`, so the specific fault survives materialisation.
+    #[test]
+    fn synthetic_run_reports_its_reason_token() {
+        let mut c = cron_with(every(60), vec![run(100, CronStatus::Succeeded, Some(1))], None, None);
+        c.runs.push(CronRun {
+            started_at: ts(166),
+            status: CronStatus::Failed,
+            duration: None,
+            reason: Some(CronRunReason::Missed),
+        });
+        assert_eq!(c.raw_health(ts(200)), CronHealth::Missing);
+
+        c.runs.last_mut().unwrap().reason = Some(CronRunReason::Stuck);
+        assert_eq!(c.raw_health(ts(200)), CronHealth::Stuck);
+    }
+
+    /// With a non-empty streak the cron health is debounced by the window: a fault must persist for
+    /// the window before it shows, and a recovery must hold for the window before it clears.
+    #[test]
+    fn cron_health_is_debounced_by_the_streak() {
+        let window = chrono::Duration::minutes(5);
+        let base = ts(1_000);
+        let mut c = cron_with(every(60), vec![run(1_000, CronStatus::Failed, Some(0))], None, None);
+        // Model a sustained failing streak beginning at `base`.
+        c.streak = Streak {
+            failing_since: Some(base),
+            failing_until: Some(base + window),
+            covered_since: None,
+        };
+
+        // Raw health is failed immediately, but the debounced health holds healthy until the window.
+        assert_eq!(c.raw_health(base), CronHealth::Failed);
+        assert!(c.passing(base, window), "onset is debounced");
+        assert_eq!(c.health(base, window), CronHealth::Succeeded, "holds a healthy token during onset");
+        assert!(!c.passing(base + window, window), "trips at the window");
+        assert_eq!(c.health(base + window, window), CronHealth::Failed);
     }
 
     #[test]
     fn schedule_detector_flags_after_interval_plus_grace() {
         // interval 60s, default grace = 6s ⇒ deadline at last_start + 66s.
         let c = cron_with(every(60), vec![run(1_000, CronStatus::Succeeded, Some(5))], None, None);
-        assert_eq!(c.health(ts(1_065)), CronHealth::Succeeded);
-        assert!(c.passing(ts(1_065)));
-        assert_eq!(c.health(ts(1_067)), CronHealth::Missing);
-        assert!(!c.passing(ts(1_067)));
+        assert_eq!(c.health(ts(1_065), win()), CronHealth::Succeeded);
+        assert!(c.passing(ts(1_065), win()));
+        assert_eq!(c.health(ts(1_067), win()), CronHealth::Missing);
+        assert!(!c.passing(ts(1_067), win()));
     }
 
     #[test]
@@ -453,7 +591,7 @@ mod tests {
             .collect();
         let c = cron_with(every(60), runs, None, None);
         let last = 1_000 + 4 * 90;
-        assert_eq!(c.health(ts(last + 67)), CronHealth::Missing);
+        assert_eq!(c.health(ts(last + 67), win()), CronHealth::Missing);
     }
 
     #[test]
@@ -461,7 +599,7 @@ mod tests {
         // No max_duration: an in-flight run is never stuck (a long interval keeps the schedule
         // detector quiet so we isolate completion detection).
         let c = cron_with(every(3600), vec![run(1_000, CronStatus::Running, None)], None, None);
-        assert_eq!(c.health(ts(2_000)), CronHealth::Running);
+        assert_eq!(c.health(ts(2_000), win()), CronHealth::Running);
 
         // With max_duration, it goes stuck once exceeded, and clears once it completes.
         let c = cron_with(
@@ -470,8 +608,8 @@ mod tests {
             Some(Duration::from_secs(60)),
             None,
         );
-        assert_eq!(c.health(ts(1_055)), CronHealth::Running);
-        assert_eq!(c.health(ts(1_061)), CronHealth::Stuck);
+        assert_eq!(c.health(ts(1_055), win()), CronHealth::Running);
+        assert_eq!(c.health(ts(1_061), win()), CronHealth::Stuck);
 
         let c = cron_with(
             every(3600),
@@ -479,24 +617,24 @@ mod tests {
             Some(Duration::from_secs(60)),
             None,
         );
-        assert_eq!(c.health(ts(1_070)), CronHealth::Succeeded);
+        assert_eq!(c.health(ts(1_070), win()), CronHealth::Succeeded);
     }
 
     #[test]
     fn missing_since_is_the_deadline() {
         let c = cron_with(every(60), vec![run(1_000, CronStatus::Succeeded, Some(5))], None, None);
         let now = ts(2_000);
-        assert_eq!(c.health(now), CronHealth::Missing);
+        assert_eq!(c.health(now, win()), CronHealth::Missing);
         // last_start + interval + grace = 1000 + 60 + 6.
-        assert_eq!(c.since(c.health(now)), Some(ts(1_066)));
+        assert_eq!(c.since(c.health(now, win())), Some(ts(1_066)));
     }
 
     #[test]
     fn since_reports_failure_and_stuck_onsets() {
         // A failed terminal run reads as failing since the run finished (start + duration).
         let c = cron_with(every(60), vec![run(1_000, CronStatus::Failed, Some(5))], None, None);
-        assert_eq!(c.health(ts(1_006)), CronHealth::Failed);
-        assert_eq!(c.since(c.health(ts(1_006))), Some(ts(1_005)));
+        assert_eq!(c.health(ts(1_006), win()), CronHealth::Failed);
+        assert_eq!(c.since(c.health(ts(1_006), win())), Some(ts(1_005)));
 
         // A stuck in-flight run reads as overrunning since start + max_duration.
         let c = cron_with(
@@ -506,8 +644,8 @@ mod tests {
             None,
         );
         let now = ts(2_000);
-        assert_eq!(c.health(now), CronHealth::Stuck);
-        assert_eq!(c.since(c.health(now)), Some(ts(1_060)));
+        assert_eq!(c.health(now, win()), CronHealth::Stuck);
+        assert_eq!(c.since(c.health(now, win())), Some(ts(1_060)));
     }
 
     #[test]
@@ -563,16 +701,16 @@ mod tests {
         let start = DateTime::parse_from_rfc3339("2026-01-01T12:00:00Z").unwrap().with_timezone(&Utc);
         let c = cron_with(
             CronSchedule::Cron("* * * * *".into()),
-            vec![CronRun { started_at: start, status: CronStatus::Succeeded, duration: None }],
+            vec![CronRun { started_at: start, status: CronStatus::Succeeded, duration: None, reason: None }],
             None,
             None,
         );
 
         // Next due 12:01:00; deadline 12:06:00 (5m grace).
         let before = DateTime::parse_from_rfc3339("2026-01-01T12:05:00Z").unwrap().with_timezone(&Utc);
-        assert_eq!(c.health(before), CronHealth::Succeeded);
+        assert_eq!(c.health(before, win()), CronHealth::Succeeded);
         let after = DateTime::parse_from_rfc3339("2026-01-01T12:06:30Z").unwrap().with_timezone(&Utc);
-        assert_eq!(c.health(after), CronHealth::Missing);
+        assert_eq!(c.health(after, win()), CronHealth::Missing);
     }
 
     #[test]

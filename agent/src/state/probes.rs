@@ -43,8 +43,10 @@ pub trait ProbeStore {
 
 impl ProbeStore for State {
     async fn get_probe_states(&self) -> Result<HashMap<String, Probe>, Box<dyn Error>> {
+        let config = self.get_config();
+
         let mut histories = HashMap::new();
-        for probe in self.get_config().probes.iter() {
+        for probe in config.probes.iter() {
             histories.insert(probe.name.clone(), probe.into());
         }
 
@@ -66,6 +68,15 @@ impl ProbeStore for State {
                         })
                         .or_insert_with(|| snapshot.clone());
                 }
+            }
+        }
+
+        // The alerting debounce (the streak recovery window) is authoritative locally for display
+        // and detection — re-stamp it so a peer's stale config can never override the operator's
+        // view. Mirrors the cron config-echo in `get_cron_states`.
+        for probe in config.probes.iter() {
+            if let Some(pooled) = histories.get_mut(&probe.name) {
+                pooled.debounce = Some(probe.alerting.debounce_std());
             }
         }
 
@@ -227,6 +238,7 @@ impl Versioned for Probe {
                     .collect(),
                 observations: self.observations.clone(),
                 streak: self.streak.clone(),
+                debounce: self.debounce,
             })
         } else {
             None
@@ -253,6 +265,7 @@ mod tests {
             history: Vec::new(),
             observations: HashMap::new(),
             streak: grey_api::Streak::default(),
+            debounce: None,
         }
     }
 
