@@ -84,10 +84,12 @@
     .cron__tag-value { font-weight: 600; }
 }
 
-// The recent-runs strip: one cell per observed run, oldest first.
+// The recent-runs strip: one cell per observed run, oldest first. Cells align to the end so the most
+// recent run sits at the right edge and the strip grows leftward.
 .cron__runs {
     display: flex;
     flex-direction: row;
+    justify-content: end;
     gap: 3px;
     height: 0.8rem;
     margin-top: 0.5rem;
@@ -116,17 +118,9 @@
     color: $color-text-muted;
 }
 
-.cron__meta {
-    display: flex;
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 0.5rem 1rem;
-    margin-top: 0.5rem;
-    font-size: 0.8rem;
-    color: $color-text-muted;
-}
-
-.cron__message {
-    font-family: monospace;
-    color: $color-text;
+// The time since the last check-in, shown on the far right of the title (mirrors
+// `.probe__availability`).
+.cron__last-checkin {
+    float: right;
+    clear: both;
 }
