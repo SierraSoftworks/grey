@@ -42,11 +42,9 @@ pub fn cron(props: &CronProps) -> Html {
         CronSchedule::Cron(expr) => Some(expr.clone()),
     };
 
+    // The time since the last check-in, shown terse ("22m ago") on the right of the title.
     let last_checkin = cron.last_checkin.as_ref().map(|checkin| {
-        format!(
-            "last check-in {} ago",
-            compact_duration(now.signed_duration_since(checkin.at))
-        )
+        format!("{} ago", compact_duration(now.signed_duration_since(checkin.at)))
     });
 
     let run_count = cron.runs.len();
@@ -73,6 +71,9 @@ pub fn cron(props: &CronProps) -> Html {
                     }
                 </div>
                 <div class="cron__state">{state_text}</div>
+                if let Some(last_checkin) = last_checkin {
+                    <div class="cron__last-checkin">{last_checkin}</div>
+                }
             </div>
 
             <div class="cron__runs">
@@ -103,17 +104,6 @@ pub fn cron(props: &CronProps) -> Html {
                     })}
                 }
             </div>
-
-            if let Some(checkin) = cron.last_checkin.as_ref() {
-                <div class="cron__meta">
-                    if let Some(last_checkin) = last_checkin {
-                        <span class="cron__last-checkin">{last_checkin}</span>
-                    }
-                    if !checkin.message.is_empty() {
-                        <span class="cron__message">{&checkin.message}</span>
-                    }
-                </div>
-            }
         </div>
     }
 }
@@ -204,7 +194,7 @@ mod tests {
         });
         let html = render(cron).await;
         assert!(html.contains("cron-run"), "expected a run cell, got: {html}");
-        assert!(html.contains("done"), "expected the check-in message, got: {html}");
+        assert!(html.contains("cron__last-checkin"), "expected the last check-in time, got: {html}");
         assert!(html.contains("healthy for"), "{html}");
     }
 
