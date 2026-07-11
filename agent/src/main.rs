@@ -53,7 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let state = state::State::new(&args.config).await?;
 
-    println!(
+    tracing::info!(
         "Starting Grey with {} probes...",
         state.get_config().probes.len()
     );

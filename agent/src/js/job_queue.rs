@@ -41,7 +41,7 @@ impl JobQueue {
 
         for job in jobs_to_run.into_values() {
             if let Err(e) = job.call(context) {
-                eprintln!("Uncaught {e}");
+                tracing::error!("Uncaught {e}");
             }
         }
     }
@@ -53,14 +53,14 @@ impl JobQueue {
         let job = self.generic_jobs.borrow_mut().pop_front();
         if let Some(generic) = job {
             if let Err(err) = generic.call(context) {
-                eprintln!("Uncaught {err}");
+                tracing::error!("Uncaught {err}");
             }
         }
 
         let jobs = std::mem::take(&mut *self.promise_jobs.borrow_mut());
         for job in jobs {
             if let Err(e) = job.call(context) {
-                eprintln!("Uncaught {e}");
+                tracing::error!("Uncaught {e}");
             }
         }
         context.clear_kept_objects();
@@ -113,7 +113,7 @@ impl JobExecutor for JobQueue {
             // tasks once to see if any of them finished, and run the pending microtasks
             // otherwise.
             if let Some(Err(err)) = future::poll_once(group.next()).await.flatten() {
-                eprintln!("Uncaught {err}");
+                tracing::error!("Uncaught {err}");
             };
 
             // Only one macrotask can be executed before the next drain of the microtask queue.
