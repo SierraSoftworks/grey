@@ -121,6 +121,7 @@ mod tests {
             history: vec![],
             observations: HashMap::new(),
             streak: Default::default(),
+            debounce: None,
         }
     }
 

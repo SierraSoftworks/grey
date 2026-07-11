@@ -1,4 +1,4 @@
-use grey_api::{CronHealth, CronStatus};
+use grey_api::{CronHealth, CronRun, CronStatus};
 
 /// The colour class for a cron's derived health: a healthy run is `ok` (green), an in-flight run is
 /// `running` (light-blue), an overdue or overrunning run is `warn` (orange), a failed run is `error`
@@ -14,9 +14,14 @@ pub fn cron_class(health: CronHealth) -> &'static str {
 }
 
 /// The colour class for a single run cell in the recent-runs strip: a successful run is `ok` (green),
-/// an in-flight run is `running` (light-blue), and a failed run is `error` (red).
-pub fn cron_run_class(status: CronStatus) -> &'static str {
-    match status {
+/// an in-flight run is `running` (light-blue), and a failed run is `error` (red). A monitor-
+/// synthesised placeholder for a missed/stuck run renders `unknown` (grey), so a detected fault is
+/// visually distinct from a job-reported failure.
+pub fn cron_run_class(run: &CronRun) -> &'static str {
+    if run.reason.is_some() {
+        return "unknown";
+    }
+    match run.status {
         CronStatus::Succeeded => "ok",
         CronStatus::Running => "running",
         CronStatus::Failed => "error",
@@ -36,8 +41,17 @@ mod tests {
         assert_eq!(cron_class(CronHealth::Missing), "warn");
         assert_eq!(cron_class(CronHealth::Pending), "unknown");
 
-        assert_eq!(cron_run_class(CronStatus::Succeeded), "ok");
-        assert_eq!(cron_run_class(CronStatus::Running), "running");
-        assert_eq!(cron_run_class(CronStatus::Failed), "error");
+        let run = |status, reason| CronRun {
+            started_at: chrono::DateTime::from_timestamp(0, 0).unwrap(),
+            status,
+            duration: None,
+            reason,
+        };
+        assert_eq!(cron_run_class(&run(CronStatus::Succeeded, None)), "ok");
+        assert_eq!(cron_run_class(&run(CronStatus::Running, None)), "running");
+        assert_eq!(cron_run_class(&run(CronStatus::Failed, None)), "error");
+        // A synthesised missed/stuck placeholder renders grey regardless of its underlying status.
+        assert_eq!(cron_run_class(&run(CronStatus::Failed, Some(grey_api::CronRunReason::Missed))), "unknown");
+        assert_eq!(cron_run_class(&run(CronStatus::Failed, Some(grey_api::CronRunReason::Stuck))), "unknown");
     }
 }

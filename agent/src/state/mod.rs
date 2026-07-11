@@ -208,6 +208,13 @@ impl State {
         self.config.read().unwrap().clone()
     }
 
+    /// Replaces the in-memory configuration. Test-only helper for exercising code paths that read
+    /// `get_config()` without going through a config-file reload.
+    #[cfg(test)]
+    pub(crate) fn set_config_for_test(&self, config: Config) {
+        *self.config.write().unwrap() = Arc::new(config);
+    }
+
     /// Returns a redacted view of the known cluster peers for the API/UI. Only the node identifier
     /// and last-seen timestamp are exposed — peer **addresses are never returned**, since the API has
     /// no access control and may be reachable on the public internet.
@@ -620,6 +627,7 @@ mod tests {
             history: Vec::new(),
             observations: HashMap::new(),
             streak: grey_api::Streak::default(),
+            debounce: None,
         }
     }
 
@@ -641,7 +649,7 @@ mod tests {
         // A peer's record attests three days of coverage.
         let peer = NodeID::new();
         let mut peer_record = probe_at(&probe.name, now);
-        peer_record.streak.observe(true, streak_start);
+        peer_record.streak.observe(true, streak_start, grey_api::Streak::default_recovery_window());
 
         // Deliver the peer's record through the normal gossip apply path. This stores the
         // peer's record and folds its streak into this node's own record in one step.
@@ -652,7 +660,7 @@ mod tests {
         let pooled = state.get_probe_states().await.unwrap();
         let pooled_probe = pooled.get(&probe.name).expect("the probe to be pooled");
         assert!(pooled_probe.passing());
-        assert_eq!(pooled_probe.streak.since_at(now), Some(streak_start));
+        assert_eq!(pooled_probe.streak.since_at(now, grey_api::Streak::default_recovery_window()), Some(streak_start));
 
         // The apply also joined the peer's register into this node's own stored
         // record, so the claim survives even if the peer's record is eventually
@@ -689,6 +697,7 @@ mod tests {
             token: None,
             tags: HashMap::new(),
             visible: crate::config::default_visible_filter(),
+            alerting: Default::default(),
         }];
         *state.config.write().unwrap() = Arc::new(config);
         state

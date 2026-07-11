@@ -72,6 +72,59 @@ pub struct CronConfig {
     /// `visible: auth.admin` restricts the cron to signed-in administrators.
     #[serde(default = "default_visible_filter")]
     pub visible: filt_rs::Filter,
+
+    /// Controls webhook alerting for this cron: whether it is enabled and how long a health change
+    /// must persist before it is reported (see [`AlertingConfig`]).
+    #[serde(default)]
+    pub alerting: AlertingConfig,
+}
+
+/// Controls how state-change alerts (webhook notifications) behave for a probe or cron.
+///
+/// `debounce` also governs the entity's streak-derived health hysteresis: a fault is only reported
+/// once it has persisted continuously for this long, and a recovery once no failure has been observed
+/// for this long. It therefore doubles as the streak recovery window (replacing the historical fixed
+/// 5-minute constant). `enabled` gates webhook emission only — a disabled entity still tracks its
+/// health for the status page.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct AlertingConfig {
+    /// Whether webhook notifications fire for this entity's health transitions. Defaults to `true`.
+    #[serde(default = "default_alerting_enabled")]
+    pub enabled: bool,
+
+    /// How long the entity must continuously hold a new health state before the transition is
+    /// reported, suppressing brief flaps. Defaults to 5 minutes. Applied symmetrically to both the
+    /// onset of a fault and the recovery from it.
+    #[serde(
+        default = "default_alerting_debounce",
+        with = "crate::serializers::chrono_duration_humantime"
+    )]
+    pub debounce: chrono::Duration,
+}
+
+impl Default for AlertingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_alerting_enabled(),
+            debounce: default_alerting_debounce(),
+        }
+    }
+}
+
+impl AlertingConfig {
+    /// The debounce expressed as a [`std::time::Duration`] for stamping onto the API DTOs
+    /// (`debounce`). A negative configured duration clamps to zero.
+    pub fn debounce_std(&self) -> std::time::Duration {
+        self.debounce.to_std().unwrap_or(std::time::Duration::ZERO)
+    }
+}
+
+fn default_alerting_enabled() -> bool {
+    true
+}
+
+fn default_alerting_debounce() -> chrono::Duration {
+    chrono::Duration::minutes(5)
 }
 
 impl CronConfig {
@@ -87,13 +140,15 @@ impl CronConfig {
 
     /// A bare [`grey_api::Cron`] carrying this configuration, used to seed the pooled view.
     pub fn to_cron(&self) -> grey_api::Cron {
-        grey_api::Cron::from_config(
+        let mut cron = grey_api::Cron::from_config(
             self.name.clone(),
             self.tags.clone(),
             self.build_schedule(),
             self.max_duration,
             self.grace,
-        )
+        );
+        cron.debounce = Some(self.alerting.debounce_std());
+        cron
     }
 
     /// Re-applies this configuration onto a (possibly gossiped) record so display and detection use
@@ -103,6 +158,7 @@ impl CronConfig {
         cron.schedule = self.build_schedule();
         cron.max_duration = self.max_duration;
         cron.grace = self.grace;
+        cron.debounce = Some(self.alerting.debounce_std());
     }
 }
 
@@ -637,6 +693,31 @@ mod tests {
             .unwrap();
         let config = Config::load_from_path(&ok).await.expect("a valid webhook should load");
         assert_eq!(config.webhooks[0].filter.raw(), "true");
+    }
+
+    /// `alerting` deserializes with humantime debounce and sensible defaults: a bare entity is
+    /// enabled with a 5-minute debounce, and both fields can be overridden.
+    #[tokio::test]
+    async fn parses_alerting_config() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Defaults apply when no `alerting` block is present.
+        let default_probe = "probes:\n  - name: p\n    policy: { interval: 5s, timeout: 2s }\n    target: !Http\n      url: https://example.com\n";
+        let path = dir.path().join("default.yml");
+        tokio::fs::write(&path, default_probe).await.unwrap();
+        let config = Config::load_from_path(&path).await.unwrap();
+        assert!(config.probes[0].alerting.enabled);
+        assert_eq!(config.probes[0].alerting.debounce, chrono::Duration::minutes(5));
+
+        // Explicit values are honoured, on probes and crons alike.
+        let tuned = "probes:\n  - name: p\n    policy: { interval: 5s, timeout: 2s }\n    target: !Http\n      url: https://example.com\n    alerting:\n      enabled: false\n      debounce: 90s\ncrons:\n  - name: c\n    interval: 1h\n    alerting:\n      debounce: 10m\n";
+        let path = dir.path().join("tuned.yml");
+        tokio::fs::write(&path, tuned).await.unwrap();
+        let config = Config::load_from_path(&path).await.unwrap();
+        assert!(!config.probes[0].alerting.enabled);
+        assert_eq!(config.probes[0].alerting.debounce, chrono::Duration::seconds(90));
+        assert!(config.crons[0].alerting.enabled, "enabled defaults to true when omitted");
+        assert_eq!(config.crons[0].alerting.debounce, chrono::Duration::minutes(10));
     }
 
     /// A cron may not share a name with a probe: gossip keys replicated state by the bare entity

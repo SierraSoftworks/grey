@@ -100,7 +100,7 @@ impl ProbeResult {
             .or_insert_with(Default::default);
         observation.add_sample(self.pass, self.retries as u64, std::time::Duration::from_millis(self.duration.num_milliseconds() as u64));
 
-        probe.streak.observe(self.pass, sample_time);
+        probe.streak.observe(self.pass, sample_time, probe.window());
     }
 }
 
@@ -141,6 +141,7 @@ mod tests {
             history: Vec::new(),
             observations: HashMap::new(),
             streak: grey_api::Streak::default(),
+            debounce: None,
         }
     }
 
@@ -157,22 +158,22 @@ mod tests {
 
         assert!(probe.history.len() >= 3, "three hours of samples should span multiple buckets");
         let sampled_until = start + Duration::minutes(179);
-        assert!(probe.streak.passing_at(sampled_until));
-        assert_eq!(probe.streak.since_at(sampled_until), Some(start));
+        assert!(probe.streak.passing_at(sampled_until, grey_api::Streak::default_recovery_window()));
+        assert_eq!(probe.streak.since_at(sampled_until, grey_api::Streak::default_recovery_window()), Some(start));
 
-        // A failure starts an episode immediately, and further failing samples refresh
-        // it without moving the onset...
+        // A failure starts an episode immediately (the raw failing signal), and further failing
+        // samples refresh it without moving the onset marker.
         let failed_at = start + Duration::minutes(180);
         result_at(failed_at, false).apply("node", &mut probe);
         result_at(failed_at + Duration::minutes(1), false).apply("node", &mut probe);
-        assert!(probe.streak.failing_at(failed_at + Duration::minutes(1)));
-        assert_eq!(probe.streak.since_at(failed_at + Duration::minutes(1)), Some(failed_at));
+        assert!(probe.streak.failing_at(failed_at + Duration::minutes(1), grey_api::Streak::default_recovery_window()));
+        assert_eq!(probe.streak.failing_since, Some(failed_at), "the onset marker is pinned to the first failure");
 
         // ...and once no failures have been observed for the recovery window, the probe
         // reads as passing since the last failing observation.
-        let recovered = failed_at + Duration::minutes(1) + grey_api::Streak::recovery_window() + Duration::seconds(1);
+        let recovered = failed_at + Duration::minutes(1) + grey_api::Streak::default_recovery_window() + Duration::seconds(1);
         result_at(recovered, true).apply("node", &mut probe);
-        assert!(probe.streak.passing_at(recovered));
-        assert_eq!(probe.streak.since_at(recovered), Some(failed_at + Duration::minutes(1)));
+        assert!(probe.streak.passing_at(recovered, grey_api::Streak::default_recovery_window()));
+        assert_eq!(probe.streak.since_at(recovered, grey_api::Streak::default_recovery_window()), Some(failed_at + Duration::minutes(1)));
     }
 }

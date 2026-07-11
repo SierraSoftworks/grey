@@ -10,6 +10,7 @@ mod checks;
 mod cluster;
 mod config;
 mod cron;
+mod cron_monitor;
 mod engine;
 mod js;
 #[macro_use]

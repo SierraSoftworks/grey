@@ -11,7 +11,8 @@
 use std::collections::HashMap;
 use std::error::Error;
 
-use grey_api::Cron;
+use chrono::{DateTime, Utc};
+use grey_api::{CheckIn, Cron, CronRun, CronRunReason, CronStatus};
 use redb::{ReadableDatabase, ReadableTable, TableDefinition};
 
 use crate::cluster::Versioned;
@@ -69,6 +70,18 @@ pub trait CronStore {
         &self,
         name: &str,
         checkin: CronCheckin,
+    ) -> Result<bool, Box<dyn Error>>;
+
+    /// Materialises a monitor-detected fault (a missed or overrunning run) onto the named cron's
+    /// record: it appends (or marks) a synthetic run carrying the reason, records a failing streak
+    /// observation at `occurred_at`, and updates `last_checkin` — so the fault surfaces as a run
+    /// placeholder in the UI and drives streak-based alerting. Returns `Ok(false)` when the cron is
+    /// not in the local configuration.
+    async fn record_cron_detection(
+        &self,
+        name: &str,
+        reason: CronRunReason,
+        occurred_at: DateTime<Utc>,
     ) -> Result<bool, Box<dyn Error>>;
 }
 
@@ -146,6 +159,81 @@ impl CronStore for State {
 
         Ok(true)
     }
+
+    async fn record_cron_detection(
+        &self,
+        name: &str,
+        reason: CronRunReason,
+        occurred_at: DateTime<Utc>,
+    ) -> Result<bool, Box<dyn Error>> {
+        let config = self.get_config();
+        let Some(cfg) = config.crons.iter().find(|c| c.name == name) else {
+            return Ok(false);
+        };
+
+        let occurred_at = DateTime::from_timestamp_millis(occurred_at.timestamp_millis())
+            .unwrap_or(occurred_at);
+
+        let txn = self.database.begin_write()?;
+        {
+            let mut table = txn.open_table(CRON_TABLE)?;
+
+            let mut cron = table
+                .get(name)?
+                .and_then(|existing| {
+                    let (_version, _last_writer, data) = existing.value();
+                    rmp_serde::from_slice::<Cron>(data).ok()
+                })
+                .unwrap_or_else(|| cfg.to_cron());
+
+            // Keep config-echo (including the recovery window) current before deriving state.
+            cfg.stamp(&mut cron);
+
+            match reason {
+                // An overrun marks the run already in flight, so the same occurrence isn't recorded
+                // twice; if nothing is in flight (already closed), fall through to a placeholder.
+                CronRunReason::Stuck if cron.has_in_flight() => {
+                    if let Some(run) = cron.runs.last_mut() {
+                        run.reason = Some(reason);
+                    }
+                }
+                _ => {
+                    cron.push_run(CronRun {
+                        started_at: occurred_at,
+                        status: CronStatus::Failed,
+                        duration: None,
+                        reason: Some(reason),
+                    });
+                }
+            }
+
+            // The detection is a failing observation at the moment the fault began.
+            let window = cron.window();
+            cron.streak.observe(false, occurred_at, window);
+
+            let message = match reason {
+                CronRunReason::Missed => "no run started within the schedule grace",
+                CronRunReason::Stuck => "run overran its max_duration",
+            };
+            cron.last_checkin = Some(CheckIn {
+                at: occurred_at,
+                status: CronStatus::Failed,
+                message: message.into(),
+            });
+
+            // Advance the record's version to now so the detection supersedes prior state and gossips
+            // (a backfilled `occurred_at` in the past must not leave the version stale).
+            cron.last_updated = cron.last_updated.max(Utc::now());
+
+            table.insert(
+                name,
+                (cron.version(), self.node_id.into(), rmp_serde::to_vec_named(&cron)?.as_slice()),
+            )?;
+        }
+        txn.commit()?;
+
+        Ok(true)
+    }
 }
 
 #[cfg(test)]
@@ -173,6 +261,7 @@ mod tests {
             token: None,
             tags: HashMap::new(),
             visible: crate::config::default_visible_filter(),
+            alerting: Default::default(),
         }];
         *state.config.write().unwrap() = Arc::new(config);
         state
@@ -213,7 +302,7 @@ mod tests {
             grey_api::CronSchedule::Every(Duration::from_secs(60)),
             "config echo is stamped"
         );
-        assert!(backup.passing(chrono::Utc::now()));
+        assert!(backup.passing(chrono::Utc::now(), backup.window()));
         assert_eq!(backup.last_checkin.as_ref().unwrap().message, "done");
     }
 

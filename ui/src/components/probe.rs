@@ -12,15 +12,16 @@ pub struct ProbeProps {
 pub fn probe(props: &ProbeProps) -> Html {
     let recent_availability = props.probe.recent(2).success_rate();
     let streak = props.probe.streak.clone();
+    let window = props.probe.window();
 
-    // Key the status off the currently observed state so a recovery is reflected
-    // immediately, using the recent average only to grade how severe an ongoing failure is.
+    // Key the status off the currently observed (debounced) state so a recovery is reflected once it
+    // settles, using the recent average only to grade how severe an ongoing failure is.
     let probe_class = probe_class(props.probe.passing(), recent_availability);
 
     // How long the probe has held its current state, e.g. "healthy for 5d" or "unhealthy for 17m".
-    let streak_text = streak.since().map(|since| {
+    let streak_text = props.probe.since().map(|since| {
         let held_for = compact_duration(chrono::Utc::now().signed_duration_since(since));
-        if streak.passing() {
+        if props.probe.passing() {
             format!("healthy for {held_for}")
         } else {
             format!("unhealthy for {held_for}")
@@ -53,7 +54,7 @@ pub fn probe(props: &ProbeProps) -> Html {
                 }
                 <div class="probe__availability">{availability(props.probe.availability())}</div>
             </div>
-            <ProbeHistory samples={props.probe.history.clone()} streak={streak} />
+            <ProbeHistory samples={props.probe.history.clone()} streak={streak} window={window} />
         </div>
     }
 }
@@ -86,6 +87,7 @@ mod tests {
             history: vec![],
             observations: Default::default(),
             streak,
+            debounce: None,
         };
         yew::ServerRenderer::<Harness>::with_props(move || HarnessProps { probe })
             .render()
@@ -95,7 +97,7 @@ mod tests {
     #[tokio::test]
     async fn test_shows_healthy_streak_duration() {
         let mut streak = Streak::default();
-        streak.observe(true, chrono::Utc::now() - chrono::Duration::days(5));
+        streak.observe(true, chrono::Utc::now() - chrono::Duration::days(5), Streak::default_recovery_window());
 
         let html = render(streak).await;
         assert!(html.contains("healthy for 5d"), "expected the healthy streak text, got: {html}");
@@ -108,7 +110,7 @@ mod tests {
         let mut streak = Streak::default();
         let now = chrono::Utc::now();
         for minutes_ago in (2..=17).rev().step_by(3) {
-            streak.observe(false, now - chrono::Duration::minutes(minutes_ago));
+            streak.observe(false, now - chrono::Duration::minutes(minutes_ago), Streak::default_recovery_window());
         }
 
         let html = render(streak).await;

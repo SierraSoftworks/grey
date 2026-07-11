@@ -62,6 +62,17 @@ impl Engine {
             });
         }
 
+        // Materialise time-derived cron faults (missed/stuck runs) into persisted state, so they
+        // surface as run placeholders in the UI and drive streak-based alerting like reported
+        // failures. Runs alongside the notifier so a missed run's failing streak observation is in
+        // place before the notifier evaluates it.
+        {
+            let state = self.state.clone();
+            tokio::task::spawn_local(async move {
+                crate::cron_monitor::CronMonitor::new(state).run().await;
+            });
+        }
+
         // Start probe runners
         for probe in self.probes.read().unwrap().values().cloned() {
             self.start_probe_runner(probe);
