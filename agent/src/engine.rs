@@ -102,7 +102,7 @@ impl Engine {
         }
 
         if self.state.get_config().ui.enabled {
-            eprintln!(
+            info!(
                 "Starting web UI on http://{}",
                 self.state.get_config().ui.listen.as_str()
             );
