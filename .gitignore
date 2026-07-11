@@ -1,6 +1,4 @@
 /dist
 /target
-/result
 /state
-.direnv
 *.redb
