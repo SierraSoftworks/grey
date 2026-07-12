@@ -118,7 +118,7 @@
     color: $color-text-muted;
 }
 
-// The time since the last check-in, shown on the far right of the title (mirrors
+// How long ago the job last succeeded, shown on the far right of the title (mirrors
 // `.probe__availability`).
 .cron__last-checkin {
     float: right;
