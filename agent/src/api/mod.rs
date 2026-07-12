@@ -59,6 +59,14 @@ fn is_fingerprinted(file_name: &str) -> bool {
         .any(|segment| segment.len() >= 8 && segment.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
+// This is a public status page, so let crawlers index the standard pages. The JSON API under
+// `/api/` is machine-facing and carries no indexable content, so keep bots out of it.
+async fn robots() -> HttpResponse {
+    HttpResponse::Ok()
+        .content_type(ContentType::plaintext())
+        .body("User-agent: *\nDisallow: /api/\n")
+}
+
 // Custom handler for serving embedded static files
 async fn serve_static(path: web::Path<String>) -> Result<HttpResponse> {
     let file_path = path.into_inner();
@@ -141,6 +149,7 @@ pub fn create_app() -> App<
                 .route("/incidents/{id}/updates/{uid}", web::put().to(admin::put_update))
                 .route("/incidents/{id}/updates/{uid}", web::delete().to(admin::delete_update)),
         )
+        .route("/robots.txt", web::get().to(robots))
         .route("/static/{filename:.*}", web::get().to(serve_static))
 }
 
@@ -253,6 +262,28 @@ mod tests {
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), actix_web::http::StatusCode::NOT_FOUND);
+    }
+
+    /// `/robots.txt` is served as plain text: standard pages stay crawlable, the JSON API is off-limits.
+    #[actix_web::test]
+    async fn robots_txt_is_served() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::test(dir.path().to_path_buf()).await;
+        let app = test::init_service(create_app().app_data(web::Data::new(state))).await;
+
+        let req = test::TestRequest::get().uri("/robots.txt").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success(), "GET /robots.txt should be routed");
+        assert_eq!(
+            resp.headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok()),
+            Some("text/plain; charset=utf-8"),
+            "robots.txt must be served as plain text"
+        );
+
+        let body = test::read_body(resp).await;
+        assert_eq!(&body[..], b"User-agent: *\nDisallow: /api/\n");
     }
 
     /// The tracing middleware is wired in front of every route. It echoes a `traceparent` when a
