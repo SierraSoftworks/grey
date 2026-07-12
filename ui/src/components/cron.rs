@@ -10,8 +10,8 @@ pub struct CronProps {
 }
 
 /// A single cron card, rendered "as if it were an active probe": a status dot + health, the expected
-/// schedule, a recent-runs strip, and the last reported check-in. Each run shows a hover popover in
-/// the same style as the probe history.
+/// schedule, a recent-runs strip, and how long ago the job last succeeded. Each run shows a hover
+/// popover in the same style as the probe history.
 #[function_component(Cron)]
 pub fn cron(props: &CronProps) -> Html {
     let cron = &props.cron;
@@ -42,9 +42,12 @@ pub fn cron(props: &CronProps) -> Html {
         CronSchedule::Cron(expr) => Some(expr.clone()),
     };
 
-    // The time since the last check-in, shown terse ("22m ago") on the right of the title.
-    let last_checkin = cron.last_checkin.as_ref().map(|checkin| {
-        format!("{} ago", compact_duration(now.signed_duration_since(checkin.at)))
+    // How stale the job's last success is, shown terse ("22m ago") on the right of the title.
+    // Derived from the converged streak (see `Cron::last_success`): it ages from the most recent run
+    // while the job is healthy (resetting as runs land) and from the failure onset while it is
+    // failing/stuck/missing (climbing), so it stays consistent with the streak-derived status dot.
+    let last_success = cron.last_success(now).map(|at| {
+        format!("{} ago", compact_duration(now.signed_duration_since(at)))
     });
 
     let run_count = cron.runs.len();
@@ -71,8 +74,8 @@ pub fn cron(props: &CronProps) -> Html {
                     }
                 </div>
                 <div class="cron__state">{state_text}</div>
-                if let Some(last_checkin) = last_checkin {
-                    <div class="cron__last-checkin">{last_checkin}</div>
+                if let Some(last_success) = last_success {
+                    <div class="cron__last-checkin">{last_success}</div>
                 }
             </div>
 
@@ -203,8 +206,49 @@ mod tests {
         });
         let html = render(cron).await;
         assert!(html.contains("cron-run"), "expected a run cell, got: {html}");
-        assert!(html.contains("cron__last-checkin"), "expected the last check-in time, got: {html}");
+        assert!(html.contains("cron__last-checkin"), "expected the since-last-success time, got: {html}");
         assert!(html.contains("healthy for"), "{html}");
+    }
+
+    /// While the job reads healthy the since-last-success block ages from the most recent run, so it
+    /// resets as fresh runs land.
+    #[tokio::test]
+    async fn since_last_success_tracks_the_last_run_while_healthy() {
+        let mut cron = cron("job");
+        let now = chrono::Utc::now();
+        cron.runs.push(CronRun {
+            started_at: now - chrono::Duration::minutes(2),
+            status: CronStatus::Succeeded,
+            duration: Some(Duration::from_secs(5)),
+            reason: None,
+        });
+        let html = render(cron).await;
+        assert!(html.contains("cron__last-checkin"), "expected the since-last-success time, got: {html}");
+        assert!(html.contains("2m ago"), "expected time since the last run, got: {html}");
+    }
+
+    /// While the streak reads failing, the since-last-success block ages from the failure onset, so a
+    /// job that has gone bad shows this figure climbing.
+    #[tokio::test]
+    async fn since_last_success_climbs_from_the_failure_onset() {
+        let mut cron = cron("job");
+        let now = chrono::Utc::now();
+        // A fault that began three hours ago and is still being observed → debounced-failing.
+        cron.streak = grey_api::Streak {
+            failing_since: Some(now - chrono::Duration::hours(3)),
+            failing_until: Some(now - chrono::Duration::minutes(1)),
+            covered_since: Some(now - chrono::Duration::days(1)),
+        };
+        let html = render(cron).await;
+        assert!(html.contains("cron__last-checkin"), "expected the since-last-success time, got: {html}");
+        assert!(html.contains("3h ago"), "expected time since the failure onset, got: {html}");
+    }
+
+    /// A pending job (no runs and no fault) has nothing to age, so the block is omitted entirely.
+    #[tokio::test]
+    async fn since_last_success_is_absent_when_pending() {
+        let html = render(cron("job")).await;
+        assert!(!html.contains("cron__last-checkin"), "expected no since-last-success block, got: {html}");
     }
 
     /// The run popover itself only appears on hover (which SSR can't reach), so render it directly to

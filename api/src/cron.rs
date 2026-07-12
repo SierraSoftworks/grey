@@ -340,6 +340,20 @@ impl Cron {
         self.runs.last().map(|run| run.started_at)
     }
 
+    /// The reference the UI ages as the job's "time since last success". It follows the converged
+    /// [`Streak`]'s debounced health so it stays consistent with the status dot: while the job reads
+    /// failing it is the failure onset ([`Streak::failing_since`]), so the figure climbs from the
+    /// moment the job went bad; while it reads healthy it is the start of the most recent run
+    /// ([`Cron::last_start`]), so it resets as fresh runs land. `None` for a job that is neither
+    /// failing nor has any run yet — there is nothing to age.
+    pub fn last_success(&self, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        if self.streak.failing_for(now, self.window()) {
+            self.streak.failing_since
+        } else {
+            self.last_start()
+        }
+    }
+
     /// The grace applied before a late run reads `Missing`: the configured value, or a
     /// schedule-derived default (a tenth of an `Every` interval, or [`DEFAULT_CRON_GRACE`] for a
     /// crontab schedule).
@@ -718,6 +732,42 @@ mod tests {
         assert!(every(60).is_valid());
         assert!(CronSchedule::Cron("* * * * *".into()).is_valid());
         assert!(!CronSchedule::Cron("not a cron".into()).is_valid());
+    }
+
+    #[test]
+    fn last_success_follows_the_streak_health() {
+        let window = win();
+
+        // Neither failing nor any run yet → nothing to age.
+        let empty = cron_with(every(60), vec![], None, None);
+        assert_eq!(empty.last_success(ts(2_000)), None);
+
+        // Healthy (empty or passing streak): the most recent run start, so it resets as runs land.
+        let mut c = cron_with(
+            every(60),
+            vec![run(1_000, CronStatus::Succeeded, Some(5)), run(1_100, CronStatus::Succeeded, Some(5))],
+            None,
+            None,
+        );
+        assert_eq!(c.last_success(ts(1_150)), Some(ts(1_100)));
+
+        // A fresh fault younger than the window has not tripped the debounced health yet, so it
+        // still tracks the last run (matching the dot, which is still healthy).
+        let base = ts(2_000);
+        c.streak = Streak { failing_since: Some(base), failing_until: Some(base), covered_since: Some(ts(500)) };
+        assert!(!c.streak.failing_for(base, window));
+        assert_eq!(c.last_success(base), Some(ts(1_100)));
+
+        // Once it has been failing for the window the reference becomes the onset and climbs from
+        // there rather than tracking the runs.
+        c.streak.failing_until = Some(base + window);
+        assert!(c.streak.failing_for(base + window, window));
+        assert_eq!(c.last_success(base + window), Some(base));
+
+        // Recovered (no failure within the window) → back to the most recent run start.
+        let recovered = base + window + window + chrono::Duration::seconds(1);
+        assert!(!c.streak.failing_for(recovered, window));
+        assert_eq!(c.last_success(recovered), Some(ts(1_100)));
     }
 
     #[test]
