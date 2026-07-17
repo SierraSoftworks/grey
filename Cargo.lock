@@ -542,7 +542,7 @@ dependencies = [
 [[package]]
 name = "boa_ast"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#1956dc6c41a166ef534896321b7a90b517952b28"
+source = "git+https://github.com/boa-dev/boa#b562725784a18e55d27ddd9702abac61b36a250d"
 dependencies = [
  "bitflags",
  "boa_interner",
@@ -557,7 +557,7 @@ dependencies = [
 [[package]]
 name = "boa_engine"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#1956dc6c41a166ef534896321b7a90b517952b28"
+source = "git+https://github.com/boa-dev/boa#b562725784a18e55d27ddd9702abac61b36a250d"
 dependencies = [
  "aligned-vec",
  "arrayvec",
@@ -613,7 +613,7 @@ dependencies = [
 [[package]]
 name = "boa_gc"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#1956dc6c41a166ef534896321b7a90b517952b28"
+source = "git+https://github.com/boa-dev/boa#b562725784a18e55d27ddd9702abac61b36a250d"
 dependencies = [
  "arrayvec",
  "boa_macros",
@@ -626,7 +626,7 @@ dependencies = [
 [[package]]
 name = "boa_interner"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#1956dc6c41a166ef534896321b7a90b517952b28"
+source = "git+https://github.com/boa-dev/boa#b562725784a18e55d27ddd9702abac61b36a250d"
 dependencies = [
  "boa_gc",
  "boa_macros",
@@ -641,7 +641,7 @@ dependencies = [
 [[package]]
 name = "boa_macros"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#1956dc6c41a166ef534896321b7a90b517952b28"
+source = "git+https://github.com/boa-dev/boa#b562725784a18e55d27ddd9702abac61b36a250d"
 dependencies = [
  "cfg-if",
  "cow-utils",
@@ -654,7 +654,7 @@ dependencies = [
 [[package]]
 name = "boa_parser"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#1956dc6c41a166ef534896321b7a90b517952b28"
+source = "git+https://github.com/boa-dev/boa#b562725784a18e55d27ddd9702abac61b36a250d"
 dependencies = [
  "bitflags",
  "boa_ast",
@@ -671,7 +671,7 @@ dependencies = [
 [[package]]
 name = "boa_runtime"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#1956dc6c41a166ef534896321b7a90b517952b28"
+source = "git+https://github.com/boa-dev/boa#b562725784a18e55d27ddd9702abac61b36a250d"
 dependencies = [
  "base64",
  "boa_engine",
@@ -691,7 +691,7 @@ dependencies = [
 [[package]]
 name = "boa_string"
 version = "1.0.0-dev"
-source = "git+https://github.com/boa-dev/boa#1956dc6c41a166ef534896321b7a90b517952b28"
+source = "git+https://github.com/boa-dev/boa#b562725784a18e55d27ddd9702abac61b36a250d"
 dependencies = [
  "fast-float2",
  "itoa",
@@ -1558,7 +1558,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2616,7 +2616,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.4",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -3303,7 +3303,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 1.3.1",
+ "proc-macro-crate 3.3.0",
  "proc-macro2",
  "quote",
  "syn 2.0.118",
@@ -3855,7 +3855,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.4",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -3894,9 +3894,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.4",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4273,7 +4273,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4332,7 +4332,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4720,7 +4720,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 [[package]]
 name = "small_btree"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#1956dc6c41a166ef534896321b7a90b517952b28"
+source = "git+https://github.com/boa-dev/boa#b562725784a18e55d27ddd9702abac61b36a250d"
 dependencies = [
  "arrayvec",
 ]
@@ -4928,7 +4928,7 @@ dependencies = [
 [[package]]
 name = "tag_ptr"
 version = "0.1.0"
-source = "git+https://github.com/boa-dev/boa#1956dc6c41a166ef534896321b7a90b517952b28"
+source = "git+https://github.com/boa-dev/boa#b562725784a18e55d27ddd9702abac61b36a250d"
 
 [[package]]
 name = "tap"
@@ -4946,7 +4946,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5855,7 +5855,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
