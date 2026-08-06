@@ -3,6 +3,8 @@ mod auth;
 mod client;
 mod components;
 mod contexts;
+#[cfg(debug_assertions)]
+pub mod demo;
 pub mod formatters;
 pub mod routes;
 mod styles;

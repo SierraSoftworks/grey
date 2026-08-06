@@ -124,7 +124,7 @@ pub fn app(props: &AppProps) -> Html {
 
 /// On the client the browser's history drives the router.
 #[cfg(feature = "wasm")]
-fn render_router(_url: &str) -> Html {
+pub(crate) fn render_router(_url: &str) -> Html {
     use yew_router::prelude::*;
 
     html! {
@@ -137,7 +137,7 @@ fn render_router(_url: &str) -> Html {
 /// During SSR there is no browser history, so seed an in-memory history from the request path so the
 /// correct route is server-rendered (and the client hydrates without a mismatch).
 #[cfg(not(feature = "wasm"))]
-fn render_router(url: &str) -> Html {
+pub(crate) fn render_router(url: &str) -> Html {
     use yew_router::Router;
     use yew_router::history::{AnyHistory, History, MemoryHistory};
 
