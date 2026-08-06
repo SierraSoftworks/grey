@@ -11,6 +11,15 @@
         opacity: 1;
         visibility: visible;
     }
+
+    // The chip collapses to its indicator dot on a phone; the popover still carries the detail.
+    @media only screen and (max-width: $mobile) {
+        padding: 0.375rem 0.5rem;
+
+        .status-text {
+            display: none;
+        }
+    }
 }
 
 .cluster-popover {
@@ -40,6 +49,12 @@
     max-width: min(40rem, 90vw);
     font-size: 0.85rem;
     font-weight: 400;
+
+    // A phone has no room for a 20rem floor; let the rows compress instead of overhanging the page.
+    @media only screen and (max-width: $mobile) {
+        min-width: 0;
+        width: min(20rem, calc(100vw - 2rem));
+    }
 
     &::after {
         content: '';

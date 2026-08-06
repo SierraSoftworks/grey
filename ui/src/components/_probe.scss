@@ -22,11 +22,20 @@
     gap: 0.5rem;
     flex-wrap: wrap;
     margin-right: auto;
+    min-width: 0;
 }
 
 .probe__name {
     font-weight: inherit;
     margin: 0;
+    // Truncated rather than wrapped: a wrapped name is pushed onto its own line by the flex
+    // line-breaking rules, stranding the status dot above it. The zero basis keeps it on the dot's
+    // line at every width, growing only into the space the tags don't claim.
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .probe-observers {
@@ -104,11 +113,13 @@
 .probe__availability {
     float: right;
     clear: both;
+    flex: none;
 }
 
 // How long the probe has held its current state, shown to the left of the availability %.
 .probe__streak {
     align-self: center;
+    flex: none;
     font-size: 0.8rem;
     color: $color-text-muted;
     margin-right: 0.75rem;
@@ -142,5 +153,44 @@
 
     .probe__tag-value {
         font-weight: 600;
+    }
+}
+
+// On a phone the name (with its tags) claims the full width and the streak and availability share
+// the line beneath it, so a long probe name no longer squeezes them out of the row.
+@media only screen and (max-width: $mobile) {
+    .probe {
+        padding-left: 1rem;
+    }
+
+    .probe__title {
+        flex-wrap: wrap;
+        column-gap: 0.5rem;
+        row-gap: 0.35rem;
+    }
+
+    .probe__name-section {
+        flex: 1 1 100%;
+    }
+
+    .probe__name {
+        font-size: 1rem;
+    }
+
+    .probe__tags {
+        flex: 1 1 100%;
+        margin-left: 0;
+    }
+
+    .probe__streak {
+        margin-right: auto;
+    }
+
+    .probe__availability {
+        margin-left: auto;
+    }
+
+    .service__name {
+        font-size: 1.25rem;
     }
 }

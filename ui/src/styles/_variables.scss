@@ -49,6 +49,10 @@ $color-tooltip-border: var(--tooltip-border);
 $mobile: 600px;
 $tablet: 980px;
 
+// How many cells of a right-aligned history strip (probe availability, cron runs) stay visible on a
+// phone. The remainder are the oldest, and are hidden rather than squeezed into unreadable slivers.
+$mobile-strip-cells: 24;
+
 // Common measurements
 $border-radius: 5px;
 $border-radius-small: 4px;

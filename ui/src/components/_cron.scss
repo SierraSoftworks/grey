@@ -96,7 +96,10 @@
 }
 
 .cron-run {
-    flex: 0 0 0.8rem;
+    // Cells cap at 0.8rem but compress rather than overflow once a job has accumulated a long run
+    // history; the strip is right-aligned, so an overflow would run off the left edge unseen.
+    flex: 0 1 0.8rem;
+    min-width: 4px;
     border-radius: $border-radius-small;
     cursor: pointer;
     // A positioned ancestor so the hover popover anchors to this cell, and a stacking bump while
@@ -111,6 +114,16 @@
     &.warn { background-color: $color-status-warn; }
     &.error { background-color: $color-status-error; }
     &.running { background-color: $color-status-running; }
+    // A monitor-synthesised missed/stuck placeholder, greyed so it reads as "no run happened"
+    // rather than a job-reported failure. Without this the cell renders invisible.
+    &.unknown { background-color: $color-status-offline; }
+
+    // Only the most recent runs stay on a phone, so each cell keeps a readable width.
+    @media only screen and (max-width: $mobile) {
+        &:nth-last-child(n + #{$mobile-strip-cells + 1}) {
+            display: none;
+        }
+    }
 }
 
 .cron__no-runs {
@@ -123,4 +136,50 @@
 .cron__last-checkin {
     float: right;
     clear: both;
+}
+
+// On a phone the name (with its badge, schedule and tags) claims the full width and the state and
+// last-success times share the line beneath it, rather than being squeezed into a sliver.
+@media only screen and (max-width: $mobile) {
+    .cron {
+        padding-left: 1rem;
+    }
+
+    .cron__title {
+        flex-wrap: wrap;
+        column-gap: 0.5rem;
+        row-gap: 0.35rem;
+    }
+
+    .cron__name-section {
+        flex: 1 1 100%;
+        align-items: flex-start;
+
+        > .status-dot {
+            margin-top: 0.45rem;
+        }
+    }
+
+    .cron__name {
+        font-size: 1rem;
+        overflow-wrap: anywhere;
+    }
+
+    .cron__tags {
+        margin-left: 0;
+    }
+
+    .cron__state {
+        margin-right: auto;
+    }
+
+    .cron__last-checkin {
+        margin-left: auto;
+        font-size: 0.8rem;
+        color: $color-text-muted;
+    }
+
+    .cron__runs {
+        gap: 2px;
+    }
 }

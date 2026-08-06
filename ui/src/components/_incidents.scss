@@ -10,6 +10,14 @@
     .incidents-section__summaries {
         padding: 1.5rem;
     }
+
+    @media only screen and (max-width: $mobile) {
+        margin: 1rem auto;
+
+        .incidents-section__summaries {
+            padding: 1rem;
+        }
+    }
 }
 
 // A title link reused by summaries and blocks.
@@ -127,6 +135,18 @@
     font: inherit;
     font-size: 0.85rem;
     white-space: nowrap;
+
+    // Long display names give way to an ellipsis rather than pushing the menu toggle off-screen.
+    @media only screen and (max-width: $mobile) {
+        padding: 0.35rem 0.6rem;
+        font-size: 0.8rem;
+        max-width: 7rem;
+
+        .user-chip__name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+    }
 
     .user-chip__signout {
         position: absolute;

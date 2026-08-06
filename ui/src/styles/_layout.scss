@@ -2,7 +2,9 @@
 
 // App layout and content containers
 #app {
-    width: 100vw;
+    // `100%` rather than `100vw`: the viewport unit includes the scrollbar gutter, which shows up as
+    // a sliver of horizontal scroll on narrow screens.
+    width: 100%;
     margin: 0;
     display: flex;
     flex-direction: column;
@@ -107,5 +109,17 @@
 @media screen and (max-width: $tablet) {
     body {
         background-color: $background-box;
+    }
+}
+
+// A phone has no room for the desktop gutters; trimming them back is what lets the history strips
+// and title rows fit inside the card.
+@media screen and (max-width: $mobile) {
+    .section {
+        padding: 1rem;
+
+        &.fill {
+            padding: 1.5rem 1rem;
+        }
     }
 }
