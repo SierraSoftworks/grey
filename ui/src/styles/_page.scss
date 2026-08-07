@@ -13,6 +13,11 @@
         font-weight: 200;
         margin-top: 0;
     }
+
+    @media only screen and (max-width: $mobile) {
+        margin: 1rem auto;
+        padding: 1rem;
+    }
 }
 
 // Muted "nothing to show" text.

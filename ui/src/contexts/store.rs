@@ -261,11 +261,25 @@ pub struct StoreProviderProps {
     pub peers: Vec<Peer>,
     #[prop_or_default]
     pub incidents: Vec<IncidentView>,
+    /// A pre-established session, used by demo mode to render the operator-only chrome. Normally
+    /// `None`: the session is discovered from the stored OIDC token on mount.
+    #[prop_or_default]
+    pub user: Option<AdminUser>,
+    /// Demo mode: serve entirely from the seeded props and never touch the API (no polling, no OIDC
+    /// bootstrap). See [`crate::demo`].
+    #[cfg(debug_assertions)]
+    #[prop_or_default]
+    pub demo: bool,
     pub children: Children,
 }
 
 #[function_component(StoreProvider)]
 pub fn store_provider(props: &StoreProviderProps) -> Html {
+    #[cfg(debug_assertions)]
+    let demo = props.demo;
+    #[cfg(not(debug_assertions))]
+    let demo = false;
+
     let auth_cfg = props.config.auth.clone();
     let client = ApiClient::new(auth_cfg.clone());
 
@@ -275,12 +289,13 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
         let crons = props.crons.clone();
         let peers = props.peers.clone();
         let incidents = props.incidents.clone();
+        let user = props.user.clone();
         move || {
             let mut incidents = incidents;
             sort_incidents(&mut incidents);
             StoreState {
                 config,
-                user: None,
+                user,
                 token: None,
                 peers,
                 incidents,
@@ -299,7 +314,7 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
         let client = client.clone();
         use_effect_with((), move |_| {
             #[cfg(feature = "wasm")]
-            if let Some(cfg) = auth_cfg {
+            if let Some(cfg) = auth_cfg.filter(|_| !demo) {
                 wasm_bindgen_futures::spawn_local(async move {
                     let mut current = crate::auth::stored_token();
                     if crate::auth::has_pending_callback() {
@@ -324,7 +339,7 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
                 });
             }
             #[cfg(not(feature = "wasm"))]
-            let _ = (&state, &auth_cfg, &client);
+            let _ = (&state, &auth_cfg, &client, &demo);
             || ()
         });
     }
@@ -347,22 +362,24 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
             let focus = focus.clone();
             let seeded = !state.probes.is_empty();
             use_effect_with((), move |_| {
-                wasm_bindgen_futures::spawn_local(async move {
-                    if !seeded {
-                        state.dispatch(load_probes(&client).await);
-                        state.dispatch(load_crons(&client).await);
-                        state.dispatch(load_incidents(&client).await);
-                    }
-                    loop {
-                        gloo::timers::future::sleep(reload).await;
-                        // Hold here while the page is unfocused; the interval that elapsed in the
-                        // background collapses into a single fetch once focus returns.
-                        focus.active().await;
-                        state.dispatch(load_probes(&client).await);
-                        state.dispatch(load_crons(&client).await);
-                        state.dispatch(load_incidents(&client).await);
-                    }
-                });
+                if !demo {
+                    wasm_bindgen_futures::spawn_local(async move {
+                        if !seeded {
+                            state.dispatch(load_probes(&client).await);
+                            state.dispatch(load_crons(&client).await);
+                            state.dispatch(load_incidents(&client).await);
+                        }
+                        loop {
+                            gloo::timers::future::sleep(reload).await;
+                            // Hold here while the page is unfocused; the interval that elapsed in
+                            // the background collapses into a single fetch once focus returns.
+                            focus.active().await;
+                            state.dispatch(load_probes(&client).await);
+                            state.dispatch(load_crons(&client).await);
+                            state.dispatch(load_incidents(&client).await);
+                        }
+                    });
+                }
                 || ()
             });
         }
@@ -374,14 +391,16 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
             let client = client.clone();
             let focus = focus.clone();
             use_effect_with((), move |_| {
-                wasm_bindgen_futures::spawn_local(async move {
-                    state.dispatch(Action::SetPeers(load_peers(&client).await));
-                    loop {
-                        gloo::timers::future::sleep(reload).await;
-                        focus.active().await;
+                if !demo {
+                    wasm_bindgen_futures::spawn_local(async move {
                         state.dispatch(Action::SetPeers(load_peers(&client).await));
-                    }
-                });
+                        loop {
+                            gloo::timers::future::sleep(reload).await;
+                            focus.active().await;
+                            state.dispatch(Action::SetPeers(load_peers(&client).await));
+                        }
+                    });
+                }
                 || ()
             });
         }
@@ -397,7 +416,7 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
             let client = client.clone();
             let first = use_mut_ref(|| true);
             use_effect_with(state.token.is_some(), move |_| {
-                if std::mem::replace(&mut *first.borrow_mut(), false) {
+                if std::mem::replace(&mut *first.borrow_mut(), false) || demo {
                     // Mount: the initial fetch is handled by the effects above.
                 } else {
                     wasm_bindgen_futures::spawn_local(async move {

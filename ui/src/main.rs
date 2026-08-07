@@ -3,6 +3,8 @@ mod auth;
 mod client;
 mod components;
 mod contexts;
+#[cfg(debug_assertions)]
+pub mod demo;
 pub mod formatters;
 pub mod routes;
 mod styles;
@@ -18,6 +20,14 @@ pub use contexts::*;
 fn main() {
     #[cfg(target_arch = "wasm32")]
     wasm_logger::init(wasm_logger::Config::default());
+
+    // `?demo` renders the app from a local fixture with the API disabled, so the layout can be
+    // iterated on with nothing but `trunk serve`.
+    #[cfg(all(feature = "wasm", debug_assertions))]
+    if demo::enabled() {
+        yew::Renderer::<demo::DemoApp>::new().render();
+        return;
+    }
 
     #[cfg(feature = "wasm")]
     if let Ok(props) = AppProps::from_dom() {

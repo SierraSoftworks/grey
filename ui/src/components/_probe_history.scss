@@ -16,7 +16,10 @@
     flex: 1;
     position: relative;
     cursor: pointer;
-    min-width: 10px;
+    // Segments share the strip's width evenly; the floor stops a full 48-hour history from
+    // overflowing its card on a narrow viewport (the strip is right-aligned, so the overflow would
+    // silently run off the left edge).
+    min-width: 4px;
 
     &:first-child {
         border-top-left-radius: $border-radius-small;
@@ -47,6 +50,20 @@
 
     &.unknown {
         background-color: $color-status-unknown;
+    }
+
+    // A phone shows the most recent day rather than two days' worth of slivers, so each segment
+    // stays wide enough to read (and tap).
+    @media only screen and (max-width: $mobile) {
+        &:nth-last-child(n + #{$mobile-strip-cells + 1}) {
+            display: none;
+        }
+
+        // The oldest still-visible segment takes over the rounded leading edge.
+        &:nth-last-child(#{$mobile-strip-cells}) {
+            border-top-left-radius: $border-radius-small;
+            border-bottom-left-radius: $border-radius-small;
+        }
     }
 }
 

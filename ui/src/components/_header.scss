@@ -12,26 +12,13 @@ header {
     border-bottom: 1px solid $color-separator;
 
     @media only screen and (max-width: $mobile) {
-        flex-direction: column;
-        align-items: stretch;
+        // Brand and controls share the first row; the nav collapses onto a second row behind the
+        // hamburger. Wrapping (rather than absolute positioning) keeps the controls from sitting on
+        // top of the brand when the title is long.
+        flex-wrap: wrap;
         position: sticky;
         top: 0;
         z-index: 1000;
-
-        // Create a top row for brand and controls
-        .header__brand,
-        .header__controls {
-            display: flex;
-        }
-
-        // On mobile, position brand and controls in a row
-        .header__brand {
-            flex: 1;
-        }
-
-        .header__menu {
-            align-items: center;
-        }
 
         &.menu-open {
             .header__nav {
@@ -66,18 +53,32 @@ header {
     color: inherit;
 
     @media only screen and (max-width: $mobile) {
-        flex: none;
+        // Shrinkable, so a long title gives way to the controls rather than pushing them off-screen.
+        flex: 0 1 auto;
+        min-width: 0;
+        padding: 0.75rem 1rem;
     }
 
     img {
         height: 2rem;
         aspect-ratio: 1/1;
         margin: 0 1rem 0 0;
+
+        @media only screen and (max-width: $mobile) {
+            margin-right: 0.6rem;
+        }
     }
 
     .header__title {
         font-size: 1.2rem;
         font-weight: 500;
+
+        @media only screen and (max-width: $mobile) {
+            font-size: 1.05rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
     }
 }
 
@@ -110,7 +111,9 @@ header {
         transition: max-height 0.3s ease-in-out, opacity 0.3s ease-in-out, visibility 0.3s ease-in-out;
         background-color: $background-box;
         border-top: 1px solid $color-separator;
-        order: 3; // Move below everything else on mobile
+        // A full-width row of its own, below the brand and controls.
+        order: 3;
+        flex: 1 1 100%;
         align-items: stretch;
 
         .header__nav-link {
@@ -132,12 +135,12 @@ header {
     padding: 0 1rem;
 
     @media only screen and (max-width: $mobile) {
-        gap: 0.5rem;
-        position: absolute;
-        top: 0;
-        right: 0;
-        padding: 1rem;
-        align-items: flex-start;
+        gap: 0.4rem;
+        flex: 0 0 auto;
+        order: 2;
+        // Stays on the right even when a long brand title pushes the controls onto their own row.
+        margin-left: auto;
+        padding: 0.75rem 1rem 0.75rem 0;
     }
 }
 
