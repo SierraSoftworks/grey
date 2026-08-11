@@ -33,6 +33,13 @@ pub struct Probe {
     /// existed.
     #[serde(default, with = "humantime_serde::option")]
     pub debounce: Option<std::time::Duration>,
+
+    /// A propagating tombstone: the observing node no longer has this probe in its configuration.
+    /// Retired records are excluded from the pooled view (and so from the API and UI) but keep
+    /// gossiping until they age out, so removing a probe from the config removes it cluster-wide
+    /// rather than leaving its history stranded on every peer.
+    #[serde(default)]
+    pub retired: bool,
 }
 
 impl Probe {
@@ -99,6 +106,7 @@ impl Mergeable for Probe {
         if other.last_updated > self.last_updated {
             self.name = other.name.clone();
             self.tags = other.tags.clone();
+            self.retired = other.retired;
         }
 
         self.last_updated = self.last_updated.max(other.last_updated);
@@ -165,6 +173,7 @@ mod tests {
             })].into_iter().collect(),
             streak: Streak::default(),
             debounce: None,
+            retired: false,
         };
 
         let probe2 = Probe {
@@ -180,6 +189,7 @@ mod tests {
             })].into_iter().collect(),
             streak: Streak::default(),
             debounce: None,
+            retired: false,
         };
 
         probe1.merge(&probe2);
@@ -214,6 +224,7 @@ mod tests {
             ].into_iter().collect(),
             streak: Streak::default(),
             debounce: None,
+            retired: false,
         };
 
         let total = probe.total();
@@ -246,6 +257,7 @@ mod tests {
             ].into_iter().collect(),
             streak: Streak::default(),
             debounce: None,
+            retired: false,
         };
 
         let availability = probe.availability();
@@ -263,6 +275,7 @@ mod tests {
             observations: HashMap::new(),
             streak: Streak::default(),
             debounce: None,
+            retired: false,
         };
 
         // With an empty streak record (e.g. data from older agents), the probe falls
@@ -330,6 +343,7 @@ mod tests {
                 covered_since: Some(chrono::DateTime::from_timestamp(1_690_000_000, 0).unwrap()),
             },
             debounce: None,
+            retired: false,
         };
 
         let packed = rmp_serde::to_vec(&probe).unwrap();

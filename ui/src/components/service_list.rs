@@ -137,6 +137,7 @@ mod tests {
             observations: Default::default(),
             streak: Default::default(),
             debounce: None,
+            retired: false,
         }
     }
 

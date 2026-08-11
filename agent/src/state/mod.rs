@@ -628,6 +628,7 @@ mod tests {
             observations: HashMap::new(),
             streak: grey_api::Streak::default(),
             debounce: None,
+            retired: false,
         }
     }
 

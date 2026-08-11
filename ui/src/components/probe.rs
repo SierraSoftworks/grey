@@ -88,6 +88,7 @@ mod tests {
             observations: Default::default(),
             streak,
             debounce: None,
+            retired: false,
         };
         yew::ServerRenderer::<Harness>::with_props(move || HarnessProps { probe })
             .render()
