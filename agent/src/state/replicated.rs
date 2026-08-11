@@ -122,6 +122,7 @@ mod tests {
             observations: HashMap::new(),
             streak: Default::default(),
             debounce: None,
+            retired: false,
         }
     }
 

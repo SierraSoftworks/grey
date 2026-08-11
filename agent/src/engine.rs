@@ -44,6 +44,12 @@ impl Engine {
         // Start config reload watcher
         self.start_config_reloader();
 
+        // Tombstone any stored records for probes that were removed from the configuration while this
+        // node was down, so they stop appearing in the UI (and are dropped by our peers).
+        if let Err(err) = self.state.reconcile_probe_config().await {
+            error!(name: "engine.probes.reconcile", { exception = err }, "Failed to reconcile stored probe state with the configuration: {err}");
+        }
+
         {
             let state = self.state.clone();
             tokio::task::spawn_local(async move {
@@ -157,6 +163,12 @@ impl Engine {
 
                 let new_probes = state.get_config().probes.clone();
                 if new_probes != current_probes {
+                    // Retire the records of removed probes (and revive those that came back) so the
+                    // configuration remains the source of truth for what the UI shows.
+                    if let Err(err) = state.reconcile_probe_config().await {
+                        error!(name: "config.reload.probe", { action = "reconcile", exception = err }, "Failed to reconcile stored probe state with the configuration: {err}");
+                    }
+
                     let old_probes: HashMap<&str, &Probe> = current_probes
                         .iter()
                         .map(|p| (p.name.as_str(), p))

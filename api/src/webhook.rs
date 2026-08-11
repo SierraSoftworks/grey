@@ -229,6 +229,7 @@ mod tests {
                 covered_since: None,
             },
             debounce: None,
+            retired: false,
         }
     }
 

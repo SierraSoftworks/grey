@@ -27,6 +27,11 @@ pub trait ProbeStore {
     /// Persists the configured probe metadata for this node.
     async fn update_probe_config(&self, probe: &crate::Probe) -> Result<(), Box<dyn Error>>;
 
+    /// Reconciles this node's stored probe records against the current configuration, tombstoning
+    /// the records of probes that have been removed (and clearing the tombstone from any that have
+    /// returned).
+    async fn reconcile_probe_config(&self) -> Result<(), Box<dyn Error>>;
+
     /// Applies a fresh probe result to this node's stored state for the named probe.
     async fn update_probe_state(
         &self,
@@ -61,6 +66,13 @@ impl ProbeStore for State {
                 let (_node_id, probe_name) = key.value();
                 let (_, data) = value.value();
                 if let Ok(snapshot) = rmp_serde::from_slice::<ProbeState>(data) {
+                    // A retired record is an observer's tombstone for a probe it no longer runs; it
+                    // contributes nothing to the pool, so a probe disappears once every observer has
+                    // dropped it (and stays visible while any node still probes it).
+                    if snapshot.retired {
+                        continue;
+                    }
+
                     histories
                         .entry(probe_name.clone())
                         .and_modify(|existing: &mut ProbeState| {
@@ -105,6 +117,58 @@ impl ProbeStore for State {
                 (self.node_id.into(), probe.name.clone()),
                 (snapshot.version(), rmp_serde::to_vec_named(&snapshot)?.as_slice()),
             )?;
+        }
+
+        txn.commit()?;
+
+        Ok(())
+    }
+
+    #[instrument(name="state.probes.reconcile", skip(self), fields(otel.kind = "internal", node.id=%self.node_id), err(Debug))]
+    async fn reconcile_probe_config(&self) -> Result<(), Box<dyn Error>> {
+        let config = self.get_config();
+        let own_id: u128 = self.node_id.into();
+
+        let txn = self.database.begin_write()?;
+        {
+            let mut table = txn.open_table(PROBES_TABLE)?;
+
+            let mut updates: Vec<(String, ProbeState)> = Vec::new();
+            for entry in table.iter()?.filter_map(|r| r.ok()) {
+                let (key, value) = entry;
+                let (node_id, probe_name) = key.value();
+                // Only this node's own observations are ours to retire; a peer's record is retired by
+                // the peer itself and reaches us through gossip.
+                if node_id != own_id {
+                    continue;
+                }
+
+                let (_version, data) = value.value();
+                let Ok(mut snapshot) = rmp_serde::from_slice::<ProbeState>(data) else {
+                    continue;
+                };
+
+                let retired = !config.probes.iter().any(|p| p.name == probe_name);
+                if snapshot.retired == retired {
+                    continue;
+                }
+
+                snapshot.retired = retired;
+                // `last_updated` serializes with second precision, so advance by a whole second when
+                // the clock hasn't moved on yet — otherwise the version wouldn't change and peers
+                // would never pick the tombstone up.
+                snapshot.last_updated = chrono::Utc::now()
+                    .max(snapshot.last_updated + chrono::Duration::seconds(1));
+                updates.push((probe_name, snapshot));
+            }
+
+            for (probe_name, snapshot) in updates {
+                info!(name: "state.probes.reconcile", { probe.name = %probe_name, probe.retired = snapshot.retired }, "Reconciled stored probe record against the configuration");
+                table.insert(
+                    (own_id, probe_name),
+                    (snapshot.version(), rmp_serde::to_vec_named(&snapshot)?.as_slice()),
+                )?;
+            }
         }
 
         txn.commit()?;
@@ -239,6 +303,7 @@ impl Versioned for Probe {
                 observations: self.observations.clone(),
                 streak: self.streak.clone(),
                 debounce: self.debounce,
+                retired: self.retired,
             })
         } else {
             None
@@ -266,7 +331,90 @@ mod tests {
             observations: HashMap::new(),
             streak: grey_api::Streak::default(),
             debounce: None,
+            retired: false,
         }
+    }
+
+    /// A probe dropped from the configuration disappears from the pooled view (and so from the UI)
+    /// even though it has recorded history, and its record is tombstoned rather than deleted so the
+    /// removal propagates to peers holding a copy.
+    #[tokio::test]
+    async fn removing_a_probe_from_the_config_retires_its_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = State::test(dir.path().to_path_buf()).await;
+        let probe_name = state.get_config().probes[0].name.clone();
+
+        assert!(
+            state.get_probe_states().await.unwrap().contains_key(&probe_name),
+            "the configured probe must be visible before it is removed"
+        );
+
+        let mut config = Config::test(&dir.path().to_path_buf());
+        config.probes.clear();
+        state.set_config_for_test(config);
+        state.reconcile_probe_config().await.unwrap();
+
+        assert!(
+            !state.get_probe_states().await.unwrap().contains_key(&probe_name),
+            "a probe removed from the configuration must not be returned, even with stored history"
+        );
+
+        let txn = state.database.begin_read().unwrap();
+        let table = txn.open_table(PROBES_TABLE).unwrap();
+        let entry = table
+            .get((state.node_id.into(), probe_name.clone()))
+            .unwrap()
+            .expect("the tombstone must be retained so it can be gossiped");
+        let (_version, data) = entry.value();
+        let stored: ProbeState = rmp_serde::from_slice(data).unwrap();
+        assert!(stored.retired, "the record must be tombstoned rather than deleted");
+    }
+
+    /// Retirement is per-observer: a peer that still runs the probe keeps it visible here (the
+    /// headless-worker topology), and re-adding it locally clears the tombstone without losing the
+    /// history that was recorded before the removal.
+    #[tokio::test]
+    async fn retirement_is_scoped_to_this_node_and_reversible() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = State::test(dir.path().to_path_buf()).await;
+        let probe_name = state.get_config().probes[0].name.clone();
+
+        let empty = {
+            let mut config = Config::test(&dir.path().to_path_buf());
+            config.probes.clear();
+            config
+        };
+        state.set_config_for_test(empty);
+        state.reconcile_probe_config().await.unwrap();
+
+        // A peer still observing the probe keeps it in the pooled view.
+        let peer = NodeID::new();
+        let mut diff = crate::cluster::ClusterStateDiff::new();
+        diff.update(
+            peer,
+            probe_name.clone(),
+            crate::state::ReplicatedEntity::Probe(probe_at(&probe_name, chrono::Utc::now())),
+        );
+        crate::cluster::GossipStore::apply(&state, diff).await.unwrap();
+        assert!(
+            state.get_probe_states().await.unwrap().contains_key(&probe_name),
+            "a peer that still runs the probe must keep it visible"
+        );
+
+        // Restoring the configuration revives this node's own record.
+        state.set_config_for_test(Config::test(&dir.path().to_path_buf()));
+        state.reconcile_probe_config().await.unwrap();
+
+        let txn = state.database.begin_read().unwrap();
+        let table = txn.open_table(PROBES_TABLE).unwrap();
+        let entry = table.get((state.node_id.into(), probe_name.clone())).unwrap().unwrap();
+        let (_version, data) = entry.value();
+        let stored: ProbeState = rmp_serde::from_slice(data).unwrap();
+        assert!(!stored.retired, "re-adding the probe must clear the tombstone");
+        assert!(
+            !stored.history.is_empty(),
+            "the history recorded before the removal must survive the round trip"
+        );
     }
 
     /// Two updates within the same wall-clock second must produce distinct versions, so the later

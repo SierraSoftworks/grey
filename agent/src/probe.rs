@@ -102,6 +102,7 @@ impl Into<grey_api::Probe> for &Probe {
             observations: HashMap::new(),
             streak: grey_api::Streak::default(),
             debounce: Some(self.alerting.debounce_std()),
+            retired: false,
         }
     }
 }

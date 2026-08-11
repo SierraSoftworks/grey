@@ -274,6 +274,7 @@ fn probe(
         observations,
         streak: streak(now, shape),
         debounce: None,
+        retired: false,
     }
 }
 
