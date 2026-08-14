@@ -59,6 +59,7 @@ export default defineUserConfig({
           '/targets/http.md',
           '/targets/script.md',
           '/targets/tcp.md',
+          '/targets/tls_cert.md',
         ]
       },
       {

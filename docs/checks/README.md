@@ -47,6 +47,7 @@ The most useful operators are summarised below — see the
 | `matches`                      | Regular-expression match.                                   |
 | `+`, `-`                       | Arithmetic on numbers, datetimes, and durations.            |
 | `now()`                        | The current UTC time, for relative-time comparisons.        |
+| `30d`, `1h30m`                 | Duration literals, for comparing against durations.         |
 
 The string operators are case-insensitive by default; each has a case-sensitive `_cs`
 variant (`contains_cs`, `startswith_cs`, …). String literals use double quotes (`"text"`),

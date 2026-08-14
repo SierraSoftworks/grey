@@ -11,6 +11,7 @@
         "!Http mapping",
         "!Script mapping",
         "!Tcp mapping",
+        "!TlsCert mapping",
         "!Grpc mapping",
     ],
     "cSpell.words": [

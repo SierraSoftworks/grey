@@ -7,7 +7,7 @@ For a quick introduction to using Grey to probe a service, take a look at the
 [Usage Guide](../guide/README.md).
 :::
 
-When defining a probe, you can specify the target type using the `!Http`, `!Grpc`, `!Tcp`, `!Dns`, or `!Script` syntax. These
+When defining a probe, you can specify the target type using the `!Http`, `!Grpc`, `!Tcp`, `!TlsCert`, `!Dns`, or `!Script` syntax. These
 target types each accept a distinct set of configuration options which are documented
 on their respective pages.
 
@@ -48,6 +48,17 @@ probes:
     checks:
       - net.ip == "127.0.0.1"
 
+  - name: tls.example
+    policy:
+      interval: 1h
+      timeout: 10s
+      retries: 3
+    target: !TlsCert
+      host: example.com:443
+    checks:
+      - tls.trusted == true
+      - tls.expires_in > 30d
+
   - name: dns.example
     policy:
       interval: 5s
@@ -57,7 +68,7 @@ probes:
       domain: example.com
       record_type: MX
     checks:
-      - "10 smtp.example.com" in dns.answers
+      - '"10 smtp.example.com" in dns.answers'
 
   - name: script.example
     policy:

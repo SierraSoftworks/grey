@@ -50,15 +50,20 @@ lazy_static.workspace = true
 openssl-sys = { workspace = true, optional = true }
 rand.workspace = true
 reqwest.workspace = true
+rustls.workspace = true
+rustls-native-certs.workspace = true
+rustls-pki-types.workspace = true
 serde_yaml.workspace = true
 sha2.workspace = true
 tonic.workspace = true
 tonic-health.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
 tracing.workspace = true
 tracing-batteries.workspace = true
 trust-dns-resolver.workspace = true
 uuid.workspace = true
+x509-parser.workspace = true
 
 [features]
 default = ["scripts"]
@@ -67,7 +72,9 @@ scripts = ["dep:boa_engine", "dep:boa_gc", "dep:boa_runtime"]
 openssl_src = ["dep:openssl-sys"]
 
 [dev-dependencies]
+rcgen.workspace = true
 tempfile.workspace = true
+time.workspace = true
 wiremock = "0.6"
 
 
