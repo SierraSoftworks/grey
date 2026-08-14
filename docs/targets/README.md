@@ -68,7 +68,7 @@ probes:
       domain: example.com
       record_type: MX
     checks:
-      - "10 smtp.example.com" in dns.answers
+      - '"10 smtp.example.com" in dns.answers'
 
   - name: script.example
     policy:
