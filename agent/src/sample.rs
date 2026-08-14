@@ -1,5 +1,6 @@
 use std::{borrow::Cow, collections::HashMap, fmt::Display};
 
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize, de::Visitor};
 
 #[derive(Debug, Clone, Default)]
@@ -31,6 +32,8 @@ pub enum SampleValue {
     Double(f64),
     Int(i64),
     Bool(bool),
+    DateTime(DateTime<Utc>),
+    Duration(Duration),
     List(Vec<SampleValue>),
 }
 
@@ -42,6 +45,8 @@ impl SampleValue {
             SampleValue::Double(_) => "double",
             SampleValue::Int(_) => "int",
             SampleValue::Bool(_) => "bool",
+            SampleValue::DateTime(_) => "datetime",
+            SampleValue::Duration(_) => "duration",
             SampleValue::List(_) => "list",
         }
     }
@@ -84,9 +89,27 @@ impl From<&str> for SampleValue {
     }
 }
 
+impl From<DateTime<Utc>> for SampleValue {
+    fn from(value: DateTime<Utc>) -> Self {
+        SampleValue::DateTime(value)
+    }
+}
+
+impl From<Duration> for SampleValue {
+    fn from(value: Duration) -> Self {
+        SampleValue::Duration(value)
+    }
+}
+
 impl<T: Into<SampleValue>> From<Vec<T>> for SampleValue {
     fn from(value: Vec<T>) -> Self {
         SampleValue::List(value.into_iter().map(|v| v.into()).collect())
+    }
+}
+
+impl<T: Into<SampleValue>> From<Option<T>> for SampleValue {
+    fn from(value: Option<T>) -> Self {
+        value.map_or(SampleValue::None, Into::into)
     }
 }
 
@@ -98,9 +121,23 @@ impl Display for SampleValue {
             SampleValue::Double(value) => write!(f, "{}", value),
             SampleValue::Int(value) => write!(f, "{}", value),
             SampleValue::Bool(value) => write!(f, "{}", value),
+            SampleValue::DateTime(value) => write!(f, "{}", format_datetime(value)),
+            SampleValue::Duration(value) => write!(f, "{}", format_duration(value)),
             SampleValue::List(value) => write!(f, "[{}]", value.iter().map(SampleValue::to_string).collect::<Vec<_>>().join(", ")),
         }
     }
+}
+
+/// Renders a timestamp in the same RFC 3339 form that `filt-rs` uses for its
+/// own datetime values, so check failures and expression literals agree.
+fn format_datetime(value: &DateTime<Utc>) -> String {
+    value.to_rfc3339_opts(SecondsFormat::AutoSi, true)
+}
+
+/// Renders a duration in `filt-rs`'s compact form (e.g. `30d`, `1h30m`) so it
+/// matches the duration literals a check would compare it against.
+fn format_duration(value: &Duration) -> String {
+    filt_rs::FilterValue::Duration(*value).to_string()
 }
 
 impl filt_rs::Filterable for Sample {
@@ -123,6 +160,8 @@ impl<'a> From<&'a SampleValue> for filt_rs::FilterValue<'a> {
             SampleValue::Double(value) => filt_rs::FilterValue::Number(*value),
             SampleValue::Int(value) => filt_rs::FilterValue::Number(*value as f64),
             SampleValue::Bool(value) => filt_rs::FilterValue::Bool(*value),
+            SampleValue::DateTime(value) => filt_rs::FilterValue::DateTime(*value),
+            SampleValue::Duration(value) => filt_rs::FilterValue::Duration(*value),
             SampleValue::List(value) => {
                 filt_rs::FilterValue::Tuple(value.iter().map(filt_rs::FilterValue::from).collect())
             }
@@ -141,12 +180,17 @@ impl Serialize for SampleValue {
             SampleValue::Double(value) => serializer.serialize_f64(*value),
             SampleValue::Int(value) => serializer.serialize_i64(*value),
             SampleValue::Bool(value) => serializer.serialize_bool(*value),
+            SampleValue::DateTime(value) => serializer.serialize_str(&format_datetime(value)),
+            SampleValue::Duration(value) => serializer.serialize_str(&format_duration(value)),
             SampleValue::List(value) => serializer.collect_seq(value),
         }
     }
 }
 
 impl<'de> Deserialize<'de> for SampleValue {
+    /// Datetimes and durations serialize to their string forms and are read
+    /// back as [`SampleValue::String`]; samples are only ever deserialized for
+    /// debugging, never round-tripped through storage or the cluster.
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -242,6 +286,11 @@ impl<'de> Visitor<'de> for SampleValueVisitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
+
+    fn datetime() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 6, 12, 13, 30, 45).unwrap()
+    }
 
     #[test]
     fn test_sample_value_from() {
@@ -256,6 +305,12 @@ mod tests {
 
         let sv: SampleValue = true.into();
         assert_eq!(sv, SampleValue::Bool(true));
+
+        let sv: SampleValue = datetime().into();
+        assert_eq!(sv, SampleValue::DateTime(datetime()));
+
+        let sv: SampleValue = Duration::days(30).into();
+        assert_eq!(sv, SampleValue::Duration(Duration::days(30)));
 
         let sv: SampleValue = vec![1, 2, 3].into();
         assert_eq!(
@@ -282,6 +337,12 @@ mod tests {
         let sv = SampleValue::Bool(true);
         assert_eq!(sv.get_type(), "bool");
 
+        let sv = SampleValue::DateTime(datetime());
+        assert_eq!(sv.get_type(), "datetime");
+
+        let sv = SampleValue::Duration(Duration::days(30));
+        assert_eq!(sv.get_type(), "duration");
+
         let sv = SampleValue::None;
         assert_eq!(sv.get_type(), "null");
 
@@ -301,6 +362,20 @@ mod tests {
 
         let display = format!("{}", sv);
         assert_eq!(display, "[42, 3.14, \"hello\", true, null]");
+    }
+
+    /// Temporal values render exactly as `filt-rs` renders its own, so a failing
+    /// check reports a value in the same notation its expression is written in.
+    #[test]
+    fn test_sample_value_display_temporal() {
+        assert_eq!(
+            SampleValue::DateTime(datetime()).to_string(),
+            "2026-06-12T13:30:45Z"
+        );
+        assert_eq!(
+            SampleValue::Duration(Duration::minutes(90)).to_string(),
+            "1h30m"
+        );
     }
 
     #[test]
@@ -330,6 +405,20 @@ mod tests {
         assert_eq!(round_trip(&sv), sv);
     }
 
+    /// Temporal values are written out in their string form, which is all the
+    /// debug-oriented serialization of a sample needs to convey.
+    #[test]
+    fn test_sample_value_serialize_temporal() {
+        assert_eq!(
+            round_trip(&SampleValue::DateTime(datetime())),
+            SampleValue::String("2026-06-12T13:30:45Z".to_string())
+        );
+        assert_eq!(
+            round_trip(&SampleValue::Duration(Duration::minutes(90))),
+            SampleValue::String("1h30m".to_string())
+        );
+    }
+
     fn round_trip(value: &SampleValue) -> SampleValue {
         let serialized = serde_json::to_string(value).unwrap();
         println!("Serialized: {serialized} (from {value})");
@@ -356,6 +445,14 @@ mod tests {
         assert_eq!(
             FilterValue::from(&SampleValue::String("hello".into())),
             FilterValue::String("hello".into())
+        );
+        assert_eq!(
+            FilterValue::from(&SampleValue::DateTime(datetime())),
+            FilterValue::DateTime(datetime())
+        );
+        assert_eq!(
+            FilterValue::from(&SampleValue::Duration(Duration::days(30))),
+            FilterValue::Duration(Duration::days(30))
         );
         assert_eq!(
             FilterValue::from(&SampleValue::List(vec![
@@ -394,5 +491,31 @@ mod tests {
 
         let failing = Filter::new("http.status == 500").expect("parse filter");
         assert!(!failing.matches(&sample).expect("evaluate filter"));
+    }
+
+    /// Temporal fields are what make expiry checks readable, so verify they can
+    /// be compared against `now()` and against duration literals like `30d`.
+    #[test]
+    fn test_sample_temporal_checks() {
+        use filt_rs::Filter;
+
+        let sample = Sample::default()
+            .with("tls.not_after", Utc::now() + Duration::days(60))
+            .with("tls.expires_in", Duration::days(60));
+
+        for check in [
+            "tls.not_after > now() + 30d",
+            "tls.expires_in > 30d",
+            "tls.expires_in < 90d",
+        ] {
+            let filter = Filter::new(check).expect("parse filter");
+            assert!(
+                filter.matches(&sample).expect("evaluate filter"),
+                "expected {check} to match"
+            );
+        }
+
+        let filter = Filter::new("tls.expires_in < 30d").expect("parse filter");
+        assert!(!filter.matches(&sample).expect("evaluate filter"));
     }
 }
