@@ -1,0 +1,57 @@
+# Example TLS certificate monitoring configuration
+probes:
+  # Alert well before a public certificate is due to expire.
+  - name: tls.expiry
+    policy:
+      interval: 1h
+      timeout: 10s
+      retries: 3
+    target: !TlsCert
+      host: sierrasoftworks.com:443
+      alpn: [h2, http/1.1]
+    checks:
+      - tls.trusted == true
+      - tls.hostname_valid == true
+      - tls.expires_in > 30d
+
+  # The same target works against anything speaking TLS over TCP, not just HTTPS.
+  - name: tls.smtp
+    policy:
+      interval: 1h
+      timeout: 10s
+      retries: 3
+    target: !TlsCert
+      host: smtp.gmail.com:465
+    checks:
+      - tls.trusted == true
+      - tls.not_after > now() + 14d
+
+  # Connect to a specific node by IP, but validate the shared service name.
+  - name: tls.pinned
+    policy:
+      interval: 1h
+      timeout: 10s
+      retries: 3
+    target: !TlsCert
+      host: 1.1.1.1:443
+      server_name: cloudflare-dns.com
+    checks:
+      - tls.trusted == true
+      - '"cloudflare-dns.com" in tls.sans'
+      - tls.chain.length > 1
+
+  # A privately signed service, validated against its own certificate authority.
+  # - name: tls.internal
+  #   policy:
+  #     interval: 1h
+  #     timeout: 10s
+  #     retries: 3
+  #   target: !TlsCert
+  #     host: broker.internal:9093
+  #     ca_cert: |
+  #       -----BEGIN CERTIFICATE-----
+  #       ...
+  #       -----END CERTIFICATE-----
+  #   checks:
+  #     - tls.trusted == true
+  #     - tls.expires_in > 90d

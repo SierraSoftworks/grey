@@ -9,6 +9,7 @@ mod grpc;
 mod http;
 mod script;
 mod tcp;
+mod tls_cert;
 
 pub trait Target: Display {
     fn run(
@@ -31,6 +32,7 @@ pub enum TargetType {
     #[cfg(feature = "scripts")]
     Script(script::ScriptTarget),
     Tcp(tcp::TcpTarget),
+    TlsCert(tls_cert::TlsCertTarget),
 }
 
 impl TargetType {
@@ -53,6 +55,7 @@ impl TargetType {
             #[cfg(feature = "scripts")]
             TargetType::Script(target) => target.run(cancel).await,
             TargetType::Tcp(target) => target.run(cancel).await,
+            TargetType::TlsCert(target) => target.run(cancel).await,
         }
     }
 }
@@ -70,6 +73,7 @@ impl Display for TargetType {
             #[cfg(feature = "scripts")]
             TargetType::Script(target) => write!(f, "{}", target),
             TargetType::Tcp(target) => write!(f, "{}", target),
+            TargetType::TlsCert(target) => write!(f, "{}", target),
         }
     }
 }
@@ -87,6 +91,7 @@ impl Target for TargetType {
             #[cfg(feature = "scripts")]
             TargetType::Script(target) => target.run(cancel).await,
             TargetType::Tcp(target) => target.run(cancel).await,
+            TargetType::TlsCert(target) => target.run(cancel).await,
         }
     }
 }

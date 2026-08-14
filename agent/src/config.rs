@@ -559,6 +559,25 @@ mod tests {
         );
     }
 
+    /// The shipped `tls_cert` example must parse through the real configuration
+    /// loader, guarding the example — and the `!TlsCert` target's optional
+    /// fields — against drift.
+    #[tokio::test]
+    async fn loads_tls_cert_example() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../example/tls-cert.yml");
+        let config = Config::load_from_path(&path)
+            .await
+            .expect("example/tls-cert.yml should load");
+
+        let probe = config
+            .probes
+            .iter()
+            .find(|p| p.name == "tls.pinned")
+            .expect("tls.pinned probe should be present");
+        assert_eq!(probe.checks.len(), 3);
+        assert_eq!(probe.target.to_string(), "TLS 1.1.1.1:443 (cloudflare-dns.com)");
+    }
+
     /// The shipped `crons` example must parse through the real configuration loader, guarding the
     /// example against drift and exercising the `CronConfig` (humantime) deserialization.
     #[tokio::test]
