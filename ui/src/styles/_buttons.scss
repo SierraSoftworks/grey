@@ -11,6 +11,7 @@
     border-radius: $border-radius-small;
     padding: 0.4rem 0.9rem;
     font-size: 0.85rem;
+    transition: background-color 0.2s ease, color 0.2s ease;
 
     &:hover {
         background-color: $color-separator;
@@ -18,13 +19,14 @@
 }
 
 .primary-button {
-    background-color: $color-status-unknown;
+    background-color: $color-accent;
     color: $color-status-text;
-    border-color: $color-status-unknown;
+    border-color: $color-accent;
+    transition: background-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
 
     &:hover {
         opacity: 0.9;
-        background-color: $color-status-unknown;
+        background-color: $color-accent;
     }
 
     &:disabled {
@@ -45,6 +47,7 @@
     border: 1px solid $color-status-warn;
     border-radius: $border-radius-small;
     padding: 0.4rem 0.85rem;
+    transition: background-color 0.2s ease, color 0.2s ease;
 
     &:hover {
         color: $color-status-text;
@@ -62,6 +65,7 @@
     font-size: 0.8rem;
     color: $color-text-muted;
     text-decoration: underline;
+    transition: background-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
 
     &:hover {
         color: $color-text;

@@ -9,50 +9,49 @@
     border-radius: 50%;
     flex-shrink: 0;
     display: inline-block;
-    background-color: $color-status-unknown;
+    background-color: var(--status-dot-color);
+    box-shadow: 0 0 0 var(--status-dot-color);
+    --status-dot-color: var(--color-status-unknown);
 
     &.active {
         animation: pulse 2s infinite;
     }
 
     &.ok {
-        background-color: $color-status-ok;
+       --status-dot-color: var(--color-status-ok);
     }
 
     &.warn {
-        background-color: $color-status-warn;
+        --status-dot-color: var(--color-status-warn);
     }
 
     &.error {
-        background-color: $color-status-error;
+        --status-dot-color: var(--color-status-error);
     }
 
     &.running {
-        background-color: $color-status-running;
+        --status-dot-color: var(--color-status-running);
     }
 
     &.unknown {
-        background-color: $color-status-unknown;
+        --status-dot-color: var(--color-status-unknown);
     }
 
     &.draft {
-        background-color: $color-status-offline;
+        --status-dot-color: var(--color-status-offline);
     }
 }
 
 @keyframes pulse {
     0% {
-        opacity: 1;
-        transform: scale(1);
+        box-shadow: 0 0 0 var(--status-dot-color);
     }
 
-    50% {
-        opacity: 0.7;
-        transform: scale(1.2);
+    80% {
+        box-shadow: 0 0 10px var(--status-dot-color);
     }
 
     100% {
-        opacity: 1;
-        transform: scale(1);
+        box-shadow: 0 0 0 var(--status-dot-color);
     }
 }

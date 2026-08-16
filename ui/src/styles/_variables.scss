@@ -15,13 +15,58 @@
     --color-status-warn: #e67e22;
     --color-status-error: #e74c3c;
     --color-status-running: #5dade2;
-    --color-status-unknown: #3498db;
+    // Grey rather than blue, so "no data yet" reads as absent rather than as an in-flight run, and
+    // stays distinct from the lighter `offline` grey used for drafts.
+    --color-status-unknown: #7f8c8d;
     --color-status-offline: #95a5a6;
+
+    /* Interactive accent for primary actions, focus rings and the save affordance. Kept out of the
+       status palette so changing a status colour can't restyle unrelated controls. */
+    --color-accent: #3498db;
 
     /* Tooltip theme */
     --tooltip-background: #111; /* near-black for readability */
     --tooltip-text: #fff;        /* light text on dark background */
     --tooltip-border: rgba(255, 255, 255, 0.12); /* subtle border for separation */
+
+    /* Popover theme */
+    --popover-background: #fff;
+    --popover-color: #333;
+    --popover-border: #eee;
+}
+
+// Dark Mode
+@media (prefers-color-scheme: dark) {
+    :root {
+        --background-base: #19181A;
+        --background-box: #2D2A2E;
+        --color-base: #FCFCFA;
+        --color-box: #FCFCFA;
+
+        --color-text: #FCFCFA;
+        --color-text-muted: #939293;
+
+        --color-separator: #403E41;
+
+        --color-status-text: #221F22;
+        --color-status-ok: #28a745;
+        --color-status-warn: #e67e22;
+        --color-status-error: #e74c3c;
+        --color-status-running: #5dade2;
+        --color-status-unknown: #7f8c8d;
+        --color-status-offline: #95a5a6;
+
+        --color-accent: #3498db;
+
+        /* Tooltip theme */
+        --tooltip-background: #111; /* near-black for readability */
+        --tooltip-text: #fff;        /* light text on dark background */
+        --tooltip-border: rgba(255, 255, 255, 0.12); /* subtle border for separation */
+
+        --popover-background: #19181A;
+        --popover-color: #FCFCFA;
+        --popover-border: #403E41;
+    }
 }
 
 // SCSS Variables for easier use
@@ -39,11 +84,16 @@ $color-status-error: var(--color-status-error);
 $color-status-running: var(--color-status-running);
 $color-status-unknown: var(--color-status-unknown);
 $color-status-offline: var(--color-status-offline);
+$color-accent: var(--color-accent);
 
 // Tooltip theme variables
 $color-tooltip-background: var(--tooltip-background);
 $color-tooltip-text: var(--tooltip-text);
 $color-tooltip-border: var(--tooltip-border);
+
+$color-popover-background: var(--popover-background);
+$color-popover-color: var(--popover-color);
+$color-popover-border: var(--popover-border);
 
 // Breakpoints
 $mobile: 600px;
