@@ -20,6 +20,10 @@ pub enum Route {
     /// Signs the current user out, then redirects home. Exposed as a route so it can be linked to.
     #[at("/auth/logout")]
     AuthLogout,
+    /// A gallery of every UI control, for visual regression checks. Debug builds only.
+    #[cfg(debug_assertions)]
+    #[at("/controls")]
+    Controls,
     #[not_found]
     #[at("/404")]
     NotFound,

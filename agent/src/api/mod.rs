@@ -107,7 +107,7 @@ pub fn create_app() -> App<
         InitError = (),
     >,
 > {
-    App::new()
+    let app = App::new()
         // Surface a `traceparent` on every response so clients can correlate problems with traces.
         .wrap(from_fn(trace::trace_requests))
         .route("/", web::get().to(page::index))
@@ -150,7 +150,14 @@ pub fn create_app() -> App<
                 .route("/incidents/{id}/updates/{uid}", web::delete().to(admin::delete_update)),
         )
         .route("/robots.txt", web::get().to(robots))
-        .route("/static/{filename:.*}", web::get().to(serve_static))
+        .route("/static/{filename:.*}", web::get().to(serve_static));
+
+    // The SPA's control gallery is compiled into debug builds of the UI only, so only serve its
+    // page there; in release the path falls through to the 404 handling of any unknown route.
+    #[cfg(debug_assertions)]
+    let app = app.route("/controls", web::get().to(page::index));
+
+    app
 }
 
 /// Pure-function tests for the fingerprint detector. These live in their own module because the
