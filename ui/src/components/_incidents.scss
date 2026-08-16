@@ -268,7 +268,7 @@
         }
         &:focus {
             outline: none;
-            border-color: $color-status-unknown;
+            border-color: $color-accent;
             background-color: $background-base;
         }
     }
@@ -280,7 +280,7 @@
         background: none;
         padding: 0.1rem;
         margin: 0.3rem 0 0 0.5rem;
-        color: $color-status-unknown;
+        color: $color-accent;
         display: inline-flex;
         align-items: center;
 

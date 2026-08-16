@@ -18,13 +18,13 @@
 }
 
 .primary-button {
-    background-color: $color-status-unknown;
+    background-color: $color-accent;
     color: $color-status-text;
-    border-color: $color-status-unknown;
+    border-color: $color-accent;
 
     &:hover {
         opacity: 0.9;
-        background-color: $color-status-unknown;
+        background-color: $color-accent;
     }
 
     &:disabled {
