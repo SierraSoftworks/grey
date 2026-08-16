@@ -4,6 +4,18 @@ use crate::routes::Route;
 use yew::prelude::*;
 use yew_router::prelude::*;
 
+/// The debug-only link to the control gallery; absent from release builds, where the route does not
+/// exist.
+#[cfg(debug_assertions)]
+fn controls_link() -> Html {
+    html! { <Link<Route> to={Route::Controls} classes="header__nav-link">{"Controls"}</Link<Route>> }
+}
+
+#[cfg(not(debug_assertions))]
+fn controls_link() -> Html {
+    html! {}
+}
+
 #[function_component(Header)]
 pub fn header() -> Html {
     let store = use_store();
@@ -33,6 +45,7 @@ pub fn header() -> Html {
 
             <nav class="header__nav">
                 <Link<Route> to={Route::Incidents} classes="header__nav-link">{"Incidents"}</Link<Route>>
+                { controls_link() }
                 {
                     for store.config().links.iter().map(|link| {
                         html! {

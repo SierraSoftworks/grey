@@ -1,0 +1,125 @@
+@use 'variables' as *;
+
+// The debug-only control gallery (`/controls`). Deliberately plain: the page chrome should never
+// compete with the specimens it frames, so it is limited to separators, labels and the backgrounds
+// each control is normally rendered against.
+.controls {
+    max-width: 1100px;
+
+    &__intro {
+        color: $color-text-muted;
+        margin-top: 0;
+    }
+
+    &__section {
+        margin: 2.5rem 0;
+        padding-top: 1.5rem;
+        border-top: 1px solid $color-separator;
+    }
+
+    &__section-title {
+        font-weight: 300;
+        margin: 0;
+    }
+
+    &__section-note {
+        color: $color-text-muted;
+        font-size: 0.85rem;
+        margin: 0.25rem 0 1.25rem;
+    }
+
+    &__section-body > * + * {
+        margin-top: 1.5rem;
+    }
+
+    // A responsive shelf of individually labelled specimens.
+    &__grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+        gap: 1rem;
+    }
+
+    &__specimen {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.6rem;
+        padding: 1rem;
+        border: 1px solid $color-separator;
+        border-radius: $border-radius-medium;
+        background-color: $background-box;
+        color: $color-box;
+    }
+
+    &__specimen-body {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        min-height: 2rem;
+    }
+
+    &__specimen-label {
+        font-size: 0.75rem;
+        color: $color-text-muted;
+    }
+
+    // Full-width specimens stacked vertically (banners, probes, incidents).
+    &__stack > * + * {
+        margin-top: 0.75rem;
+    }
+
+    // Wraps specimens that normally live inside the landing page's card.
+    &__stack--boxed {
+        background-color: $background-box;
+        color: $color-box;
+        border-radius: $border-radius;
+        padding: 1rem 2rem;
+
+        > * + * {
+            margin-top: 1rem;
+        }
+    }
+
+    &__row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.5rem;
+        align-items: center;
+    }
+
+    // Oversized glyphs, where clipping and stroke weight are easiest to judge.
+    &__row--large {
+        font-size: 2.5rem;
+    }
+
+    &__stack--large {
+        font-size: 2.5rem;
+    }
+
+    &__dots {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    // Popovers anchor above their trigger, so reserve the overhead they occupy while pinned open.
+    &__popovers {
+        display: flex;
+        justify-content: space-between;
+        gap: 2rem;
+        padding-top: 10rem;
+    }
+
+    &__popover-anchor {
+        position: relative;
+    }
+
+    &__popover-trigger {
+        display: inline-block;
+        padding: 0.35rem 0.75rem;
+        border: 1px dashed $color-separator;
+        border-radius: $border-radius-small;
+        font-size: 0.8rem;
+        color: $color-text-muted;
+    }
+}

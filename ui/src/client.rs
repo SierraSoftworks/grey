@@ -179,6 +179,8 @@ fn switch(route: Route) -> Html {
         Route::Incident { id } => html! { <IncidentDetail id={id} /> },
         Route::AuthCallback => html! { <AuthCallback /> },
         Route::AuthLogout => html! { <AuthLogout /> },
+        #[cfg(debug_assertions)]
+        Route::Controls => html! { <crate::views::ControlsView /> },
         Route::NotFound => html! { <yew_router::prelude::Redirect<Route> to={Route::Home} /> },
     }
 }
