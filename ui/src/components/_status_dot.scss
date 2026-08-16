@@ -14,7 +14,7 @@
     --status-dot-color: var(--color-status-unknown);
 
     &.active {
-        animation: pulse 2s ease infinite;
+        animation: pulse 2s infinite;
     }
 
     &.ok {
@@ -47,7 +47,7 @@
         box-shadow: 0 0 0 var(--status-dot-color);
     }
 
-    50% {
+    80% {
         box-shadow: 0 0 10px var(--status-dot-color);
     }
 
