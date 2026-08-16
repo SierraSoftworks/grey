@@ -10,12 +10,12 @@
     z-index: 20;
     width: max-content;
     max-width: min(18rem, 80vw);
-    background-color: $background-box;
-    color: $color-text;
-    border: 1px solid $color-separator;
+    background-color: $color-popover-background;
+    color: $color-popover-color;
+    border: 1px solid $color-popover-border;
     border-radius: $border-radius-medium;
     padding: 0.6rem 0.75rem;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     text-align: left;
 
     // The downward arrow affixed to the bottom of the card, pointing at the trigger.
@@ -24,7 +24,7 @@
         position: absolute;
         top: 100%;
         border: 6px solid transparent;
-        border-top-color: $background-box;
+        border-top-color: $color-popover-background;
     }
 
     &.popover--align-center {
