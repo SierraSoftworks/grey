@@ -644,25 +644,22 @@ mod tests {
             )
             .await
             .unwrap();
-        let (version, view) = match outcome {
-            CasOutcome::Updated(v, view) => (v, view),
-            _ => panic!("expected Updated"),
-        };
+        assert!(matches!(outcome, CasOutcome::Updated(..)));
+        let view = state.get_incident(created.id()).await.unwrap().unwrap();
         assert_eq!(view.ended_at(), Some(corrected));
 
         // An edit without a timestamp leaves the (corrected) one in place.
+        let latest = view.updates.last().unwrap();
         let outcome = state
             .put_update(
-                view.updates.last().unwrap().id,
-                version,
+                latest.id,
+                latest.version,
                 PutUpdate { message: "mitigation complete".into(), timestamp: None },
             )
             .await
             .unwrap();
-        let view = match outcome {
-            CasOutcome::Updated(_, view) => view,
-            _ => panic!("expected Updated"),
-        };
+        assert!(matches!(outcome, CasOutcome::Updated(..)));
+        let view = state.get_incident(created.id()).await.unwrap().unwrap();
         assert_eq!(view.ended_at(), Some(corrected));
         assert_eq!(view.updates.last().unwrap().message, "mitigation complete");
     }

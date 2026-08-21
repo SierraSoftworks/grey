@@ -179,3 +179,33 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
         </div>
     }
 }
+
+#[cfg(all(test, feature = "wasm"))]
+mod tests {
+    use super::*;
+    use crate::contexts::StoreProvider;
+
+    /// Server-renders the admin form the way a signed-in operator sees it. Effects never run during
+    /// SSR, so this exercises the markup and the hooks that build it, not the submit path.
+    async fn render_form() -> String {
+        #[function_component(Harness)]
+        fn harness() -> Html {
+            html! {
+                <StoreProvider>
+                    <NewIncidentForm token={"test-token".to_string()} />
+                </StoreProvider>
+            }
+        }
+
+        yew::ServerRenderer::<Harness>::new().render().await
+    }
+
+    #[tokio::test]
+    async fn offers_a_start_time_alongside_the_opening_update() {
+        let html = render_form().await;
+        assert!(html.contains("Started (UTC)"), "the start time is labelled as UTC: {html}");
+        assert!(html.contains("type=\"datetime-local\""), "it is entered with a date/time picker");
+        assert!(html.contains("Leave blank to start the incident now"), "blank means now");
+        assert!(html.contains("Create incident"));
+    }
+}
