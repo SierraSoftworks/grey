@@ -28,7 +28,7 @@ fn not_found() -> HttpResponse {
 fn bad_timestamp() -> HttpResponse {
     ApiError::bad_request("The supplied update timestamp is not valid.")
         .with_advice_lines([
-            "An update may be backdated, but it cannot be dated in the future.",
+            "An update may be backdated to any time since 1970, but never dated in the future.",
             "Check that the time is in UTC and that your clock is correct.",
         ])
         .into()

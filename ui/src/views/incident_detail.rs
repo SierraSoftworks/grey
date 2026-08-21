@@ -59,9 +59,10 @@ struct AdminIncidentDetailProps {
 fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
     use crate::components::icons::{check_icon, edit_icon, save_icon, trash_icon};
     use crate::components::markdown::render_markdown;
-    use crate::formatters::{datetime_local_value, resolve_update_timestamp};
+    use crate::formatters::{changed_update_timestamp, datetime_local_value, resolve_update_timestamp};
     use crate::routes::Route;
     use crate::styles::impact_class;
+    use chrono::{DateTime, Utc};
     use grey_api::{CreateUpdate, Impact, IncidentUpdateId, IncidentView, PutIncident, PutUpdate};
     use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
     use yew_router::prelude::*;
@@ -202,7 +203,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
         })
     };
 
-    let on_save_update = |uid: IncidentUpdateId, version: u64| {
+    let on_save_update = |uid: IncidentUpdateId, version: u64, posted_at: DateTime<Utc>| {
         let message_draft = message_draft.clone();
         let timestamp_draft = timestamp_draft.clone();
         let editing = editing.clone();
@@ -210,9 +211,9 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
         let store = store.clone();
         let apply_saved = apply_saved.clone();
         Callback::from(move |_| {
-            // A blank (or unchanged) time leaves the stored timestamp alone; an edited one moves the
+            // A blank or untouched time leaves the stored timestamp alone; an edited one moves the
             // update along the timeline.
-            let timestamp = match resolve_update_timestamp(&timestamp_draft) {
+            let timestamp = match changed_update_timestamp(&timestamp_draft, posted_at) {
                 Ok(timestamp) => timestamp,
                 Err(e) => {
                     store.set_error(e);
@@ -392,7 +393,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                                                 oninput={on_draft_timestamp.clone()}
                                             />
                                             <button type="button" class="incident-edit__icon-button" title="Save update"
-                                                disabled={*saving} onclick={on_save_update(uid, version)}>
+                                                disabled={*saving} onclick={on_save_update(uid, version, update.timestamp)}>
                                                 { check_icon() }
                                             </button>
                                         } else {

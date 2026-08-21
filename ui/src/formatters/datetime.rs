@@ -50,6 +50,22 @@ pub fn resolve_update_timestamp(value: &str) -> Result<Option<DateTime<Utc>>, Ap
     }
 }
 
+/// The `timestamp` to send when saving an edited update: `None` while the field still shows the time
+/// the update already carries, so that saving a message edit alone leaves the stored time exactly as
+/// it was. The input renders minute precision while a stored timestamp is second-precise, so echoing
+/// an untouched value back would silently truncate it. Anything the operator did change is resolved
+/// by [`resolve_update_timestamp`].
+pub fn changed_update_timestamp(
+    value: &str,
+    posted_at: DateTime<Utc>,
+) -> Result<Option<DateTime<Utc>>, ApiError> {
+    if value.trim() == datetime_local_value(posted_at) {
+        return Ok(None);
+    }
+
+    resolve_update_timestamp(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,6 +93,25 @@ mod tests {
 
         let future = datetime_local_value(Utc::now() + chrono::Duration::days(1));
         assert!(resolve_update_timestamp(&future).is_err(), "a future-dated update is refused");
+    }
+
+    #[test]
+    fn an_untouched_field_leaves_a_stored_timestamp_alone() {
+        // A stored update carries seconds the minute-precision input cannot show...
+        let posted_at = ts(1_700_000_137);
+        assert_eq!(datetime_local_value(posted_at), "2023-11-14T22:15");
+        assert_eq!(
+            changed_update_timestamp("2023-11-14T22:15", posted_at),
+            Ok(None),
+            "saving a message edit alone must not truncate the stored seconds"
+        );
+
+        // ...but a time the operator actually moved is sent as the new timestamp.
+        assert_eq!(
+            changed_update_timestamp("2023-11-14T21:00", posted_at),
+            Ok(Some(ts(1_699_995_600)))
+        );
+        assert!(changed_update_timestamp("nonsense", posted_at).is_err());
     }
 
     #[test]
