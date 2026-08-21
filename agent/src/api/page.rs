@@ -142,11 +142,12 @@ mod tests {
 
         app_state
             .state
-            .create_incident(
-                "Database outage".into(),
-                grey_api::Impact::Offline,
-                "Investigating".into(),
-            )
+            .create_incident(grey_api::CreateIncident {
+                title: "Database outage".into(),
+                impact: grey_api::Impact::Offline,
+                message: "Investigating".into(),
+                timestamp: None,
+            })
             .await
             .unwrap();
 

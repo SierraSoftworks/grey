@@ -31,7 +31,7 @@ pub async fn get_incidents(
 mod tests {
     use actix_web::body::MessageBody;
     use actix_web::http::StatusCode;
-    use grey_api::{Impact, IncidentsPage};
+    use grey_api::{CreateIncident, Impact, IncidentsPage};
     use tempfile::tempdir;
 
     use super::*;
@@ -59,12 +59,22 @@ mod tests {
 
         let visible = app_state
             .state
-            .create_incident("Visible".into(), Impact::Offline, "down".into())
+            .create_incident(CreateIncident {
+                title: "Visible".into(),
+                impact: Impact::Offline,
+                message: "down".into(),
+                timestamp: None,
+            })
             .await
             .unwrap();
         app_state
             .state
-            .create_incident("Hidden".into(), Impact::Hidden, "draft".into())
+            .create_incident(CreateIncident {
+                title: "Hidden".into(),
+                impact: Impact::Hidden,
+                message: "draft".into(),
+                timestamp: None,
+            })
             .await
             .unwrap();
 

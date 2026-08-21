@@ -37,6 +37,12 @@
         color: $color-text;
     }
 
+    // Guidance beneath an optional field, such as the incident's (backdate-able) start time.
+    .incident-form__hint {
+        font-size: 0.75rem;
+        opacity: 0.8;
+    }
+
     .incident-form__actions {
         display: flex;
         gap: 0.5rem;

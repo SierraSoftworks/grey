@@ -2,8 +2,9 @@ use yew::prelude::*;
 
 use crate::contexts::use_store;
 
-/// The `/incidents/new` page (admin only): a title plus the incident's opening update (impact +
-/// message). Saving creates the incident and navigates to its page.
+/// The `/incidents/new` page (admin only): a title plus the incident's opening update (impact,
+/// message, and optionally the time it started, so an outage can be declared after the fact). Saving
+/// creates the incident and navigates to its page.
 #[function_component(NewIncident)]
 pub fn new_incident() -> Html {
     let store = use_store();
@@ -34,6 +35,7 @@ struct NewIncidentFormProps {
 #[cfg(feature = "wasm")]
 #[function_component(NewIncidentForm)]
 fn new_incident_form(props: &NewIncidentFormProps) -> Html {
+    use crate::formatters::resolve_update_timestamp;
     use crate::routes::Route;
     use grey_api::Impact;
     use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
@@ -54,6 +56,9 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
     let title = use_state(String::new);
     let impact = use_state(|| "offline".to_string());
     let message = use_state(String::new);
+    // When the incident started, as a UTC `datetime-local` value. Blank means "now" — the server
+    // stamps the opening update itself.
+    let started = use_state(String::new);
     let saving = use_state(|| false);
     let navigator = use_navigator();
     // The shared store, whose `create_incident` performs the API call and reflects the new incident
@@ -74,6 +79,13 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
             impact.set(el.value());
         })
     };
+    let on_started = {
+        let started = started.clone();
+        Callback::from(move |e: InputEvent| {
+            let el: HtmlInputElement = e.target_unchecked_into();
+            started.set(el.value());
+        })
+    };
     let on_message = {
         let message = message.clone();
         Callback::from(move |e: InputEvent| {
@@ -84,7 +96,8 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
 
     let onsubmit = {
         let token = props.token.clone();
-        let (title, impact, message) = (title.clone(), impact.clone(), message.clone());
+        let (title, impact, message, started) =
+            (title.clone(), impact.clone(), message.clone(), started.clone());
         let saving = saving.clone();
         let navigator = navigator.clone();
         let store = store.clone();
@@ -98,10 +111,20 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
                 ));
                 return;
             }
+            // A blank start time leaves the stamping to the server; anything else backdates the
+            // opening update to when the problem actually began.
+            let timestamp = match resolve_update_timestamp(&started) {
+                Ok(timestamp) => timestamp,
+                Err(e) => {
+                    store.set_error(e);
+                    return;
+                }
+            };
             let input = grey_api::CreateIncident {
                 title: title_value,
                 impact: impact.parse().unwrap_or_default(),
                 message: message_value,
+                timestamp,
             };
             let _ = &token;
             let saving = saving.clone();
@@ -137,6 +160,12 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
                             <option value={opt.as_str()} selected={*impact == opt.as_str()}>{impact_caption(opt)}</option>
                         }) }
                     </select>
+                </label>
+                <label>{"Started (UTC)"}
+                    <input type="datetime-local" value={(*started).clone()} oninput={on_started} />
+                    <small class="incident-form__hint">
+                        {"Leave blank to start the incident now, or backdate it to when the problem began."}
+                    </small>
                 </label>
                 <label>{"Initial update"}
                     <textarea rows="4" value={(*message).clone()} oninput={on_message} placeholder="Enter initial update in markdown form..." />

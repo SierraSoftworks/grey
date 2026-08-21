@@ -118,6 +118,10 @@ drafts), and each incident's own page becomes editable:
   for a title and the incident's opening update (an impact and a markdown
   message). Saving creates the incident with that first update and takes you to
   its page.
+- **Declare an outage that already started** — the **Started (UTC)** field on that
+  page backdates the opening update to when the problem actually began, rather
+  than to when you got round to declaring it. Leave it blank to start the incident
+  now.
 - **Edit the title or a message** — on an incident's page, click the title to
   change it, and click an update's edit (pencil) icon to switch its message from
   the rendered markdown to a textarea. A **Save** icon appears at the top-right as
@@ -125,20 +129,35 @@ drafts), and each incident's own page becomes editable:
   edit made against a stale version is rejected rather than overwriting a
   concurrent change.
 - **An update's impact is fixed once posted** — you choose an update's impact
-  when you add it; after it has been saved, only its message can be changed (the
-  impact records what the status was at that point on the timeline). The latest
-  update sets the incident's current impact, so adding a visible update publishes
-  a draft and adding a `none` update resolves the incident.
+  when you add it; after it has been saved, only its message and its time can be
+  changed (the impact records what the status was at that point on the timeline).
+  The latest update sets the incident's current impact, so adding a visible update
+  publishes a draft and adding a `none` update resolves the incident.
 - **Add / remove updates** — add a new update (pick its impact and write its
   message), or remove an unsaved one, then save.
+- **Post an update for a past moment** — the time field beside a new update's
+  impact records it at the moment it happened rather than the moment you post it,
+  so you can retroactively declare when mitigation completed or when a service came
+  back. Leave it blank to use the current time. Editing a posted update also opens
+  its time, so a mistimed one can be corrected — the timeline (and the incident's
+  duration, start and resolution times) re-sorts around the new time.
 - **Delete** — remove the incident permanently.
 
 Signing in is via the **Sign in** button in the header; once signed in, hover the
 user chip to reveal **Sign out**.
 
 ::: tip
-Each update is timestamped automatically when you add it, and all times are
-displayed in UTC.
+Times are both displayed and entered in **UTC**, not your local timezone. An
+update whose time you leave blank is stamped automatically when you add it, and
+no update may be dated in the future — an incident records what has already
+happened, and its newest update is what sets its current impact.
+:::
+
+::: tip
+An incident's id is minted from its start time, so a backdated incident sorts
+into the list at the point it began rather than at the top. Correcting an
+update's time afterwards moves it along the timeline but leaves the incident's
+place in the list (and its permalink) as it was.
 :::
 
 ## Pages and links

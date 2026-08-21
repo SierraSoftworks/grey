@@ -323,6 +323,25 @@
         }
     }
 
+    // The UTC timestamp field on a new or posted update. It reads as the small, muted time text it
+    // sits beside (or replaces while editing) rather than as a full-height form control.
+    .incident-edit__time-input {
+        font: inherit;
+        font-size: 0.8rem;
+        vertical-align: text-bottom;
+        padding: 0.1rem 0.35rem;
+        color: $color-text-muted;
+        background-color: $background-base;
+        border: 1px solid $color-separator;
+        border-radius: $border-radius-small;
+
+        &:focus {
+            outline: none;
+            color: $color-text;
+            border-color: $color-accent;
+        }
+    }
+
     // A posted update's card header: the fixed impact pill, with the edit/done icon at the far right.
     .incident-timeline__card-head {
         display: flex;
