@@ -59,8 +59,10 @@ struct AdminIncidentDetailProps {
 fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
     use crate::components::icons::{check_icon, edit_icon, save_icon, trash_icon};
     use crate::components::markdown::render_markdown;
+    use crate::formatters::{changed_update_timestamp, datetime_local_value, resolve_update_timestamp};
     use crate::routes::Route;
     use crate::styles::impact_class;
+    use chrono::{DateTime, Utc};
     use grey_api::{CreateUpdate, Impact, IncidentUpdateId, IncidentView, PutIncident, PutUpdate};
     use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
     use yew_router::prelude::*;
@@ -68,12 +70,16 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
     // The canonical incident (with its updates + versions) plus the editable draft fields.
     let loaded = use_state(|| Option::<IncidentView>::None);
     let title = use_state(String::new);
-    // The update whose message is open in a textarea (by id), plus that textarea's draft.
+    // The update whose message is open in a textarea (by id), plus that textarea's draft and the
+    // draft of its timestamp (as a UTC `datetime-local` value, so a mistimed update can be corrected).
     let editing = use_state(|| Option::<IncidentUpdateId>::None);
     let message_draft = use_state(String::new);
-    // The "add update" form.
+    let timestamp_draft = use_state(String::new);
+    // The "add update" form. Its timestamp is blank unless the update is being backdated — to when
+    // mitigation actually completed, say — in which case the server records that moment instead of now.
     let new_impact = use_state(|| "offline".to_string());
     let new_message = use_state(String::new);
+    let new_timestamp = use_state(String::new);
     let saving = use_state(|| false);
     let navigator = use_navigator();
     let store = use_store();
@@ -155,6 +161,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
         let id = current.id().to_string();
         let new_impact = new_impact.clone();
         let new_message = new_message.clone();
+        let new_timestamp = new_timestamp.clone();
         let saving = saving.clone();
         let store = store.clone();
         let apply_saved = apply_saved.clone();
@@ -164,13 +171,31 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                 store.set_error(grey_api::ApiError::new("An update message is required."));
                 return;
             }
-            let input = CreateUpdate { impact: new_impact.parse().unwrap_or_default(), message };
-            let (id, new_message, saving, store, apply_saved) =
-                (id.clone(), new_message.clone(), saving.clone(), store.clone(), apply_saved.clone());
+            let timestamp = match resolve_update_timestamp(&new_timestamp) {
+                Ok(timestamp) => timestamp,
+                Err(e) => {
+                    store.set_error(e);
+                    return;
+                }
+            };
+            let input =
+                CreateUpdate { impact: new_impact.parse().unwrap_or_default(), message, timestamp };
+            let (id, new_message, new_timestamp, saving, store, apply_saved) = (
+                id.clone(),
+                new_message.clone(),
+                new_timestamp.clone(),
+                saving.clone(),
+                store.clone(),
+                apply_saved.clone(),
+            );
             saving.set(true);
             wasm_bindgen_futures::spawn_local(async move {
                 match store.create_update(id, input).await {
-                    Ok(view) => { apply_saved(view); new_message.set(String::new()); }
+                    Ok(view) => {
+                        apply_saved(view);
+                        new_message.set(String::new());
+                        new_timestamp.set(String::new());
+                    }
                     Err(e) => store.set_error(e),
                 }
                 saving.set(false);
@@ -178,14 +203,24 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
         })
     };
 
-    let on_save_update = |uid: IncidentUpdateId, version: u64| {
+    let on_save_update = |uid: IncidentUpdateId, version: u64, posted_at: DateTime<Utc>| {
         let message_draft = message_draft.clone();
+        let timestamp_draft = timestamp_draft.clone();
         let editing = editing.clone();
         let saving = saving.clone();
         let store = store.clone();
         let apply_saved = apply_saved.clone();
         Callback::from(move |_| {
-            let edit = PutUpdate { message: (*message_draft).clone() };
+            // A blank or untouched time leaves the stored timestamp alone; an edited one moves the
+            // update along the timeline.
+            let timestamp = match changed_update_timestamp(&timestamp_draft, posted_at) {
+                Ok(timestamp) => timestamp,
+                Err(e) => {
+                    store.set_error(e);
+                    return;
+                }
+            };
+            let edit = PutUpdate { message: (*message_draft).clone(), timestamp };
             let (editing, saving, store, apply_saved) =
                 (editing.clone(), saving.clone(), store.clone(), apply_saved.clone());
             saving.set(true);
@@ -252,11 +287,25 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
             new_message.set(el.value());
         })
     };
+    let on_new_timestamp = {
+        let new_timestamp = new_timestamp.clone();
+        Callback::from(move |e: InputEvent| {
+            let el: HtmlInputElement = e.target_unchecked_into();
+            new_timestamp.set(el.value());
+        })
+    };
     let on_draft_message = {
         let message_draft = message_draft.clone();
         Callback::from(move |e: InputEvent| {
             let el: HtmlTextAreaElement = e.target_unchecked_into();
             message_draft.set(el.value());
+        })
+    };
+    let on_draft_timestamp = {
+        let timestamp_draft = timestamp_draft.clone();
+        Callback::from(move |e: InputEvent| {
+            let el: HtmlInputElement = e.target_unchecked_into();
+            timestamp_draft.set(el.value());
         })
     };
 
@@ -299,6 +348,14 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                                     }) }
                                 </select>
 
+                                <input
+                                    class="incident-edit__time-input"
+                                    type="datetime-local"
+                                    title="When this update happened (UTC) — leave blank to post it as of now"
+                                    value={(*new_timestamp).clone()}
+                                    oninput={on_new_timestamp}
+                                />
+
                                 <button type="button" class="incident-edit__icon-button" disabled={*saving} onclick={on_add_update}>{check_icon()}</button>
                             </div>
                             <div class={classes!("incident-timeline__card", status_class)}>
@@ -327,15 +384,22 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                                 <div class="incident-timeline__body">
                                     <div class="incident-timeline__time">
                                         <span class={classes!("incident-status-pill", class)}>{update.impact.label()}</span>
-                                        <time datetime={update.timestamp.to_rfc3339()}>{time_format(update.timestamp)}</time>
                                         if is_editing {
-                                            <button type="button" class="incident-edit__icon-button" title="Save message"
-                                                disabled={*saving} onclick={on_save_update(uid, version)}>
+                                            <input
+                                                class="incident-edit__time-input"
+                                                type="datetime-local"
+                                                title="When this update happened (UTC)"
+                                                value={(*timestamp_draft).clone()}
+                                                oninput={on_draft_timestamp.clone()}
+                                            />
+                                            <button type="button" class="incident-edit__icon-button" title="Save update"
+                                                disabled={*saving} onclick={on_save_update(uid, version, update.timestamp)}>
                                                 { check_icon() }
                                             </button>
                                         } else {
-                                            <button type="button" class="incident-edit__icon-button" title="Edit message"
-                                                onclick={ let editing = editing.clone(); let message_draft = message_draft.clone(); let msg = update.message.clone(); Callback::from(move |_| { message_draft.set(msg.clone()); editing.set(Some(uid)); }) }>
+                                            <time datetime={update.timestamp.to_rfc3339()}>{time_format(update.timestamp)}</time>
+                                            <button type="button" class="incident-edit__icon-button" title="Edit update"
+                                                onclick={ let editing = editing.clone(); let message_draft = message_draft.clone(); let timestamp_draft = timestamp_draft.clone(); let msg = update.message.clone(); let at = datetime_local_value(update.timestamp); Callback::from(move |_| { message_draft.set(msg.clone()); timestamp_draft.set(at.clone()); editing.set(Some(uid)); }) }>
                                                 { edit_icon() }
                                             </button>
                                             <button type="button" class="incident-edit__icon-button danger" title="Remove update" disabled={*saving} onclick={on_remove_update(uid, version)}>{ trash_icon() }</button>

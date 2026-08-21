@@ -1,7 +1,8 @@
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, Result, http::header, web};
+use chrono::{DateTime, Utc};
 use grey_api::{
     AdminUser, ApiError, CreateIncident, CreateUpdate, Identifier, IncidentUpdateId, PutIncident,
-    PutUpdate, parse_if_match, version_etag,
+    PutUpdate, is_valid_update_timestamp, parse_if_match, version_etag,
 };
 use serde_json::{Map, Value};
 use std::str::FromStr;
@@ -22,6 +23,21 @@ fn not_found() -> HttpResponse {
             "It may have been deleted since you last loaded the page.",
         ])
         .into()
+}
+
+fn bad_timestamp() -> HttpResponse {
+    ApiError::bad_request("The supplied update timestamp is not valid.")
+        .with_advice_lines([
+            "An update may be backdated to any time since 1970, but never dated in the future.",
+            "Check that the time is in UTC and that your clock is correct.",
+        ])
+        .into()
+}
+
+/// Whether an operator-supplied timestamp (if any) may be accepted — see
+/// [`grey_api::is_valid_update_timestamp`]. `None` always passes: the server stamps the update itself.
+fn timestamp_allowed(timestamp: Option<DateTime<Utc>>) -> bool {
+    timestamp.is_none_or(|ts| is_valid_update_timestamp(ts, Utc::now()))
 }
 
 fn too_large() -> HttpResponse {
@@ -111,7 +127,8 @@ pub async fn get_incident(
     }
 }
 
-/// `POST /api/v1/admin/incidents` — create an incident from a title and its opening update.
+/// `POST /api/v1/admin/incidents` — create an incident from a title and its opening update. The
+/// opening update may carry a `timestamp` to declare an outage that started in the past.
 pub async fn create_incident(
     data: web::Data<AppState>,
     body: web::Json<CreateIncident>,
@@ -120,7 +137,10 @@ pub async fn create_incident(
     if input.message.len() > MAX_MESSAGE_BYTES {
         return Ok(too_large());
     }
-    let view = data.state.create_incident(input.title, input.impact, input.message).await?;
+    if !timestamp_allowed(input.timestamp) {
+        return Ok(bad_timestamp());
+    }
+    let view = data.state.create_incident(input).await?;
     Ok(HttpResponse::Created()
         .insert_header((header::ETAG, version_etag(view.incident.version)))
         .json(view))
@@ -169,8 +189,9 @@ pub async fn delete_incident(
     }
 }
 
-/// `POST /api/v1/admin/incidents/{id}/updates` — add a new update to an incident. 404 if the incident
-/// does not exist. The ETag is the new update's version.
+/// `POST /api/v1/admin/incidents/{id}/updates` — add a new update to an incident, optionally
+/// backdated via the body's `timestamp`. 404 if the incident does not exist. The ETag is the new
+/// update's version.
 pub async fn create_update(
     data: web::Data<AppState>,
     path: web::Path<String>,
@@ -183,6 +204,9 @@ pub async fn create_update(
     if input.message.len() > MAX_MESSAGE_BYTES {
         return Ok(too_large());
     }
+    if !timestamp_allowed(input.timestamp) {
+        return Ok(bad_timestamp());
+    }
     match data.state.create_update(id, input).await? {
         Some((version, view)) => Ok(HttpResponse::Created()
             .insert_header((header::ETAG, version_etag(version)))
@@ -191,8 +215,9 @@ pub async fn create_update(
     }
 }
 
-/// `PUT /api/v1/admin/incidents/{id}/updates/{uid}` — replace an update's message (check-and-set
-/// against the update's version). The update's impact is fixed once posted.
+/// `PUT /api/v1/admin/incidents/{id}/updates/{uid}` — replace an update's message, and its timestamp
+/// when the body supplies one (check-and-set against the update's version). The update's impact is
+/// fixed once posted.
 pub async fn put_update(
     req: HttpRequest,
     data: web::Data<AppState>,
@@ -209,6 +234,9 @@ pub async fn put_update(
     let input = body.into_inner();
     if input.message.len() > MAX_MESSAGE_BYTES {
         return Ok(too_large());
+    }
+    if !timestamp_allowed(input.timestamp) {
+        return Ok(bad_timestamp());
     }
     match data.state.put_update(uid, expected, input).await? {
         CasOutcome::Updated(version, view) => Ok(HttpResponse::Ok()
@@ -338,6 +366,82 @@ mod tests {
         assert_eq!(test::call_service(&app, req).await.status(), StatusCode::NO_CONTENT);
         let req = test::TestRequest::get().uri(&format!("/incidents/{}", created.id())).to_request();
         assert_eq!(test::call_service(&app, req).await.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[actix_web::test]
+    async fn updates_may_be_backdated_but_never_future_dated() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::test(dir.path().to_path_buf()).await;
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(state))
+                .route("/incidents", web::post().to(create_incident))
+                .route("/incidents/{id}/updates", web::post().to(create_update))
+                .route("/incidents/{id}/updates/{uid}", web::put().to(put_update)),
+        )
+        .await;
+
+        let now = Utc::now().timestamp();
+        let (started, mitigated) = (now - 7_200, now - 3_600);
+
+        // Declaring an outage that began two hours ago backdates its opening update.
+        let req = test::TestRequest::post()
+            .uri("/incidents")
+            .set_json(serde_json::json!({
+                "title": "Outage", "impact": "offline", "message": "Investigating", "timestamp": started,
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let created: IncidentView = serde_json::from_slice(&test::read_body(resp).await).unwrap();
+        assert_eq!(created.started_at().map(|t| t.timestamp()), Some(started));
+
+        // A future-dated one is refused: the newest update sets the incident's current impact.
+        let req = test::TestRequest::post()
+            .uri("/incidents")
+            .set_json(serde_json::json!({
+                "title": "Later", "impact": "offline", "message": "Not yet", "timestamp": now + 3_600,
+            }))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status(), StatusCode::BAD_REQUEST);
+
+        // Recording when mitigation completed, an hour after the incident began.
+        let req = test::TestRequest::post()
+            .uri(&format!("/incidents/{}/updates", created.id()))
+            .set_json(serde_json::json!({ "impact": "none", "message": "Mitigated", "timestamp": mitigated }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let resolved: IncidentView = serde_json::from_slice(&test::read_body(resp).await).unwrap();
+        assert_eq!(resolved.current_impact(), Impact::None);
+        assert_eq!(resolved.ended_at().map(|t| t.timestamp()), Some(mitigated));
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/incidents/{}/updates", created.id()))
+            .set_json(serde_json::json!({ "impact": "none", "message": "Soon", "timestamp": now + 3_600 }))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status(), StatusCode::BAD_REQUEST);
+
+        // A mistimed update can be corrected in place (check-and-set on its own version).
+        let posted = resolved.updates.iter().find(|u| u.impact == Impact::None).unwrap().clone();
+        let req = test::TestRequest::put()
+            .uri(&format!("/incidents/{}/updates/{}", created.id(), posted.id))
+            .insert_header(("If-Match", version_etag(posted.version)))
+            .set_json(serde_json::json!({ "message": "Mitigated", "timestamp": mitigated - 600 }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let corrected: IncidentView = serde_json::from_slice(&test::read_body(resp).await).unwrap();
+        assert_eq!(corrected.ended_at().map(|t| t.timestamp()), Some(mitigated - 600));
+
+        // ...but not into the future, and the stored update is left as it was.
+        let posted = corrected.updates.iter().find(|u| u.impact == Impact::None).unwrap().clone();
+        let req = test::TestRequest::put()
+            .uri(&format!("/incidents/{}/updates/{}", created.id(), posted.id))
+            .insert_header(("If-Match", version_etag(posted.version)))
+            .set_json(serde_json::json!({ "message": "Mitigated", "timestamp": now + 3_600 }))
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status(), StatusCode::BAD_REQUEST);
     }
 
     #[actix_web::test]

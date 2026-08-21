@@ -12,8 +12,8 @@ use std::error::Error;
 
 use chrono::{DateTime, Utc};
 use grey_api::{
-    CreateUpdate, Identifier, Impact, Incident, IncidentUpdate, IncidentUpdateId, IncidentView,
-    IncidentsPage, PutIncident, PutUpdate,
+    CreateIncident, CreateUpdate, Identifier, Incident, IncidentUpdate, IncidentUpdateId,
+    IncidentView, IncidentsPage, PutIncident, PutUpdate,
 };
 use redb::{ReadableDatabase, ReadableTable, TableDefinition};
 use tracing_batteries::prelude::*;
@@ -125,13 +125,12 @@ pub trait IncidentStore {
     /// Fetches a single (live) incident with its visible updates.
     async fn get_incident(&self, id: Identifier) -> Result<Option<IncidentView>, Box<dyn Error>>;
 
-    /// Creates an incident with a single opening update, minting snowflake ids for both.
-    async fn create_incident(
-        &self,
-        title: String,
-        impact: Impact,
-        message: String,
-    ) -> Result<IncidentView, Box<dyn Error>>;
+    /// Creates an incident with a single opening update, minting snowflake ids for both. A
+    /// `timestamp` on the input backdates the opening update, and with it the incident's id — so a
+    /// retroactively declared outage sorts into the (id-ordered) list at the time it began rather
+    /// than at the time it was declared.
+    async fn create_incident(&self, input: CreateIncident)
+    -> Result<IncidentView, Box<dyn Error>>;
 
     /// Replaces an incident's editable header fields (its title) if `expected_version` matches.
     async fn put_incident(
@@ -148,15 +147,17 @@ pub trait IncidentStore {
         expected_version: u64,
     ) -> Result<CasOutcome<()>, Box<dyn Error>>;
 
-    /// Adds a new update to an existing incident. `None` when the incident does not exist (a 404). The
-    /// returned tuple is `(new update version, refreshed view)`.
+    /// Adds a new update to an existing incident, backdated to the input's `timestamp` when it carries
+    /// one. `None` when the incident does not exist (a 404). The returned tuple is `(new update
+    /// version, refreshed view)`.
     async fn create_update(
         &self,
         incident_id: Identifier,
         update: CreateUpdate,
     ) -> Result<Option<(u64, IncidentView)>, Box<dyn Error>>;
 
-    /// Replaces an update's editable field (its message) if `expected_version` matches.
+    /// Replaces an update's editable fields (its message, plus its timestamp when the edit supplies
+    /// one) if `expected_version` matches.
     async fn put_update(
         &self,
         update_id: IncidentUpdateId,
@@ -296,24 +297,22 @@ impl IncidentStore for State {
         read_view(&txn, id)
     }
 
-    async fn create_incident(
-        &self,
-        title: String,
-        impact: Impact,
-        message: String,
-    ) -> Result<IncidentView, Box<dyn Error>> {
+    async fn create_incident(&self, input: CreateIncident) -> Result<IncidentView, Box<dyn Error>> {
         let now = Utc::now();
+        // `version` is the gossip/ETag clock and always tracks wall-clock now; `started` is when the
+        // event itself began, which an operator may backdate.
         let version = now.timestamp_millis() as u64;
-        let incident_id = Identifier::from(snowflake_half(now));
+        let started = input.timestamp.unwrap_or(now);
+        let incident_id = Identifier::from(snowflake_half(started));
         let update = IncidentUpdate {
-            id: IncidentUpdateId::compose(incident_id, snowflake_half(now)),
-            impact,
-            timestamp: now,
-            message,
+            id: IncidentUpdateId::compose(incident_id, snowflake_half(started)),
+            impact: input.impact,
+            timestamp: started,
+            message: input.message,
             version,
             deleted: false,
         };
-        let incident = Incident { id: incident_id, title, version, deleted: false };
+        let incident = Incident { id: incident_id, title: input.title, version, deleted: false };
 
         let update_bytes = rmp_serde::to_vec_named(&update)?;
         if update_bytes.len() > MAX_UPDATE_BYTES {
@@ -409,10 +408,13 @@ impl IncidentStore for State {
     ) -> Result<Option<(u64, IncidentView)>, Box<dyn Error>> {
         let now = Utc::now();
         let version = now.timestamp_millis() as u64;
+        // An update may record a moment that has already passed (when mitigation completed, say)
+        // rather than the moment it is posted.
+        let occurred = update.timestamp.unwrap_or(now);
         let new_update = IncidentUpdate {
-            id: IncidentUpdateId::compose(incident_id, snowflake_half(now)),
+            id: IncidentUpdateId::compose(incident_id, snowflake_half(occurred)),
             impact: update.impact,
-            timestamp: now,
+            timestamp: occurred,
             message: update.message,
             version,
             deleted: false,
@@ -465,8 +467,13 @@ impl IncidentStore for State {
                     CasOutcome::VersionMismatch(existing.version)
                 }
                 Some(mut existing) => {
-                    // `impact` and `timestamp` are fixed once posted; only the message is editable.
+                    // `impact` is fixed once posted; the message is editable, and so is the timestamp
+                    // (a backdated update recorded at the wrong moment can be corrected) whenever the
+                    // edit supplies one.
                     existing.message = edit.message;
+                    if let Some(timestamp) = edit.timestamp {
+                        existing.timestamp = timestamp;
+                    }
                     existing.version = new_version;
                     updates.insert(u128::from(update_id), (new_version, own, rmp_serde::to_vec_named(&existing)?.as_slice()))?;
                     CasOutcome::Updated(new_version, ())
@@ -521,6 +528,18 @@ impl IncidentStore for State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use grey_api::Impact;
+
+    /// A whole-second timestamp `hours` in the past. Update timestamps ride the wire (and the gossip
+    /// snapshot) as unix seconds, so tests that compare a stored time use second precision.
+    fn hours_ago(hours: i64) -> DateTime<Utc> {
+        DateTime::from_timestamp(Utc::now().timestamp() - hours * 3600, 0).unwrap()
+    }
+
+    /// The opening update for a freshly declared (not backdated) incident.
+    fn opening(title: &str, impact: Impact, message: &str) -> CreateIncident {
+        CreateIncident { title: title.into(), impact, message: message.into(), timestamp: None }
+    }
 
     async fn test_state(dir: &std::path::Path) -> State {
         State::test(dir.to_path_buf()).await
@@ -531,8 +550,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let state = test_state(dir.path()).await;
 
-        let public = state.create_incident("Public".into(), Impact::Offline, "down".into()).await.unwrap();
-        let hidden = state.create_incident("Hidden".into(), Impact::Hidden, "draft".into()).await.unwrap();
+        let public = state.create_incident(opening("Public", Impact::Offline, "down")).await.unwrap();
+        let hidden = state.create_incident(opening("Hidden", Impact::Hidden, "draft")).await.unwrap();
 
         assert_ne!(public.id(), hidden.id());
         assert_eq!(public.updates.len(), 1);
@@ -549,11 +568,108 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_incident_can_be_declared_after_it_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = test_state(dir.path()).await;
+
+        // An outage noticed late: declared now, but recorded as having started two hours ago.
+        let started = hours_ago(2);
+        let backdated = state
+            .create_incident(CreateIncident {
+                title: "Backdated".into(),
+                impact: Impact::Offline,
+                message: "down since 2h ago".into(),
+                timestamp: Some(started),
+            })
+            .await
+            .unwrap();
+        assert_eq!(backdated.started_at(), Some(started));
+
+        // Its id is minted from the start time, so it sorts into the (newest-first) list where the
+        // event actually happened rather than at the top.
+        let fresh = state.create_incident(opening("Fresh", Impact::Offline, "down now")).await.unwrap();
+        let listed = state.list_incidents(true, 10, None).await.unwrap();
+        assert_eq!(
+            listed.incidents.iter().map(|v| v.id()).collect::<Vec<_>>(),
+            vec![fresh.id(), backdated.id()],
+            "the incident declared for two hours ago sorts behind the one starting now"
+        );
+
+        // Its gossip/ETag version is still wall-clock now, not the backdated time — replication and
+        // check-and-set must not be dragged into the past.
+        assert!(backdated.incident.version as i64 >= started.timestamp_millis() + 3_600_000);
+    }
+
+    #[tokio::test]
+    async fn updates_can_be_recorded_at_a_past_moment_and_corrected() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = test_state(dir.path()).await;
+
+        let started = hours_ago(3);
+        let created = state
+            .create_incident(CreateIncident {
+                title: "Outage".into(),
+                impact: Impact::Offline,
+                message: "down".into(),
+                timestamp: Some(started),
+            })
+            .await
+            .unwrap();
+
+        // Mitigation completed an hour ago — record it at that moment, not at the moment we post it.
+        let mitigated = hours_ago(1);
+        let (version, view) = state
+            .create_update(
+                created.id(),
+                CreateUpdate {
+                    impact: Impact::None,
+                    message: "mitigated".into(),
+                    timestamp: Some(mitigated),
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(view.current_impact(), Impact::None);
+        assert_eq!(view.ended_at(), Some(mitigated), "the incident ended when mitigation completed");
+        assert_eq!(view.started_at(), Some(started));
+
+        // The time was an hour out: correct it, leaving the message alone.
+        let corrected = hours_ago(2);
+        let outcome = state
+            .put_update(
+                view.updates.last().unwrap().id,
+                version,
+                PutUpdate { message: "mitigated".into(), timestamp: Some(corrected) },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(outcome, CasOutcome::Updated(..)));
+        let view = state.get_incident(created.id()).await.unwrap().unwrap();
+        assert_eq!(view.ended_at(), Some(corrected));
+
+        // An edit without a timestamp leaves the (corrected) one in place.
+        let latest = view.updates.last().unwrap();
+        let outcome = state
+            .put_update(
+                latest.id,
+                latest.version,
+                PutUpdate { message: "mitigation complete".into(), timestamp: None },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(outcome, CasOutcome::Updated(..)));
+        let view = state.get_incident(created.id()).await.unwrap().unwrap();
+        assert_eq!(view.ended_at(), Some(corrected));
+        assert_eq!(view.updates.last().unwrap().message, "mitigation complete");
+    }
+
+    #[tokio::test]
     async fn put_and_delete_are_check_and_set() {
         let dir = tempfile::tempdir().unwrap();
         let state = test_state(dir.path()).await;
 
-        let created = state.create_incident("Outage".into(), Impact::Offline, "down".into()).await.unwrap();
+        let created = state.create_incident(opening("Outage", Impact::Offline, "down")).await.unwrap();
         let v0 = created.incident.version;
 
         // Correct version -> updated + bumped version.
@@ -578,11 +694,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let state = test_state(dir.path()).await;
 
-        let created = state.create_incident("Outage".into(), Impact::Offline, "down".into()).await.unwrap();
+        let created = state.create_incident(opening("Outage", Impact::Offline, "down")).await.unwrap();
         let incident_version = created.incident.version;
 
         // Adding an update does NOT bump the incident entity's version (they are separate entities).
-        let (uv, view) = state.create_update(created.id(), CreateUpdate { impact: Impact::None, message: "fixed".into() }).await.unwrap().unwrap();
+        let (uv, view) = state.create_update(created.id(), CreateUpdate { impact: Impact::None, message: "fixed".into(), timestamp: None }).await.unwrap().unwrap();
         assert_eq!(view.updates.len(), 2);
         assert!(
             view.updates.iter().any(|u| u.impact == Impact::Offline)
@@ -594,7 +710,7 @@ mod tests {
         // The new (None) update has its own version and is editable by CAS.
         let new_update = view.updates.iter().find(|u| u.impact == Impact::None).unwrap().clone();
         assert_eq!(new_update.version, uv);
-        let edited = state.put_update(new_update.id, uv, PutUpdate { message: "resolved".into() }).await.unwrap();
+        let edited = state.put_update(new_update.id, uv, PutUpdate { message: "resolved".into(), timestamp: None }).await.unwrap();
         match edited {
             CasOutcome::Updated(_, v) => {
                 let msg = v.updates.iter().find(|u| u.id == new_update.id).unwrap().message.clone();
@@ -610,7 +726,7 @@ mod tests {
         assert_eq!(after.current_impact(), Impact::Offline);
 
         // Adding an update to a missing incident is a 404 (None).
-        assert!(state.create_update(Identifier::from(424242u64), CreateUpdate { impact: Impact::None, message: "x".into() }).await.unwrap().is_none());
+        assert!(state.create_update(Identifier::from(424242u64), CreateUpdate { impact: Impact::None, message: "x".into(), timestamp: None }).await.unwrap().is_none());
     }
 
     // Helper: the current stored version of an update (it bumps on each edit).
@@ -627,7 +743,7 @@ mod tests {
         // Create several incidents; their snowflake ids are time-ordered.
         let mut ids = Vec::new();
         for i in 0..5 {
-            let v = state.create_incident(format!("Incident {i}"), Impact::Offline, "x".into()).await.unwrap();
+            let v = state.create_incident(opening(&format!("Incident {i}"), Impact::Offline, "x")).await.unwrap();
             ids.push(v.id());
         }
 
@@ -688,7 +804,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let state = test_state(dir.path()).await;
 
-        let created = state.create_incident("Original".into(), Impact::Offline, "x".into()).await.unwrap();
+        let created = state.create_incident(opening("Original", Impact::Offline, "x")).await.unwrap();
         let id = created.id();
         let base = created.incident.version;
 
@@ -752,8 +868,8 @@ mod tests {
         let a = test_state(dir_a.path()).await;
         let b = test_state(dir_b.path()).await;
 
-        let created = a.create_incident("Round".into(), Impact::Offline, "down".into()).await.unwrap();
-        a.create_update(created.id(), CreateUpdate { impact: Impact::None, message: "up".into() }).await.unwrap();
+        let created = a.create_incident(opening("Round", Impact::Offline, "down")).await.unwrap();
+        a.create_update(created.id(), CreateUpdate { impact: Impact::None, message: "up".into(), timestamp: None }).await.unwrap();
 
         // B pulls from A: A diffs against B's digest, B applies the delta.
         let delta = a.diff(b.digest().await.unwrap()).await.unwrap();
@@ -787,7 +903,7 @@ mod tests {
         let state = test_state(dir.path()).await;
 
         // A fresh, locally-created incident.
-        let fresh = state.create_incident("Fresh".into(), Impact::Offline, "x".into()).await.unwrap();
+        let fresh = state.create_incident(opening("Fresh", Impact::Offline, "x")).await.unwrap();
 
         // An incident whose version is far older than any probe/cron expiry, delivered via gossip.
         let aged_id = Identifier::from(0x7000_0000_0000_0002u64);

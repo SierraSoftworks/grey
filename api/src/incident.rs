@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{Identifier, IncidentUpdateId};
@@ -71,6 +71,20 @@ impl std::str::FromStr for Impact {
             _ => Impact::Hidden,
         })
     }
+}
+
+/// How far ahead of the server's clock an operator-supplied update timestamp may sit before it is
+/// rejected. Updates are meant to record what already happened — the incident's current impact is
+/// that of its newest update, so a future-dated one would take effect immediately — but a little
+/// slack keeps a client whose clock runs slightly fast from being turned away.
+pub const MAX_TIMESTAMP_SKEW: Duration = Duration::minutes(5);
+
+/// Whether an operator-supplied update timestamp may be accepted: it must be no further ahead of
+/// `now` than [`MAX_TIMESTAMP_SKEW`], and no earlier than the unix epoch (ids are minted from the
+/// timestamp's unix seconds, which a pre-epoch time would wrap). Shared by the API (which answers a
+/// rejected timestamp with a `400`) and the UI (which checks before submitting).
+pub fn is_valid_update_timestamp(timestamp: DateTime<Utc>, now: DateTime<Utc>) -> bool {
+    timestamp.timestamp() >= 0 && timestamp <= now + MAX_TIMESTAMP_SKEW
 }
 
 /// A single update posted against an incident — a **standalone, gossip-replicated entity** in its own
@@ -200,12 +214,19 @@ impl IncidentView {
 }
 
 /// The body for creating an incident: a title plus its first update (impact + markdown message). The
-/// server assigns the ids and timestamps.
+/// server assigns the ids. `timestamp` backdates the opening update (and with it the incident's
+/// start) to when the event actually began; omit it to stamp the update with the current time.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct CreateIncident {
     pub title: String,
     pub impact: Impact,
     pub message: String,
+    #[serde(
+        default,
+        with = "chrono::serde::ts_seconds_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub timestamp: Option<DateTime<Utc>>,
 }
 
 /// The body for replacing an incident's editable header fields (its title). Applied as a check-and-set
@@ -215,18 +236,34 @@ pub struct PutIncident {
     pub title: String,
 }
 
-/// The body for adding a new update to an incident (the server assigns the id and timestamp).
+/// The body for adding a new update to an incident (the server assigns the id). `timestamp` records
+/// the update at a specific past moment — when mitigation actually completed, say — rather than at
+/// the time it is posted; omit it to use the current time.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct CreateUpdate {
     pub impact: Impact,
     pub message: String,
+    #[serde(
+        default,
+        with = "chrono::serde::ts_seconds_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub timestamp: Option<DateTime<Utc>>,
 }
 
-/// The body for replacing an existing update's editable field (its message). Applied as a
-/// check-and-set against the update's `version`; the `impact` is fixed once posted.
+/// The body for replacing an existing update's editable fields (its message and, when supplied, its
+/// `timestamp` — so a mistimed backdated update can be corrected). Applied as a check-and-set against
+/// the update's `version`; the `impact` is fixed once posted, and an omitted `timestamp` leaves the
+/// stored one untouched.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct PutUpdate {
     pub message: String,
+    #[serde(
+        default,
+        with = "chrono::serde::ts_seconds_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub timestamp: Option<DateTime<Utc>>,
 }
 
 /// A page of incidents, newest-first, each carrying its updates. `next_cursor` is the id to pass as
@@ -332,6 +369,54 @@ mod tests {
         assert_eq!(v.started_at(), None);
         assert_eq!(v.ended_at(), None);
         assert_eq!(v.impact_since(), None);
+    }
+
+    #[test]
+    fn create_bodies_carry_an_optional_backdated_timestamp() {
+        // Omitted on the wire when absent, so an existing client's payload is unchanged...
+        let body = CreateIncident {
+            title: "Outage".into(),
+            impact: Impact::Offline,
+            message: "down".into(),
+            timestamp: None,
+        };
+        let json = serde_json::to_value(&body).unwrap();
+        assert!(json.get("timestamp").is_none());
+        // ...and a body without the field still decodes (older clients keep working).
+        let decoded: CreateIncident =
+            serde_json::from_value(serde_json::json!({ "title": "Outage", "impact": "offline", "message": "down" }))
+                .unwrap();
+        assert_eq!(decoded, body);
+
+        // When present it rides as unix seconds, matching `IncidentUpdate::timestamp`.
+        let backdated = CreateIncident { timestamp: Some(ts(1_700_000_100)), ..body };
+        let json = serde_json::to_value(&backdated).unwrap();
+        assert_eq!(json["timestamp"], 1_700_000_100);
+        assert_eq!(serde_json::from_value::<CreateIncident>(json).unwrap(), backdated);
+
+        let update = CreateUpdate { impact: Impact::None, message: "fixed".into(), timestamp: Some(ts(1_700_000_500)) };
+        let json = serde_json::to_value(&update).unwrap();
+        assert_eq!(json["timestamp"], 1_700_000_500);
+        assert_eq!(serde_json::from_value::<CreateUpdate>(json).unwrap(), update);
+
+        let edit = PutUpdate { message: "fixed".into(), timestamp: None };
+        let json = serde_json::to_value(&edit).unwrap();
+        assert!(json.get("timestamp").is_none(), "an omitted timestamp leaves the stored one alone");
+        assert_eq!(serde_json::from_value::<PutUpdate>(serde_json::json!({ "message": "fixed" })).unwrap(), edit);
+    }
+
+    #[test]
+    fn timestamps_may_be_backdated_but_not_future_dated() {
+        let now = ts(1_700_000_000);
+        assert!(is_valid_update_timestamp(now, now), "the current time is fine");
+        assert!(is_valid_update_timestamp(ts(1_600_000_000), now), "backdating is the whole point");
+        assert!(is_valid_update_timestamp(ts(0), now), "the epoch itself is the earliest allowed");
+        assert!(
+            is_valid_update_timestamp(now + Duration::minutes(4), now),
+            "a slightly fast client clock is tolerated"
+        );
+        assert!(!is_valid_update_timestamp(now + Duration::minutes(6), now), "future-dating is not");
+        assert!(!is_valid_update_timestamp(ts(-1), now), "nor is a pre-epoch time, which would wrap ids");
     }
 
     #[test]
