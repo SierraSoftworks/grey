@@ -16,10 +16,10 @@ pub fn probe_class(passing: bool, recent_availability: f64) -> &'static str {
 pub fn sample_class(current_passing: Option<bool>, max_availability: f64) -> &'static str {
     match (current_passing, max_availability) {
         (Some(false), _) => "error",
-        (Some(true), sli) if sli > 99.9 => "ok",
+        (Some(true), sli) if sli > 90.0 => "ok",
         (Some(true), _) => "warn",
-        (None, sli) if sli > 99.9 => "ok",
-        (None, sli) if sli < 90.0 => "error",
+        (None, sli) if sli > 90.0 => "ok",
+        (None, sli) if sli < 50.0 => "error",
         (None, _) => "warn",
     }
 }
