@@ -24,6 +24,20 @@ pub trait ProbeStore {
     /// The pooled, cluster-merged probe states keyed by probe name.
     async fn get_probe_states(&self) -> Result<HashMap<String, Probe>, Box<dyn Error>>;
 
+    /// The names of every probe visible to this node: the configured set plus any name present in
+    /// stored records (peers may observe probes this node no longer configures). Walks only the
+    /// table's keys, so it is cheap regardless of record sizes.
+    async fn get_probe_names(&self) -> Result<Vec<String>, Box<dyn Error>>;
+
+    /// As [`ProbeStore::get_probe_states`], restricted to the named probes. Decoding record
+    /// snapshots is the dominant cost of a scan, so callers that can tolerate a spread-out view
+    /// (e.g. the notifier) batch the names from [`ProbeStore::get_probe_names`] through this to
+    /// turn one large scan into several small ones.
+    async fn get_probe_states_for(
+        &self,
+        names: &std::collections::HashSet<String>,
+    ) -> Result<HashMap<String, Probe>, Box<dyn Error>>;
+
     /// Persists the configured probe metadata for this node.
     async fn update_probe_config(&self, probe: &crate::Probe) -> Result<(), Box<dyn Error>>;
 
@@ -46,13 +60,23 @@ pub trait ProbeStore {
     async fn gc_loop(&self);
 }
 
-impl ProbeStore for State {
-    async fn get_probe_states(&self) -> Result<HashMap<String, Probe>, Box<dyn Error>> {
+impl State {
+    /// The shared scan behind [`ProbeStore::get_probe_states`] and
+    /// [`ProbeStore::get_probe_states_for`]: `filter` restricts which probe names are seeded and
+    /// decoded (`None` means all). The key walk always covers the whole table — skipping the
+    /// snapshot decode for filtered-out rows is what makes a restricted scan cheap.
+    fn probe_states_filtered(
+        &self,
+        filter: Option<&std::collections::HashSet<String>>,
+    ) -> Result<HashMap<String, Probe>, Box<dyn Error>> {
         let config = self.get_config();
+        let included = |name: &str| filter.map(|f| f.contains(name)).unwrap_or(true);
 
         let mut histories = HashMap::new();
         for probe in config.probes.iter() {
-            histories.insert(probe.name.clone(), probe.into());
+            if included(&probe.name) {
+                histories.insert(probe.name.clone(), probe.into());
+            }
         }
 
         let txn = self.database.begin_read()?;
@@ -64,6 +88,9 @@ impl ProbeStore for State {
             for entry in table.iter()?.filter_map(|r| r.ok()) {
                 let (key, value) = entry;
                 let (_node_id, probe_name) = key.value();
+                if !included(&probe_name) {
+                    continue;
+                }
                 let (_, data) = value.value();
                 if let Ok(snapshot) = rmp_serde::from_slice::<ProbeState>(data) {
                     // A retired record is an observer's tombstone for a probe it no longer runs; it
@@ -93,6 +120,36 @@ impl ProbeStore for State {
         }
 
         Ok(histories)
+    }
+}
+
+impl ProbeStore for State {
+    async fn get_probe_states(&self) -> Result<HashMap<String, Probe>, Box<dyn Error>> {
+        self.probe_states_filtered(None)
+    }
+
+    async fn get_probe_names(&self) -> Result<Vec<String>, Box<dyn Error>> {
+        let config = self.get_config();
+        let mut names: std::collections::HashSet<String> =
+            config.probes.iter().map(|p| p.name.clone()).collect();
+
+        let txn = self.database.begin_read()?;
+        if let Ok(table) = txn.open_table(PROBES_TABLE) {
+            for entry in table.iter()?.filter_map(|r| r.ok()) {
+                let (key, _value) = entry;
+                let (_node_id, probe_name) = key.value();
+                names.insert(probe_name);
+            }
+        }
+
+        Ok(names.into_iter().collect())
+    }
+
+    async fn get_probe_states_for(
+        &self,
+        names: &std::collections::HashSet<String>,
+    ) -> Result<HashMap<String, Probe>, Box<dyn Error>> {
+        self.probe_states_filtered(Some(names))
     }
 
     async fn update_probe_config(&self, probe: &crate::Probe) -> Result<(), Box<dyn Error>> {
@@ -159,6 +216,10 @@ impl ProbeStore for State {
                 // would never pick the tombstone up.
                 snapshot.last_updated = chrono::Utc::now()
                     .max(snapshot.last_updated + chrono::Duration::seconds(1));
+                // A tombstoned record stops receiving results (the only other place an own record
+                // is pruned), so shed its aged-out history here rather than gossiping it around
+                // until the record itself expires.
+                snapshot.prune_history();
                 updates.push((probe_name, snapshot));
             }
 
@@ -202,6 +263,10 @@ impl ProbeStore for State {
                     .unwrap_or_else(|| (probe.into(), 0));
 
                 probe_result.apply(self.node_id, &mut snapshot);
+                // A node's own records never pass through `merge` (the receive path), so this is
+                // where their history retention is enforced; without it they grow by one bucket per
+                // hour for as long as the probe keeps running.
+                snapshot.prune_history();
 
                 let new_data = rmp_serde::to_vec_named(&snapshot)?;
                 table.insert(
@@ -468,6 +533,131 @@ mod tests {
         assert!(
             table.get((node.into(), "stale".to_string())).unwrap().is_none(),
             "an hour-old probe must expire under a 60s expiry (i.e. version read as milliseconds)"
+        );
+    }
+
+    /// A node's own records never pass through `merge` (the receive path), so applying a probe
+    /// result is where their history retention must be enforced — without it they grow by one
+    /// bucket per hour for as long as the probe runs (67 days of buckets was observed in
+    /// production before this was pruned here).
+    #[tokio::test]
+    async fn applying_a_result_prunes_aged_history_buckets() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = State::test(dir.path().to_path_buf()).await;
+        let probe_name = state.get_config().probes[0].name.clone();
+        let own: u128 = state.node_id.into();
+
+        // Seed this node's own record with history far beyond the retention window, emulating a
+        // long-running node's accumulated state.
+        {
+            let txn = state.database.begin_write().unwrap();
+            {
+                let mut table = txn.open_table(PROBES_TABLE).unwrap();
+                let (version, mut snapshot) = table
+                    .get((own, probe_name.clone()))
+                    .unwrap()
+                    .map(|existing| {
+                        let (version, data) = existing.value();
+                        (version, rmp_serde::from_slice::<ProbeState>(data).unwrap())
+                    })
+                    .expect("State::test records a probe result");
+
+                let now = chrono::Utc::now();
+                let mut history: Vec<grey_api::ProbeHistoryBucket> = (49..149)
+                    .rev()
+                    .map(|age_hours| grey_api::ProbeHistoryBucket {
+                        start_time: now - chrono::Duration::hours(age_hours),
+                        pass: true,
+                        message: String::new(),
+                        validations: HashMap::new(),
+                        observations: HashMap::new(),
+                    })
+                    .collect();
+                history.append(&mut snapshot.history);
+                snapshot.history = history;
+
+                table
+                    .insert(
+                        (own, probe_name.clone()),
+                        (version, rmp_serde::to_vec_named(&snapshot).unwrap().as_slice()),
+                    )
+                    .unwrap();
+            }
+            txn.commit().unwrap();
+        }
+
+        state
+            .update_probe_state(&probe_name, crate::result::ProbeResult::test())
+            .await
+            .unwrap();
+
+        let probes = state.get_probe_states().await.unwrap();
+        let probe = probes.get(&probe_name).expect("the probe remains pooled");
+        let cutoff = chrono::Utc::now() - chrono::Duration::hours(48);
+        assert!(
+            !probe.history.is_empty(),
+            "recent history must survive the prune"
+        );
+        assert!(
+            probe.history.iter().all(|h| h.start_time > cutoff),
+            "buckets older than the retention window must be pruned when a result is applied (oldest retained: {:?})",
+            probe.history.first().map(|h| h.start_time)
+        );
+    }
+
+    /// The batched notifier scan must see exactly what the full scan sees: the name inventory
+    /// covers configured and stored probes, and a filtered read returns the same pooled records
+    /// as the unfiltered one, restricted to the requested names.
+    #[tokio::test]
+    async fn filtered_probe_scans_match_the_full_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = State::test(dir.path().to_path_buf()).await;
+        let configured = state.get_config().probes[0].name.clone();
+
+        // A record stored by a peer for a probe this node doesn't configure must appear too.
+        {
+            let txn = state.database.begin_write().unwrap();
+            {
+                let mut table = txn.open_table(PROBES_TABLE).unwrap();
+                let peer_probe = probe_at("peer-only", chrono::Utc::now());
+                let version = peer_probe.version();
+                table
+                    .insert(
+                        (NodeID::new().into(), "peer-only".to_string()),
+                        (version, rmp_serde::to_vec_named(&peer_probe).unwrap().as_slice()),
+                    )
+                    .unwrap();
+            }
+            txn.commit().unwrap();
+        }
+
+        let mut names = state.get_probe_names().await.unwrap();
+        names.sort();
+        let mut expected = vec![configured.clone(), "peer-only".to_string()];
+        expected.sort();
+        assert_eq!(names, expected);
+
+        let full = state.get_probe_states().await.unwrap();
+        for name in &names {
+            let subset = state
+                .get_probe_states_for(&std::iter::once(name.clone()).collect())
+                .await
+                .unwrap();
+            assert_eq!(subset.len(), 1, "a single-name filter returns exactly that probe");
+            assert_eq!(
+                rmp_serde::to_vec_named(&subset[name]).unwrap(),
+                rmp_serde::to_vec_named(&full[name]).unwrap(),
+                "the filtered record for '{name}' must match the full scan's"
+            );
+        }
+
+        assert!(
+            state
+                .get_probe_states_for(&std::collections::HashSet::new())
+                .await
+                .unwrap()
+                .is_empty(),
+            "an empty filter yields an empty map"
         );
     }
 }
