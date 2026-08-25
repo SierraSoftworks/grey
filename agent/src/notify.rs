@@ -41,9 +41,19 @@ use tracing_batteries::prelude::*;
 use crate::config::WebhookConfig;
 use crate::state::{CronStore, ProbeStore, State};
 
-/// How often the notifier re-derives entity state to look for transitions. Kept short enough that a
-/// state change is reported promptly, but long enough to avoid hammering the store.
-const EVALUATION_INTERVAL: Duration = Duration::from_secs(15);
+/// How long one full evaluation cycle takes: every entity's state is re-derived once per interval.
+/// Kept short enough that a state change is reported promptly, but long enough to avoid hammering
+/// the store — decoding every stored probe record is the single most expensive recurring read in
+/// the agent, so the cycle is also *spread out* rather than performed as one large scan (see
+/// [`SCAN_BATCH_SIZE`]).
+const EVALUATION_INTERVAL: Duration = Duration::from_secs(60);
+
+/// How many probes are decoded per scan within an evaluation cycle. The probe set is split into
+/// batches of this size and the batches are spaced evenly across [`EVALUATION_INTERVAL`], so the
+/// store sees a series of small reads instead of one large one — and the gaps leave the
+/// single-threaded runtime free for gossip, probes and HTTP between scans. Each batch's scan still
+/// walks the whole key range, but only decodes its own names' snapshots, which is where the cost is.
+const SCAN_BATCH_SIZE: usize = 8;
 
 /// The signature header, in the Tailscale `t=<unix-seconds>,v1=<hex>` form (see [`WebhookConfig`]).
 /// The signed timestamp travels in the `t=` field, so no separate timestamp header is needed.
@@ -79,27 +89,41 @@ impl Notifier {
         }
     }
 
-    /// Runs the evaluation loop forever. The first pass runs immediately to seed the baseline (so
-    /// startup doesn't replay existing state), then re-evaluates on [`EVALUATION_INTERVAL`].
+    /// Runs the evaluation loop forever. The first cycle starts immediately to seed the baseline
+    /// (so startup doesn't replay existing state), and each cycle — whose batches already spread
+    /// themselves across [`EVALUATION_INTERVAL`] — is followed by whatever remains of the interval,
+    /// so entities are re-evaluated roughly once per interval.
     pub async fn run(mut self) {
         loop {
+            let started = std::time::Instant::now();
             if let Err(e) = self.evaluate().await {
                 warn!(name: "webhook.evaluate", { exception = %e }, "Failed to evaluate notification state.");
             }
-            tokio::time::sleep(EVALUATION_INTERVAL).await;
+            tokio::time::sleep(EVALUATION_INTERVAL.saturating_sub(started.elapsed())).await;
         }
     }
 
-    /// Performs one evaluation pass: re-derives the pooled state, records transitions against the
+    /// Performs one evaluation cycle: re-derives the pooled state, records transitions against the
     /// baseline, and delivers an event to every matching webhook. The baseline is always refreshed
     /// (even with no webhooks configured) so that adding a webhook via a config reload doesn't replay
     /// the state every entity is already in.
+    ///
+    /// The probe set is scanned in batches of [`SCAN_BATCH_SIZE`], spaced evenly across
+    /// [`EVALUATION_INTERVAL`], so the cycle reads as a series of small store operations rather
+    /// than one large one; events are dispatched per batch so detection latency doesn't grow with
+    /// the probe count. Crons are few and cheap, so they remain a single pass at the end.
     async fn evaluate(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let config = self.state.get_config();
-        let now = Utc::now();
 
-        let probes = self.state.get_probe_states().await?;
-        let crons = self.state.get_cron_states().await?;
+        // Deterministic ordering keeps each name in a stable batch (and so on a stable cadence)
+        // across cycles.
+        let mut probe_names = self.state.get_probe_names().await?;
+        probe_names.sort();
+
+        let batches = probe_names.len().div_ceil(SCAN_BATCH_SIZE);
+        // The batches plus the final cron pass are spread across the interval; the run loop's
+        // remainder sleep absorbs whatever this cycle doesn't use.
+        let spacing = EVALUATION_INTERVAL / (batches as u32 + 1);
 
         // Whether a given entity has alerting enabled. The health axis is already debounced by the
         // streak (via each entity's configured window); `enabled` only decides whether a genuine
@@ -124,10 +148,34 @@ impl Notifier {
             }
         };
 
+        let no_probes = HashMap::new();
+        let no_crons = HashMap::new();
+
+        for batch in probe_names.chunks(SCAN_BATCH_SIZE) {
+            let names: std::collections::HashSet<String> = batch.iter().cloned().collect();
+            let probes = self.state.get_probe_states_for(&names).await?;
+
+            let events = detect_transitions(
+                &mut self.last,
+                Utc::now(),
+                &probes,
+                &no_crons,
+                !config.webhooks.is_empty(),
+                &alerting_enabled,
+            );
+
+            if !events.is_empty() {
+                self.dispatch(&config.webhooks, &events).await;
+            }
+
+            tokio::time::sleep(spacing).await;
+        }
+
+        let crons = self.state.get_cron_states().await?;
         let events = detect_transitions(
             &mut self.last,
-            now,
-            &probes,
+            Utc::now(),
+            &no_probes,
             &crons,
             !config.webhooks.is_empty(),
             &alerting_enabled,

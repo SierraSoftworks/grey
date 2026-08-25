@@ -51,6 +51,18 @@ impl Probe {
             .unwrap_or_else(Streak::default_recovery_window)
     }
 
+    /// Drops history buckets that have aged out of the 48-hour retention window.
+    ///
+    /// This must run everywhere a record is rewritten, not just on the gossip receive path
+    /// ([`Mergeable::merge`]): an observer's *own* records are only ever updated by applying its
+    /// probe results, and without pruning there they grow by one bucket per hour indefinitely —
+    /// every read of such a record (gossip diffs, the pooled API/UI view, the notifier) then pays
+    /// for decoding the full unbounded history.
+    pub fn prune_history(&mut self) {
+        let cutoff = chrono::Utc::now() - chrono::Duration::hours(24 * 2);
+        self.history.retain(|h| h.start_time > cutoff);
+    }
+
     /// Aggregate all observations into a single total observation
     pub fn total(&self) -> Observation {
         self.observations.values().fold(Observation::default(), |mut acc, obs| {
@@ -135,8 +147,7 @@ impl Mergeable for Probe {
             j += 1;
         }
 
-        self.history
-            .retain(|h| h.start_time > chrono::Utc::now() - chrono::Duration::hours(24 * 2));
+        self.prune_history();
     }
 }
 
