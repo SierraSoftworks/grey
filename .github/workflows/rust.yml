@@ -223,9 +223,8 @@ jobs:
       - name: cargo build
         env:
           # Keep debug info in the linked binary so the symbols action below
-          # can split it out; the action re-strips the binary afterwards, so
-          # release assets and the container image keep their usual size.
-          CARGO_PROFILE_RELEASE_STRIP: none
+          # can split it out on release builds; keep existing stripping on PRs.
+          CARGO_PROFILE_RELEASE_STRIP: ${{ github.event_name == 'release' && 'none' || 'debuginfo' }}
         run: cargo build --release --target ${{ matrix.target }} ${{ matrix.flags }}
 
       # Publish debug symbols to symbols.sierrasoftworks.com (build ID derived
