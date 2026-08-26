@@ -225,14 +225,36 @@ jobs:
           CARGO_PROFILE_RELEASE_STRIP: ${{ github.event_name == 'release' && 'none' || 'debuginfo' }}
         run: cargo build --release --target ${{ matrix.target }} ${{ matrix.flags }}
 
+      # Symbols must be extracted in the job that ran the build: dsymutil
+      # reads DWARF out of the build tree's object files on macOS, and the
+      # PDB is a linker output on Windows — neither exists on the publish
+      # job's fresh runner. On Linux and macOS this also re-strips the
+      # binary so release assets and the container image keep their usual
+      # size (on Windows the PDB is already a separate file and the binary
+      # is untouched); the extracted symbol files travel to
+      # publish-release-artifacts inside the build artifact below
+      # (publish: false needs no elevated permissions).
+      - name: Extract debug symbols
+        uses: SierraSoftworks/symbols@v1
+        if: github.event_name == 'release'
+        with:
+          binary: target/${{ matrix.target }}/release/grey${{ matrix.extension }}
+          publish: "false"
+
       # Also uploaded on releases so that the docker-build job can package the
-      # linux binaries into the container image.
+      # linux binaries into the container image, and so the publish job can
+      # upload the pre-extracted symbol files (each OS matches its own subset
+      # of the paths below; the rest are ignored).
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         if: github.event_name == 'pull_request' || github.event_name == 'release'
         with:
           name: grey-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.extension }}
-          path: target/${{ matrix.target }}/release/grey${{ matrix.extension }}
+          path: |
+            target/${{ matrix.target }}/release/grey${{ matrix.extension }}
+            target/${{ matrix.target }}/release/grey.debug
+            target/${{ matrix.target }}/release/grey.pdb
+            target/${{ matrix.target }}/release/grey.dSYM/**
 
   publish-release-artifacts:
     name: Publish ${{ matrix.os }}-${{ matrix.arch }} release artifacts
@@ -250,6 +272,9 @@ jobs:
       - build-app
 
     strategy:
+      # One target's publishing problem must not cancel the other targets'
+      # release uploads — each entry is independent.
+      fail-fast: false
       matrix:
         include:
           - arch: amd64
