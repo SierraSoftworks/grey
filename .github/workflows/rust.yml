@@ -135,6 +135,11 @@ jobs:
     name: ${{ matrix.os }}-${{ matrix.arch }}-release
     runs-on: ${{ matrix.run_on }}
 
+    # Keep build permissions read-only for every trigger; release publishing
+    # runs in a separate job with the elevated permissions it needs.
+    permissions:
+      contents: read
+
     needs:
       - version
       - build-ui
@@ -214,15 +219,11 @@ jobs:
           path: ./ui/dist
 
       - name: cargo build
+        env:
+          # Keep debug info in the linked binary so the symbols action below
+          # can split it out on release builds; keep existing stripping on PRs.
+          CARGO_PROFILE_RELEASE_STRIP: ${{ github.event_name == 'release' && 'none' || 'debuginfo' }}
         run: cargo build --release --target ${{ matrix.target }} ${{ matrix.flags }}
-
-      - name: Upload GitHub Release Artifacts
-        uses: SierraSoftworks/gh-releases@v1.0.10
-        if: github.event_name == 'release'
-        with:
-          files: "target/${{ matrix.target }}/release/grey${{ matrix.extension }} | grey-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.extension }}"
-          token: ${{ secrets.GITHUB_TOKEN }}
-          overwrite: "true"
 
       # Also uploaded on releases so that the docker-build job can package the
       # linux binaries into the container image.
@@ -232,6 +233,69 @@ jobs:
         with:
           name: grey-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.extension }}
           path: target/${{ matrix.target }}/release/grey${{ matrix.extension }}
+
+  publish-release-artifacts:
+    name: Publish ${{ matrix.os }}-${{ matrix.arch }} release artifacts
+    runs-on: ${{ matrix.run_on }}
+    if: github.event_name == 'release'
+
+    # id-token lets the symbols action authenticate to the symbol server with
+    # this workflow's OIDC identity; contents stays writable for the release
+    # asset upload (an explicit permissions block replaces the defaults).
+    permissions:
+      contents: write
+      id-token: write
+
+    needs:
+      - build-app
+
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            os: windows
+            run_on: windows-latest
+            target: x86_64-pc-windows-msvc
+            extension: .exe
+          - arch: amd64
+            os: linux
+            run_on: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - arch: "arm64"
+            os: linux
+            run_on: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - arch: amd64
+            os: darwin
+            run_on: macos-latest
+            target: x86_64-apple-darwin
+          - arch: arm64
+            os: darwin
+            run_on: macos-latest
+            target: aarch64-apple-darwin
+
+    steps:
+      - name: Fetch build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: grey-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.extension }}
+          path: target/${{ matrix.target }}/release
+
+      # Publish debug symbols to symbols.sierrasoftworks.com (build ID derived
+      # server-side; authenticated with this workflow's OIDC id-token) so
+      # Pyroscope's symbolizer and debuggers can resolve production frames.
+      - name: Publish debug symbols
+        uses: SierraSoftworks/symbols@v1
+        with:
+          binary: target/${{ matrix.target }}/release/grey${{ matrix.extension }}
+          version: ${{ github.event.release.tag_name }}
+
+      - name: Upload GitHub Release Artifacts
+        uses: SierraSoftworks/gh-releases@v1.0.10
+        with:
+          files: "target/${{ matrix.target }}/release/grey${{ matrix.extension }} | grey-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.extension }}"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          overwrite: "true"
 
   docker-build:
     name: Docker Build
