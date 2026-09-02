@@ -126,7 +126,8 @@ impl Probe {
     ///
     /// While failing this is the onset seen by the quorum-th observer to start failing; while
     /// passing it is the last failing observation of the observer whose recovery brought the count
-    /// back under the quorum, or the earliest coverage on record when no quorum has ever failed.
+    /// back under the quorum (the quorum-th most recent `failing_until` across all observers), or
+    /// the earliest coverage on record when fewer than a quorum have ever recorded a failure.
     pub fn since_at(&self, now: chrono::DateTime<chrono::Utc>, window: chrono::Duration) -> Option<chrono::DateTime<chrono::Utc>> {
         if self.observers.is_empty() {
             return self.streak.since_at(now, window);
@@ -144,10 +145,14 @@ impl Probe {
             return onsets.get(quorum - 1).or(onsets.last()).copied();
         }
 
+        // Every observer's last failing observation takes part, including those still failing. The
+        // quorum-th most recent of them belongs to the observer whose recovery took the count under
+        // the quorum (the debounced transition lands a window later, but `since` reports the last
+        // failing sample, as the pooled streak does); an observer that has not recovered simply
+        // holds one of the more recent slots.
         let mut recoveries: Vec<_> = self
             .observers
             .values()
-            .filter(|o| !o.streak.failing_for(now, window))
             .filter_map(|o| o.streak.failing_until)
             .collect();
         recoveries.sort_by(|a, b| b.cmp(a));
@@ -509,9 +514,23 @@ mod tests {
         assert!(probe.healthy_at(now, window));
         assert_eq!(probe.since_at(now, window), Some(now - chrono::Duration::minutes(40)));
 
+        // A partial recovery: one observer is still failing, but the other's recovery took the count
+        // under the quorum, so "passing since" is that recovery rather than the coverage fallback.
+        let mut probe = quorum_probe(now, None, &[Some(chrono::Duration::hours(1)), None, None]);
+        let ended = now - chrono::Duration::minutes(40);
+        probe.observers.get_mut("node-1").unwrap().streak = Streak {
+            failing_since: Some(ended - chrono::Duration::hours(1)),
+            failing_until: Some(ended),
+            covered_since: None,
+        };
+        assert!(probe.healthy_at(now, window));
+        assert_eq!(probe.since_at(now, window), Some(ended));
+
         // Never failed as a quorum: covered since the earliest observation.
         let probe = quorum_probe(now, None, &[None, None, None]);
         assert_eq!(probe.since_at(now, window), Some(now - chrono::Duration::days(1)));
+        let probe = quorum_probe(now, None, &[Some(chrono::Duration::hours(1)), None, None]);
+        assert_eq!(probe.since_at(now, window), Some(now - chrono::Duration::days(1)), "one failing observer of three has never been a quorum");
     }
 
     #[test]
