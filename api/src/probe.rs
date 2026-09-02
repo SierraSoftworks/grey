@@ -145,9 +145,11 @@ impl Probe {
             return onsets.get(quorum - 1).or(onsets.last()).copied();
         }
 
-        // Every observer's last failing observation takes part, including those still failing: the
-        // count dropped below the quorum at the quorum-th most recent of them, and an observer that
-        // has not recovered simply holds one of the more recent slots.
+        // Every observer's last failing observation takes part, including those still failing. The
+        // quorum-th most recent of them belongs to the observer whose recovery took the count under
+        // the quorum (the debounced transition lands a window later, but `since` reports the last
+        // failing sample, as the pooled streak does); an observer that has not recovered simply
+        // holds one of the more recent slots.
         let mut recoveries: Vec<_> = self
             .observers
             .values()
