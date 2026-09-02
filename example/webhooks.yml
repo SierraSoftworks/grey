@@ -11,7 +11,7 @@
 #
 #   POST <endpoint>
 #   Content-Type: application/json
-#   Grey-Webhook-Event: probe.state_changed        # or cron.state_changed
+#   Grey-Webhook-Event: probe.state_changed        # or cron.state_changed / node.state_changed
 #   Grey-Webhook-Delivery: <unique event id>
 #   Grey-Webhook-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<timestamp>.<body>">
 #

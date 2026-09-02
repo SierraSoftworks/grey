@@ -63,6 +63,11 @@ pub struct Peer {
     /// responses from older agents deserialize this as `false`.
     #[serde(default)]
     pub current: bool,
+
+    /// The node's derived health as an observer (see [`crate::Node`]), when it observes any probes.
+    /// Absent for members that run no probes (for example a UI-only node).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<crate::Node>,
 }
 
 #[cfg(test)]

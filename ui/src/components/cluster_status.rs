@@ -63,6 +63,12 @@ fn render_member(peer: &Peer) -> Html {
                     <span class="peer__current-tag">{"this node"}</span>
                 }
             </div>
+            if let Some(node) = &peer.node {
+                <span
+                    class={format!("peer__node {}", node.status.as_str())}
+                    title={format!("{} of {} probes disagree with the cluster (quorum {})", node.disagreeing, node.total, node.quorum)}
+                >{node.status.label()}</span>
+            }
             <span class={format!("peer__health {class}")}>{peer.health.label()}</span>
             <span class="peer__last-seen">{relative_time(peer.last_seen)}</span>
         </div>
@@ -113,7 +119,29 @@ mod tests {
             last_seen: chrono::Utc::now(),
             health,
             current,
+            node: None,
         }
+    }
+
+    /// A member with derived observer health of `status`.
+    #[tokio::test]
+    async fn test_shows_node_health_and_degrades_the_chip() {
+        let mut degraded = peer("remote-node", PeerHealth::Online, false);
+        degraded.node = Some(grey_api::Node {
+            id: "remote-node".into(),
+            status: grey_api::NodeStatus::Degraded,
+            since: None,
+            last_updated: None,
+            probes: Default::default(),
+            disagreeing: 2,
+            total: 3,
+            quorum: 2,
+        });
+        let html = render(vec![peer("local-node", PeerHealth::Online, true), degraded]).await;
+        assert!(html.contains("peer__node degraded"), "expected the node status badge, got: {html}");
+        assert!(html.contains("Degraded"), "expected the node status label, got: {html}");
+        assert!(html.contains("2 of 3 probes disagree"), "expected the disagreement summary, got: {html}");
+        assert!(html.contains("cluster-status warning"), "a degraded node must warn on the chip, got: {html}");
     }
 
     #[tokio::test]

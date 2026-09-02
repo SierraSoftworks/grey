@@ -138,6 +138,8 @@ mod tests {
             streak: Default::default(),
             debounce: None,
             retired: false,
+            observers: Default::default(),
+            quorum: None,
         }
     }
 

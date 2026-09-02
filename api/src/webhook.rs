@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{Cron, Probe};
+use crate::{Cron, Node, Probe};
 
 /// The schema version stamped onto every [`WebhookEvent`]. Bump this when the payload shape changes
 /// in a way consumers need to discriminate; a consumer can branch on `version` to handle multiple
@@ -37,6 +37,8 @@ pub enum WebhookEventKind {
     ProbeStateChanged,
     #[serde(rename = "cron.state_changed")]
     CronStateChanged,
+    #[serde(rename = "node.state_changed")]
+    NodeStateChanged,
 }
 
 impl WebhookEventKind {
@@ -45,6 +47,7 @@ impl WebhookEventKind {
         match self {
             WebhookEventKind::ProbeStateChanged => "probe.state_changed",
             WebhookEventKind::CronStateChanged => "cron.state_changed",
+            WebhookEventKind::NodeStateChanged => "node.state_changed",
         }
     }
 }
@@ -55,6 +58,7 @@ impl WebhookEventKind {
 pub enum WebhookEntityType {
     Probe,
     Cron,
+    Node,
 }
 
 impl WebhookEntityType {
@@ -62,6 +66,7 @@ impl WebhookEntityType {
         match self {
             WebhookEntityType::Probe => "probe",
             WebhookEntityType::Cron => "cron",
+            WebhookEntityType::Node => "node",
         }
     }
 }
@@ -132,6 +137,8 @@ pub struct WebhookEvent {
     /// The full cron snapshot (with runs and the last check-in), for a cron event.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cron: Option<Cron>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<Node>,
 }
 
 impl WebhookEvent {
@@ -165,6 +172,7 @@ impl WebhookEvent {
             },
             probe: Some(probe.clone()),
             cron: None,
+            node: None,
         }
     }
 
@@ -199,6 +207,39 @@ impl WebhookEvent {
             },
             probe: None,
             cron: Some(cron.clone()),
+            node: None,
+        }
+    }
+
+    /// An event for a Grey node whose derived health (see [`Node`]) crossed the healthy axis.
+    pub fn for_node(
+        id: impl Into<String>,
+        timestamp: DateTime<Utc>,
+        node: &Node,
+        previous_token: impl Into<String>,
+        previous_healthy: bool,
+    ) -> Self {
+        Self {
+            version: WEBHOOK_SCHEMA_VERSION.to_string(),
+            id: id.into(),
+            event: WebhookEventKind::NodeStateChanged,
+            timestamp,
+            entity: WebhookEntity {
+                entity_type: WebhookEntityType::Node,
+                name: node.id.clone(),
+                tags: HashMap::new(),
+            },
+            state: WebhookState {
+                current: node.status_token().to_string(),
+                previous: previous_token.into(),
+                healthy: node.healthy(),
+                was_healthy: previous_healthy,
+                since: node.since,
+                availability: None,
+            },
+            probe: None,
+            cron: None,
+            node: Some(node.clone()),
         }
     }
 }
@@ -230,6 +271,8 @@ mod tests {
             },
             debounce: None,
             retired: false,
+            observers: HashMap::new(),
+            quorum: None,
         }
     }
 
@@ -274,6 +317,39 @@ mod tests {
         assert!(event.state.availability.is_none(), "crons have no availability");
         assert!(event.cron.is_some());
         assert!(event.probe.is_none());
+    }
+
+    #[test]
+    fn node_event_carries_the_node_snapshot() {
+        let node = Node {
+            id: "node-a".into(),
+            status: crate::NodeStatus::Degraded,
+            since: Some(ts(900)),
+            last_updated: Some(ts(990)),
+            probes: Default::default(),
+            disagreeing: 2,
+            total: 3,
+            quorum: 2,
+        };
+        let event = WebhookEvent::for_node("evt-3", ts(1_000), &node, "healthy", true);
+        assert_eq!(event.event, WebhookEventKind::NodeStateChanged);
+        assert_eq!(event.entity.entity_type, WebhookEntityType::Node);
+        assert_eq!(event.entity.name, "node-a");
+        assert_eq!(event.state.current, "degraded");
+        assert_eq!(event.state.previous, "healthy");
+        assert!(!event.state.healthy);
+        assert!(event.state.was_healthy);
+        assert_eq!(event.state.since, Some(ts(900)));
+        assert!(event.state.availability.is_none());
+
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["event"], "node.state_changed");
+        assert_eq!(json["entity"]["type"], "node");
+        assert_eq!(json["node"]["status"], "degraded");
+        assert_eq!(json["node"]["disagreeing"], 2);
+        assert!(json.get("probe").is_none() && json.get("cron").is_none());
+        let decoded: WebhookEvent = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, event);
     }
 
     #[test]

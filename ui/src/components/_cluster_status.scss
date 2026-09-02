@@ -130,6 +130,32 @@
         }
     }
 
+    // The member's derived observer health: healthy, degraded (its probes disagree with the
+    // cluster) or silent (no recent samples).
+    .peer__node {
+        flex: 0 0 auto;
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        border-radius: $border-radius-small;
+        padding: 0.1rem 0.3rem;
+        border: 1px solid $color-separator;
+
+        &.healthy {
+            color: $color-status-ok;
+        }
+
+        &.degraded {
+            color: $color-status-warn;
+            border-color: $color-status-warn;
+        }
+
+        &.silent {
+            color: $color-status-offline;
+        }
+    }
+
     .peer__last-seen {
         color: $color-text-muted;
         font-size: 0.8rem;

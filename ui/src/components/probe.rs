@@ -1,4 +1,4 @@
-use super::{ProbeHistory, StatusDot};
+use super::{LiveStatus, ProbeHistory, StatusDot};
 use crate::formatters::{availability, compact_duration};
 use crate::styles::probe_class;
 use yew::prelude::*;
@@ -11,8 +11,19 @@ pub struct ProbeProps {
 #[function_component(Probe)]
 pub fn probe(props: &ProbeProps) -> Html {
     let recent_availability = props.probe.recent(2).success_rate();
-    let streak = props.probe.streak.clone();
-    let window = props.probe.window();
+    let live = LiveStatus::of(&props.probe);
+
+    // With several observers, health is decided by quorum: say how many currently disagree with
+    // the pooled verdict so an operator can tell a single bad vantage point from a real outage.
+    let observers_text = (props.probe.observers.len() > 1).then(|| {
+        let now = chrono::Utc::now();
+        let failing = props.probe.failing_observers_at(now, props.probe.window());
+        format!(
+            "{failing}/{} observers failing (quorum {})",
+            props.probe.observers.len(),
+            props.probe.quorum_size()
+        )
+    });
 
     // Key the status off the currently observed (debounced) state so a recovery is reflected once it
     // settles, using the recent average only to grade how severe an ongoing failure is.
@@ -49,12 +60,15 @@ pub fn probe(props: &ProbeProps) -> Html {
                     }
                 </div>
                 
+                if let Some(observers_text) = observers_text {
+                    <div class="probe__observers">{observers_text}</div>
+                }
                 if let Some(streak_text) = streak_text {
                     <div class="probe__streak">{streak_text}</div>
                 }
                 <div class="probe__availability">{availability(props.probe.availability())}</div>
             </div>
-            <ProbeHistory samples={props.probe.history.clone()} streak={streak} window={window} />
+            <ProbeHistory samples={props.probe.history.clone()} live={live} />
         </div>
     }
 }
@@ -89,6 +103,8 @@ mod tests {
             streak,
             debounce: None,
             retired: false,
+            observers: Default::default(),
+            quorum: None,
         };
         yew::ServerRenderer::<Harness>::with_props(move || HarnessProps { probe })
             .render()
@@ -116,6 +132,39 @@ mod tests {
 
         let html = render(streak).await;
         assert!(html.contains("unhealthy for 17m"), "expected the unhealthy streak text, got: {html}");
+    }
+
+    /// With several observers the displayed health follows the quorum, and the observer tally says
+    /// how many currently disagree.
+    #[tokio::test]
+    async fn test_shows_quorum_health_and_observer_tally() {
+        let now = chrono::Utc::now();
+        let window = Streak::default_recovery_window();
+        let failing = grey_api::ObserverState {
+            streak: Streak { failing_since: Some(now - window * 3), failing_until: Some(now), covered_since: None },
+            last_updated: now,
+        };
+        let passing = grey_api::ObserverState {
+            streak: Streak { failing_since: None, failing_until: None, covered_since: Some(now - chrono::Duration::days(2)) },
+            last_updated: now,
+        };
+        let probe = grey_api::Probe {
+            name: "probe".into(),
+            tags: Default::default(),
+            last_updated: now,
+            history: vec![],
+            observations: Default::default(),
+            streak: Streak::default(),
+            debounce: None,
+            retired: false,
+            observers: [("a".to_string(), failing), ("b".to_string(), passing.clone()), ("c".to_string(), passing)].into_iter().collect(),
+            quorum: None,
+        };
+        let html = yew::ServerRenderer::<Harness>::with_props(move || HarnessProps { probe })
+            .render()
+            .await;
+        assert!(html.contains("1/3 observers failing (quorum 2)"), "expected the observer tally, got: {html}");
+        assert!(html.contains("healthy for 2d"), "one dissenting observer must not read as unhealthy, got: {html}");
     }
 
     #[tokio::test]

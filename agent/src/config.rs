@@ -100,6 +100,13 @@ pub struct AlertingConfig {
         with = "crate::serializers::chrono_duration_humantime"
     )]
     pub debounce: chrono::Duration,
+
+    /// How many of the nodes observing this probe must each report a (debounced) failure before the
+    /// cluster reads it as failing — and, symmetrically, how many must have stopped before it reads
+    /// as recovered. Overrides `cluster.quorum` for this probe; defaults to the cluster-wide setting
+    /// (a majority of observers). Has no effect on crons, whose health is not observer-based.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quorum: Option<grey_api::Quorum>,
 }
 
 impl Default for AlertingConfig {
@@ -107,6 +114,7 @@ impl Default for AlertingConfig {
         Self {
             enabled: default_alerting_enabled(),
             debounce: default_alerting_debounce(),
+            quorum: None,
         }
     }
 }
@@ -484,6 +492,60 @@ pub struct ClusterConfig {
     #[serde(default = "default::cluster::gc_peer_expiry")]
     #[serde(with = "humantime_serde")]
     pub gc_peer_expiry: std::time::Duration,
+
+    /// The default quorum of observers that must agree before a probe reads as failing (or as
+    /// recovered). `majority` (the default), a count such as `2`, or a percentage such as `60%`.
+    /// A probe's `alerting.quorum` overrides it.
+    #[serde(default)]
+    pub quorum: grey_api::Quorum,
+
+    /// Alerting on the health of the Grey nodes themselves (`node.state_changed` events).
+    #[serde(default)]
+    pub alerting: NodeAlertingConfig,
+}
+
+/// Controls the `node.state_changed` webhook events describing the health of Grey nodes as
+/// observers: a node is *degraded* when a quorum of the probes it runs fail from its vantage point
+/// while the cluster's quorum reads them passing, and *silent* when none of its probes has recorded
+/// a sample for `silent_after`.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct NodeAlertingConfig {
+    /// Whether node health transitions are delivered to the configured webhooks. Defaults to `true`.
+    #[serde(default = "default_alerting_enabled")]
+    pub enabled: bool,
+
+    /// How many of a node's probes must disagree with the cluster before the node reads as degraded.
+    /// Defaults to a majority.
+    #[serde(default)]
+    pub quorum: grey_api::Quorum,
+
+    /// How long a node may go without recording a sample for any of its probes before it reads as
+    /// silent. Defaults to 1 hour; set it above the longest probe interval on the node, or to `0s`
+    /// to disable silence detection.
+    #[serde(default = "default::cluster::silent_after")]
+    #[serde(with = "humantime_serde")]
+    pub silent_after: std::time::Duration,
+}
+
+impl NodeAlertingConfig {
+    /// The silence threshold as a [`chrono::Duration`], or `None` when disabled (`0s`).
+    pub fn silent_after_chrono(&self) -> Option<chrono::Duration> {
+        if self.silent_after.is_zero() {
+            None
+        } else {
+            chrono::Duration::from_std(self.silent_after).ok()
+        }
+    }
+}
+
+impl Default for NodeAlertingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_alerting_enabled(),
+            quorum: grey_api::Quorum::default(),
+            silent_after: default::cluster::silent_after(),
+        }
+    }
 }
 
 impl ClusterConfig {
@@ -521,6 +583,8 @@ impl Default for ClusterConfig {
             gc_interval: default::cluster::gc_interval(),
             gc_probe_expiry: default::cluster::gc_probe_expiry(),
             gc_peer_expiry: default::cluster::gc_peer_expiry(),
+            quorum: grey_api::Quorum::default(),
+            alerting: NodeAlertingConfig::default(),
         }
     }
 }
@@ -683,6 +747,26 @@ mod tests {
         assert!(orchestrator.secret.is_none());
     }
 
+    /// Quorum settings parse in every spelling and default to a majority; node alerting has
+    /// sensible defaults and a `0s` silence threshold disables silence detection.
+    #[test]
+    fn quorum_and_node_alerting_config() {
+        let yaml = "probes:\n  - name: p\n    policy: { interval: 5s, timeout: 2s }\n    target: !Http\n      url: https://example.com\n    alerting:\n      quorum: 2\n  - name: q\n    policy: { interval: 5s, timeout: 2s }\n    target: !Http\n      url: https://example.com\ncluster:\n  peers: []\n  secret: ''\n  quorum: 60%\n  alerting:\n    quorum: majority\n    silent_after: 0s\n";
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.probes[0].alerting.quorum, Some(grey_api::Quorum::Count(2)));
+        assert_eq!(config.probes[1].alerting.quorum, None);
+        assert_eq!(config.cluster.quorum, grey_api::Quorum::Percent(60));
+        assert!(config.cluster.alerting.enabled);
+        assert_eq!(config.cluster.alerting.quorum, grey_api::Quorum::Majority);
+        assert_eq!(config.cluster.alerting.silent_after_chrono(), None);
+
+        let defaults = ClusterConfig::default();
+        assert_eq!(defaults.quorum, grey_api::Quorum::Majority);
+        assert_eq!(defaults.alerting.silent_after_chrono(), Some(chrono::Duration::hours(1)));
+
+        assert!(serde_yaml::from_str::<Config>("cluster:\n  peers: []\n  secret: ''\n  quorum: most\n").is_err());
+    }
+
     /// A webhook with a missing or non-http(s) endpoint must fail to load rather than silently
     /// dropping every notification.
     #[tokio::test]
@@ -832,6 +916,10 @@ mod default {
 
         pub fn gc_peer_expiry() -> std::time::Duration {
             std::time::Duration::from_secs(30 * 60)
+        }
+
+        pub fn silent_after() -> std::time::Duration {
+            std::time::Duration::from_secs(60 * 60)
         }
     }
 }

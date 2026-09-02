@@ -29,8 +29,10 @@ Pre-compiled binaries for other platforms are available from the
 ## Highlights
 - **Clustered probing.** Run Grey on as many machines as you like and have them
   cooperate: every node probes independently and gossips its results, so the cluster
-  converges on one view of service health measured from many locations at once. Workers
-  can be headless while a central node serves the status page.
+  converges on one view of service health measured from many locations at once. Health is
+  decided by a quorum of the observing nodes, so a single node with a flaky uplink can neither
+  raise nor suppress an alert, and the cluster reports a node whose view disagrees with its peers.
+  Workers can be headless while a central node serves the status page.
 - **Cron (deadman's-switch) monitoring.** Track scheduled jobs — backups, batch jobs,
   anything that can't be probed from the outside — by having them *check in*. Grey raises
   the alarm when an expected run goes missing or overruns.

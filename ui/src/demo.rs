@@ -242,6 +242,7 @@ fn peer(id: &str, health: PeerHealth, last_seen: DateTime<Utc>, current: bool) -
         last_seen,
         health,
         current,
+        node: None,
     }
 }
 
@@ -275,6 +276,8 @@ fn probe(
         streak: streak(now, shape),
         debounce: None,
         retired: false,
+        observers: Default::default(),
+        quorum: None,
     }
 }
 

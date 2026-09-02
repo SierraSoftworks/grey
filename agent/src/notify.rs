@@ -33,7 +33,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use filt_rs::{Filter, FilterValue, Filterable};
-use grey_api::{Cron, Probe, WebhookEvent};
+use grey_api::{Cron, Node, Probe, WebhookEvent};
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use tracing_batteries::prelude::*;
@@ -185,6 +185,20 @@ impl Notifier {
             self.dispatch(&config.webhooks, &events).await;
         }
 
+        // Node health is derived from the same pooled probe state every node holds, so each node
+        // evaluates every node (itself included) and a degraded node's peers deliver its event even
+        // when it cannot.
+        let nodes = self.state.get_nodes().await?;
+        let events = detect_node_transitions(
+            &mut self.last,
+            Utc::now(),
+            &nodes,
+            !config.webhooks.is_empty() && config.cluster.alerting.enabled,
+        );
+        if !events.is_empty() {
+            self.dispatch(&config.webhooks, &events).await;
+        }
+
         Ok(())
     }
 
@@ -306,6 +320,40 @@ fn detect_transitions(
 }
 
 /// A fresh, unique event identifier.
+/// The node counterpart of [`detect_transitions`]: seeds a baseline per node on first sight and emits
+/// a `node.state_changed` event whenever a node's derived status crosses the healthy axis.
+fn detect_node_transitions(
+    last: &mut HashMap<String, Status>,
+    now: DateTime<Utc>,
+    nodes: &[Node],
+    notify: bool,
+) -> Vec<WebhookEvent> {
+    let mut events = Vec::new();
+
+    for node in nodes {
+        let key = format!("node:{}", node.id);
+        let token = node.status_token();
+        let healthy = node.healthy();
+
+        if notify
+            && let Some(previous) = last.get(&key)
+            && previous.healthy != healthy
+        {
+            events.push(WebhookEvent::for_node(
+                new_id(),
+                now,
+                node,
+                previous.token.clone(),
+                previous.healthy,
+            ));
+        }
+
+        last.insert(key, Status { token: token.to_string(), healthy });
+    }
+
+    events
+}
+
 fn new_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
@@ -528,6 +576,8 @@ mod tests {
             streak,
             debounce: None,
             retired: false,
+            observers: Default::default(),
+            quorum: None,
         }
     }
 
@@ -749,6 +799,49 @@ mod tests {
         // ...but the baseline advanced to "failing", so re-enabling on the same (failing) state does
         // not replay it as a fresh transition.
         assert!(detect_transitions(&mut last, now, &failing, &empty_crons, true, &all_enabled).is_empty());
+    }
+
+    fn node(id: &str, status: grey_api::NodeStatus) -> Node {
+        Node {
+            id: id.into(),
+            status,
+            since: Some(Utc::now()),
+            last_updated: Some(Utc::now()),
+            probes: Default::default(),
+            disagreeing: 0,
+            total: 3,
+            quorum: 2,
+        }
+    }
+
+    /// Node transitions follow the same seed-then-crossing rule as probes and crons: only a change
+    /// of health axis fires, and movement between the unhealthy tokens is silent.
+    #[test]
+    fn detects_node_transitions_on_the_health_axis() {
+        use grey_api::NodeStatus;
+        let mut last = HashMap::new();
+        let now = Utc::now();
+
+        assert!(detect_node_transitions(&mut last, now, &[node("a", NodeStatus::Healthy)], true).is_empty());
+
+        let events = detect_node_transitions(&mut last, now, &[node("a", NodeStatus::Degraded)], true);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event, grey_api::WebhookEventKind::NodeStateChanged);
+        assert_eq!(events[0].entity.name, "a");
+        assert_eq!((events[0].state.previous.as_str(), events[0].state.current.as_str()), ("healthy", "degraded"));
+        assert!(!events[0].state.healthy && events[0].state.was_healthy);
+        assert!(events[0].node.is_some());
+
+        assert!(detect_node_transitions(&mut last, now, &[node("a", NodeStatus::Silent)], true).is_empty());
+
+        let events = detect_node_transitions(&mut last, now, &[node("a", NodeStatus::Healthy)], true);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].state.previous, "silent");
+        assert!(events[0].state.healthy);
+
+        // Disabled node alerting still tracks the baseline.
+        assert!(detect_node_transitions(&mut last, now, &[node("a", NodeStatus::Degraded)], false).is_empty());
+        assert!(detect_node_transitions(&mut last, now, &[node("a", NodeStatus::Degraded)], true).is_empty());
     }
 
     #[test]

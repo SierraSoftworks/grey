@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{Mergeable, ProbeHistoryBucket, Streak};
+use crate::{Mergeable, ObserverState, ProbeHistoryBucket, Quorum, Streak};
 use crate::observation::Observation;
 
 /// Raw probe data as returned by the /api/v1/probes endpoint
@@ -40,6 +40,18 @@ pub struct Probe {
     /// rather than leaving its history stranded on every peer.
     #[serde(default)]
     pub retired: bool,
+
+    /// Each observer's own view of the probe (the streak built from its samples alone), keyed by
+    /// node identifier. A node's own record carries only its own entry; the pooled view carries one
+    /// per observer, and health is decided by quorum over them (see [`Probe::healthy_at`]).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub observers: HashMap<String, ObserverState>,
+
+    /// The quorum of observers that must agree before the probe reads as failing (and, by
+    /// symmetry, as recovered). Stamped from the local configuration, like `debounce`; absent means
+    /// [`Quorum::Majority`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quorum: Option<Quorum>,
 }
 
 impl Probe {
@@ -78,21 +90,87 @@ impl Probe {
 
     /// Whether this probe is currently passing (debounced by its configured window), falling back to
     /// the latest history bucket's result when the streak record carries no observations.
-    pub fn passing(&self) -> bool {
-        if self.streak.is_empty() {
-            self.history.last().map(|h| h.pass).unwrap_or(true)
+    /// The quorum in force for this probe.
+    pub fn quorum(&self) -> Quorum {
+        self.quorum.unwrap_or_default()
+    }
+
+    /// How many observers must report a failure for the probe to read as failing.
+    pub fn quorum_size(&self) -> usize {
+        self.quorum().required(self.observers.len())
+    }
+
+    /// The observers whose own debounced streak reads the probe as failing at `now`.
+    pub fn failing_observers_at(&self, now: chrono::DateTime<chrono::Utc>, window: chrono::Duration) -> usize {
+        self.observers
+            .values()
+            .filter(|o| o.streak.failing_for(now, window))
+            .count()
+    }
+
+    /// The probe's debounced health at `now`, decided by quorum: it reads as failing only while at
+    /// least [`Probe::quorum_size`] observers each report a sustained failure, and as passing (or
+    /// recovered) otherwise. Observers that have gone quiet decay to passing on their own, so a
+    /// node that stops reporting biases the probe towards recovery rather than blocking it.
+    ///
+    /// Records that predate per-observer streaks fall back to the pooled [`Streak`].
+    pub fn healthy_at(&self, now: chrono::DateTime<chrono::Utc>, window: chrono::Duration) -> bool {
+        if self.observers.is_empty() {
+            self.streak.healthy_at(now, window)
         } else {
-            self.streak.healthy_at(chrono::Utc::now(), self.window())
+            self.failing_observers_at(now, window) < self.quorum_size()
         }
     }
 
-    /// When the probe's current (debounced) state was entered.
-    pub fn since(&self) -> Option<chrono::DateTime<chrono::Utc>> {
-        self.streak.since_at(chrono::Utc::now(), self.window())
+    /// When the probe entered its current quorum-derived state, when known.
+    ///
+    /// While failing this is the onset seen by the quorum-th observer to start failing; while
+    /// passing it is the last failing observation of the observer whose recovery brought the count
+    /// back under the quorum, or the earliest coverage on record when no quorum has ever failed.
+    pub fn since_at(&self, now: chrono::DateTime<chrono::Utc>, window: chrono::Duration) -> Option<chrono::DateTime<chrono::Utc>> {
+        if self.observers.is_empty() {
+            return self.streak.since_at(now, window);
+        }
+
+        let quorum = self.quorum_size();
+        if !self.healthy_at(now, window) {
+            let mut onsets: Vec<_> = self
+                .observers
+                .values()
+                .filter(|o| o.streak.failing_for(now, window))
+                .filter_map(|o| o.streak.failing_since)
+                .collect();
+            onsets.sort();
+            return onsets.get(quorum - 1).or(onsets.last()).copied();
+        }
+
+        let mut recoveries: Vec<_> = self
+            .observers
+            .values()
+            .filter(|o| !o.streak.failing_for(now, window))
+            .filter_map(|o| o.streak.failing_until)
+            .collect();
+        recoveries.sort_by(|a, b| b.cmp(a));
+        recoveries.get(quorum - 1).copied().or_else(|| {
+            self.observers
+                .values()
+                .filter_map(|o| o.streak.covered_since)
+                .min()
+        })
     }
 
-    /// The derived status token used to describe the probe in notifications: `"passing"` or
-    /// `"failing"`. This is the probe analogue of [`crate::CronHealth::as_str`].
+    pub fn passing(&self) -> bool {
+        if self.streak.is_empty() && self.observers.is_empty() {
+            self.history.last().map(|h| h.pass).unwrap_or(true)
+        } else {
+            self.healthy_at(chrono::Utc::now(), self.window())
+        }
+    }
+
+    pub fn since(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.since_at(chrono::Utc::now(), self.window())
+    }
+
     pub fn status_token(&self) -> &'static str {
         if self.passing() { "passing" } else { "failing" }
     }
@@ -124,6 +202,12 @@ impl Mergeable for Probe {
         self.last_updated = self.last_updated.max(other.last_updated);
         self.observations.extend(other.observations.clone());
         self.streak.join(&other.streak);
+        for (observer, state) in &other.observers {
+            self.observers
+                .entry(observer.clone())
+                .and_modify(|mine| mine.merge(state))
+                .or_insert_with(|| state.clone());
+        }
 
         let mut i = 0;
         let mut j = 0;
@@ -185,6 +269,8 @@ mod tests {
             streak: Streak::default(),
             debounce: None,
             retired: false,
+            observers: HashMap::new(),
+            quorum: None,
         };
 
         let probe2 = Probe {
@@ -201,6 +287,8 @@ mod tests {
             streak: Streak::default(),
             debounce: None,
             retired: false,
+            observers: HashMap::new(),
+            quorum: None,
         };
 
         probe1.merge(&probe2);
@@ -236,6 +324,8 @@ mod tests {
             streak: Streak::default(),
             debounce: None,
             retired: false,
+            observers: HashMap::new(),
+            quorum: None,
         };
 
         let total = probe.total();
@@ -269,6 +359,8 @@ mod tests {
             streak: Streak::default(),
             debounce: None,
             retired: false,
+            observers: HashMap::new(),
+            quorum: None,
         };
 
         let availability = probe.availability();
@@ -287,6 +379,8 @@ mod tests {
             streak: Streak::default(),
             debounce: None,
             retired: false,
+            observers: HashMap::new(),
+            quorum: None,
         };
 
         // With an empty streak record (e.g. data from older agents), the probe falls
@@ -335,6 +429,125 @@ mod tests {
         assert!(streak.healthy_at(last_fail + window + chrono::Duration::seconds(1), window));
     }
 
+    fn observer(streak: Streak, last_updated: chrono::DateTime<chrono::Utc>) -> crate::ObserverState {
+        crate::ObserverState { streak, last_updated }
+    }
+
+    /// A probe with one observer per entry of `views`: `Some(onset)` for an observer that has been
+    /// failing continuously since `now - onset`, `None` for one that only ever passed.
+    fn quorum_probe(now: chrono::DateTime<chrono::Utc>, quorum: Option<Quorum>, views: &[Option<chrono::Duration>]) -> Probe {
+        let observers = views
+            .iter()
+            .enumerate()
+            .map(|(i, view)| {
+                let streak = match view {
+                    Some(onset) => Streak { failing_since: Some(now - *onset), failing_until: Some(now), covered_since: None },
+                    None => Streak { failing_since: None, failing_until: None, covered_since: Some(now - chrono::Duration::days(1)) },
+                };
+                (format!("node-{i}"), observer(streak, now))
+            })
+            .collect();
+        Probe {
+            name: "probe".into(),
+            tags: HashMap::new(),
+            last_updated: now,
+            history: vec![],
+            observations: HashMap::new(),
+            streak: Streak::default(),
+            debounce: None,
+            retired: false,
+            observers,
+            quorum,
+        }
+    }
+
+    #[test]
+    fn health_is_decided_by_a_quorum_of_observers() {
+        let now = chrono::Utc::now();
+        let window = Streak::default_recovery_window();
+        let sustained = Some(window * 2);
+        let cases: &[(&str, Option<Quorum>, &[Option<chrono::Duration>], bool)] = &[
+            ("single observer failing is its own majority", None, &[sustained], false),
+            ("single observer passing", None, &[None], true),
+            ("one of three failing is tolerated", None, &[sustained, None, None], true),
+            ("two of three failing trips the majority", None, &[sustained, sustained, None], false),
+            ("an even split reads passing", None, &[sustained, sustained, None, None], true),
+            ("a count quorum of one alerts on any observer", Some(Quorum::Count(1)), &[sustained, None, None], false),
+            ("a percentage quorum", Some(Quorum::Percent(100)), &[sustained, sustained, None], true),
+            ("an unconfirmed fault does not count", None, &[Some(chrono::Duration::seconds(10)), Some(chrono::Duration::seconds(10))], true),
+        ];
+        for (name, quorum, views, expect_healthy) in cases {
+            let probe = quorum_probe(now, *quorum, views);
+            assert_eq!(probe.healthy_at(now, window), *expect_healthy, "{name}");
+            assert_eq!(probe.passing(), *expect_healthy, "{name} (passing)");
+        }
+    }
+
+    #[test]
+    fn since_follows_the_quorum() {
+        let now = chrono::Utc::now();
+        let window = Streak::default_recovery_window();
+        let early = chrono::Duration::hours(2);
+        let late = chrono::Duration::hours(1);
+
+        // Failing: the onset is the moment the quorum-th observer started failing.
+        let probe = quorum_probe(now, None, &[Some(early), Some(late), None]);
+        assert!(!probe.healthy_at(now, window));
+        assert_eq!(probe.since_at(now, window), Some(now - late));
+
+        // Recovered: "passing since" is the last failing sample of the observer whose recovery took
+        // the count back under the quorum (the earlier of the two recoveries).
+        let mut probe = quorum_probe(now, None, &[None, None, None]);
+        for (id, ended) in [("node-0", 20), ("node-1", 40)] {
+            let ended = now - chrono::Duration::minutes(ended);
+            probe.observers.get_mut(id).unwrap().streak = Streak {
+                failing_since: Some(ended - chrono::Duration::hours(1)),
+                failing_until: Some(ended),
+                covered_since: None,
+            };
+        }
+        assert!(probe.healthy_at(now, window));
+        assert_eq!(probe.since_at(now, window), Some(now - chrono::Duration::minutes(40)));
+
+        // Never failed as a quorum: covered since the earliest observation.
+        let probe = quorum_probe(now, None, &[None, None, None]);
+        assert_eq!(probe.since_at(now, window), Some(now - chrono::Duration::days(1)));
+    }
+
+    #[test]
+    fn records_without_observers_fall_back_to_the_pooled_streak() {
+        let now = chrono::Utc::now();
+        let window = Streak::default_recovery_window();
+        let mut probe = quorum_probe(now, None, &[]);
+        probe.streak = Streak { failing_since: Some(now - window * 2), failing_until: Some(now), covered_since: None };
+        assert!(!probe.healthy_at(now, window));
+        assert_eq!(probe.since_at(now, window), Some(now - window * 2));
+    }
+
+    #[test]
+    fn merge_unions_observers() {
+        let now = chrono::Utc::now();
+        let window = Streak::default_recovery_window();
+        let mut a = quorum_probe(now, None, &[Some(window * 2)]);
+        let mut b = quorum_probe(now, None, &[None, None]);
+        b.observers.remove("node-0");
+        let mut c = quorum_probe(now, None, &[None, None, None]);
+        c.observers.retain(|k, _| k == "node-2");
+
+        let mut ab = a.clone();
+        ab.merge(&b);
+        ab.merge(&c);
+        let mut cba = c.clone();
+        cba.merge(&b);
+        cba.merge(&a);
+        assert_eq!(ab.observers, cba.observers, "the observer map converges regardless of merge order");
+        assert_eq!(ab.observers.len(), 3);
+        assert!(ab.healthy_at(now, window), "one failing observer of three is below the majority");
+
+        a.merge(&a.clone());
+        assert_eq!(a.observers.len(), 1, "merge is idempotent");
+    }
+
     #[test]
     fn test_msgpack_roundtrip() {
         let probe = Probe {
@@ -355,6 +568,15 @@ mod tests {
             },
             debounce: None,
             retired: false,
+            observers: vec![("observer1".into(), crate::ObserverState {
+                streak: Streak {
+                    failing_since: Some(chrono::DateTime::from_timestamp(1_699_999_000, 0).unwrap()),
+                    failing_until: Some(chrono::DateTime::from_timestamp(1_699_999_900, 0).unwrap()),
+                    covered_since: None,
+                },
+                last_updated: chrono::DateTime::from_timestamp(1_699_999_900, 0).unwrap(),
+            })].into_iter().collect(),
+            quorum: Some(Quorum::Percent(60)),
         };
 
         let packed = rmp_serde::to_vec(&probe).unwrap();
