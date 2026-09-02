@@ -101,6 +101,13 @@ impl ProbeResult {
         observation.add_sample(self.pass, self.retries as u64, std::time::Duration::from_millis(self.duration.num_milliseconds() as u64));
 
         probe.streak.observe(self.pass, sample_time, probe.window());
+
+        // The observer's own view, kept apart from the pooled `streak` so the cluster can decide
+        // health by quorum over observers rather than by whichever node last saw a failure.
+        let window = probe.window();
+        let own = probe.observers.entry(node_id.to_string()).or_default();
+        own.streak.observe(self.pass, sample_time, window);
+        own.last_updated = own.last_updated.max(sample_time);
     }
 }
 
@@ -143,6 +150,8 @@ mod tests {
             streak: grey_api::Streak::default(),
             debounce: None,
             retired: false,
+            observers: Default::default(),
+            quorum: None,
         }
     }
 

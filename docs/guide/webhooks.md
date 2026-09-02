@@ -31,8 +31,18 @@ schedule does not produce a stream of events.
   `succeeded` → `running` → `succeeded` stays healthy throughout and is silent. The specific state
   it moved to is carried in `state.current` (and the health axis in `state.healthy`).
 
+- **Nodes** (the Grey instances themselves) are healthy while `healthy` and unhealthy while
+  `degraded` (a quorum of the probes the node runs fail from its vantage point while the cluster
+  reads them passing) or `silent` (it has stopped recording samples). See
+  [Node health events](#node-health-events).
+
 The recovery window (probes) and the schedule grace / `max_duration` (crons) act as a settling time
 on these transitions, so a transient blip that clears within those windows never produces an event.
+
+In a cluster a probe's health is decided by a **quorum of the nodes observing it**: a failure is only
+reported once enough observers have each seen it persist for the debounce, and a recovery once
+fewer than that number still do. See [Behaviour in a cluster](#behaviour-in-a-cluster) and the
+[clustering guide](./clustering.md#quorum).
 
 Because state is re-derived on a short cadence, both *event-driven* changes (a fresh probe sample or
 cron check-in) and *time-driven* changes (a probe recovering, or a cron run going missing) are
@@ -69,6 +79,7 @@ crons:
 | ----- | ------- | ----------- |
 | `alerting.enabled` | `true` | Whether webhook notifications fire for this entity. When `false`, its health is still tracked and shown on the status page, but no webhook is delivered. |
 | `alerting.debounce` | `5m` | How long a new health state must hold before it is reported. Applied symmetrically to both the onset of a fault and the recovery from it. |
+| `alerting.quorum` | `cluster.quorum` (`majority`) | Probes only. How many of the nodes observing the probe must each report a debounced failure before it reads as failing. `majority`, a count (`2`), or a percentage (`60%`). |
 
 The `debounce` also governs the entity's **displayed** health: a fault is shown (and a recovery
 cleared) only once it has held for this long, so the status page and the webhooks always agree. For a
@@ -116,18 +127,57 @@ Every delivery is an HTTP `POST` with a JSON body like this:
 | Field | Description |
 | ----- | ----------- |
 | `version` | The payload schema version (`"v1"` today). Branch on it to handle future schema changes. |
-| `id` | A unique identifier for the event, also sent in the `Grey-Webhook-Delivery` header. Use it to de-duplicate. |
-| `event` | `probe.state_changed` or `cron.state_changed`. |
+| `id` | A unique identifier for the event, also sent in the `Grey-Webhook-Delivery` header. Use it to de-duplicate repeated deliveries of one event; each node minting the same transition uses its own id. |
+| `event` | `probe.state_changed`, `cron.state_changed` or `node.state_changed`. |
 | `timestamp` | When the event was generated (and the value signed in the `t=` of the signature). |
-| `entity.type` | `probe` or `cron`. |
-| `entity.name` | The probe/cron name. |
-| `entity.tags` | The entity's configured tags. |
-| `state.current` / `state.previous` | The status tokens before and after the transition (`passing`/`failing` for a probe; a cron health token for a cron). |
+| `entity.type` | `probe`, `cron` or `node`. |
+| `entity.name` | The probe/cron name, or the node identifier. |
+| `entity.tags` | The entity's configured tags (empty for nodes). |
+| `state.current` / `state.previous` | The status tokens before and after the transition (`passing`/`failing` for a probe; a cron health token for a cron; `healthy`/`degraded`/`silent` for a node). |
 | `state.healthy` / `state.was_healthy` | The same transition collapsed onto the pass/fail axis, so you can branch on health regardless of the specific failure mode. |
 | `state.since` | When the current state was entered, when known. |
 | `state.availability` | The probe's availability over its retained history, as a percentage. Omitted for crons. |
 | `probe` | For a probe event: the full probe snapshot, including its `streak`, `history`, per-observer `observations`, and `tags`. |
 | `cron` | For a cron event: the full cron snapshot, including its `runs` and `last_checkin`. |
+| `node` | For a node event: the node's derived health (see [Node health events](#node-health-events)). |
+
+A probe snapshot carries an `observers` map alongside its pooled `streak`: each observing node's own
+streak and when it last reported, plus the `quorum` in force. This is what the transition was decided
+from, so a consumer can see exactly which nodes agreed.
+
+## Node health events
+Every Grey node evaluates the health of every node in the cluster (itself included) from the same
+replicated probe state, so a node that has lost its connectivity has its event delivered by its
+peers. A node is:
+
+- **`degraded`** when a quorum of the probes it runs fail *from its vantage point* while the
+  cluster's quorum reads them passing. Requiring the disagreement is what separates a bad vantage
+  point from a genuine outage: when every node sees a service down, the service is alerted on and
+  the nodes stay healthy.
+- **`silent`** when it has not recorded a sample for any of its probes for `cluster.alerting.silent_after`
+  (1 hour by default), meaning its gossip has stopped reaching the cluster.
+- **`healthy`** otherwise.
+
+```json
+{
+  "event": "node.state_changed",
+  "entity": { "type": "node", "name": "1p3x9k...", "tags": {} },
+  "state": { "current": "degraded", "previous": "healthy", "healthy": false, "was_healthy": true },
+  "node": {
+    "id": "1p3x9k...",
+    "status": "degraded",
+    "since": "2026-06-19T11:59:30Z",
+    "last_updated": "2026-06-19T12:00:00Z",
+    "probes": { "example.web": { "failing": true, "cluster_failing": false, "since": "..." } },
+    "disagreeing": 3,
+    "total": 4,
+    "quorum": 3
+  }
+}
+```
+
+Node alerting is configured under `cluster.alerting`; see the
+[clustering guide](./clustering.md#node-health) for the options.
 
 ## Signing and verification
 When a `secret` is configured, every delivery carries these headers:
@@ -183,7 +233,7 @@ The following fields are available to a filter:
 | Field | Type | Example |
 | ----- | ---- | ------- |
 | `event` | string | `event == "cron.state_changed"` |
-| `entity.type` (alias `entity.kind`) | string | `entity.type == "probe"` |
+| `entity.type` (alias `entity.kind`) | string | `entity.type == "probe"`, `"cron"` or `"node"` |
 | `entity.name` | string | `entity.name matches r"^prod\."` |
 | `entity.tags.<key>` (alias `tags.<key>`) | string | `entity.tags.team == "Platform"` |
 | `state.current` | string | `state.current == "missing"` |
@@ -203,6 +253,9 @@ filter: 'state.was_healthy == true && state.healthy == false && entity.tags.team
 
 # Only cron problems.
 filter: 'entity.type == "cron" && state.healthy == false'
+
+# Route Grey's own node health to the team running Grey, not the service owners.
+filter: 'entity.type == "node"'
 ```
 
 ## Additional headers
@@ -215,13 +268,20 @@ checks itself), not as authenticated data — a receiver should not assume they 
 
 ## Behaviour in a cluster
 A webhook event represents the cluster's converged view of an entity, not a single node's
-observation: transitions are read from the gossiped streak / cron health (which every node converges
-on identically), and the snapshot carries every observer's data. You therefore don't need to run
-webhooks on every node — configuring them on a single node is sufficient and authoritative.
+observation. Each node gossips its *own* view of every probe it runs, and every node derives a
+probe's health from the same pooled set of observers by **quorum**: the probe reads as failing only
+while at least the configured quorum of observers (a majority by default) each report a sustained
+failure, and as recovered once fewer than that still do. A single node with a flaky uplink can
+therefore neither raise nor suppress an alert on its own, and no node has to be elected to decide.
+Cron health is not observer-based and is unaffected.
 
-If you do configure the same webhook on several nodes, the endpoint will receive one delivery per
-node on each transition; de-duplicate downstream using the `Grey-Webhook-Delivery` header or the
-entity name and `state.current`.
+Because the derivation is a pure function of replicated state and time, every node reaches the
+same verdict; nodes may reach it a gossip round apart. You therefore don't need to run webhooks on
+every node — configuring them on a single node is sufficient. Configuring them on several nodes
+buys delivery redundancy (useful for `node.state_changed`, where the affected node may be the one
+that cannot deliver) at the cost of one delivery per node on each transition; de-duplicate
+downstream on the entity name and `state.current` rather than on `Grey-Webhook-Delivery`, which
+differs per node.
 
 ## Reliability
 Each delivery is attempted once, bounded by the per-webhook `timeout` (default 10s). Failures and

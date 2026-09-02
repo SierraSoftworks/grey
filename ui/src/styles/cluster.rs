@@ -5,7 +5,10 @@ use grey_api::{Peer, PeerHealth};
 pub fn cluster_class(members: &[Peer]) -> &'static str {
     if members.iter().any(|p| p.health == PeerHealth::Offline) {
         "error"
-    } else if members.iter().any(|p| p.health == PeerHealth::Suspect) {
+    } else if members
+        .iter()
+        .any(|p| p.health == PeerHealth::Suspect || p.node.as_ref().is_some_and(|n| !n.healthy()))
+    {
         "warning"
     } else {
         "good"

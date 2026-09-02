@@ -218,6 +218,10 @@ impl State {
     /// Returns a redacted view of the known cluster peers for the API/UI. Only the node identifier
     /// and last-seen timestamp are exposed — peer **addresses are never returned**, since the API has
     /// no access control and may be reachable on the public internet.
+    ///
+    /// Each member also carries its derived observer health (see [`grey_api::Node`]) when it observes
+    /// any probes; observers whose membership has expired but whose probe records remain are listed
+    /// as offline so the cluster view accounts for every node still counted in a quorum.
     pub async fn get_peers(&self) -> Result<Vec<grey_api::Peer>, Box<dyn Error>> {
         let mut peers: Vec<grey_api::Peer> = self
             .members
@@ -228,6 +232,7 @@ impl State {
                 last_seen,
                 health,
                 current: false,
+                node: None,
             })
             .collect();
 
@@ -238,9 +243,37 @@ impl State {
             last_seen: chrono::Utc::now(),
             health: grey_api::PeerHealth::Online,
             current: true,
+            node: None,
         });
 
+        for node in self.get_nodes().await? {
+            match peers.iter_mut().find(|p| p.id == node.id) {
+                Some(peer) => peer.node = Some(node),
+                None => peers.push(grey_api::Peer {
+                    id: node.id.clone(),
+                    last_seen: node.last_updated.unwrap_or_default(),
+                    health: grey_api::PeerHealth::Offline,
+                    current: false,
+                    node: Some(node),
+                }),
+            }
+        }
+
         Ok(peers)
+    }
+
+    /// Derives the health of every node observing a probe from the pooled probe state, using the
+    /// configured node quorum and silence threshold. The same derivation feeds the cluster page and
+    /// the `node.state_changed` webhook events.
+    pub async fn get_nodes(&self) -> Result<Vec<grey_api::Node>, Box<dyn Error>> {
+        let config = self.get_config();
+        let probes = ProbeStore::get_probe_states(self).await?;
+        Ok(grey_api::Node::derive(
+            probes.values(),
+            chrono::Utc::now(),
+            config.cluster.alerting.quorum,
+            config.cluster.alerting.silent_after_chrono(),
+        ))
     }
 
     fn generate_example_key(&self) -> String {
@@ -629,6 +662,8 @@ mod tests {
             streak: grey_api::Streak::default(),
             debounce: None,
             retired: false,
+            observers: Default::default(),
+            quorum: None,
         }
     }
 

@@ -116,6 +116,16 @@
     flex: none;
 }
 
+// The quorum tally ("1/3 observers failing (quorum 2)"), shown to the left of the streak text.
+.probe__observers {
+    align-self: center;
+    flex: none;
+    font-size: 0.8rem;
+    color: $color-text-muted;
+    margin-right: 0.75rem;
+    white-space: nowrap;
+}
+
 // How long the probe has held its current state, shown to the left of the availability %.
 .probe__streak {
     align-self: center;

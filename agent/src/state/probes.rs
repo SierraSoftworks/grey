@@ -116,7 +116,12 @@ impl State {
         for probe in config.probes.iter() {
             if let Some(pooled) = histories.get_mut(&probe.name) {
                 pooled.debounce = Some(probe.alerting.debounce_std());
+                pooled.quorum = Some(probe.alerting.quorum.unwrap_or(config.cluster.quorum));
             }
+        }
+        // Probes this node doesn't run itself still take the cluster-wide quorum.
+        for pooled in histories.values_mut() {
+            pooled.quorum.get_or_insert(config.cluster.quorum);
         }
 
         Ok(histories)
@@ -369,6 +374,8 @@ impl Versioned for Probe {
                 streak: self.streak.clone(),
                 debounce: self.debounce,
                 retired: self.retired,
+                observers: self.observers.clone(),
+                quorum: self.quorum,
             })
         } else {
             None
@@ -397,6 +404,8 @@ mod tests {
             streak: grey_api::Streak::default(),
             debounce: None,
             retired: false,
+            observers: Default::default(),
+            quorum: None,
         }
     }
 
@@ -493,6 +502,94 @@ mod tests {
         assert!(later.version() > earlier.version(), "a 1ms-newer update must advance the version");
         assert!(later.diff(earlier.version()).is_some(), "the newer update must be diffable");
         assert!(earlier.diff(earlier.version()).is_none(), "an unchanged probe has nothing to diff");
+    }
+
+    /// Each node's record carries only its own observer entry; pooling unions them, and the pooled
+    /// health follows the configured quorum rather than any single observer's failure.
+    #[tokio::test]
+    async fn pooled_health_follows_the_quorum_of_observers() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = State::test(dir.path().to_path_buf()).await;
+        let probe_name = state.get_config().probes[0].name.clone();
+        let now = chrono::Utc::now();
+        let window = grey_api::Streak::default_recovery_window();
+
+        // This node has been observing a sustained failure (samples closer together than the
+        // window, so they form one continuous episode older than the debounce).
+        for minutes_ago in [16, 12, 8, 4, 0] {
+            let result = ProbeResult {
+                start_time: now - chrono::Duration::minutes(minutes_ago),
+                pass: false,
+                ..ProbeResult::test()
+            };
+            state.update_probe_state(&probe_name, result).await.unwrap();
+        }
+
+        let own_id = state.node_id.to_string();
+        let pooled = state.get_probe_states().await.unwrap();
+        let probe = &pooled[&probe_name];
+        assert_eq!(probe.observers.keys().collect::<Vec<_>>(), vec![&own_id], "only this node's entry is recorded");
+        assert_eq!(probe.quorum, Some(grey_api::Quorum::Majority), "the cluster default is stamped");
+        assert!(!probe.healthy_at(now, window), "a lone observer is its own majority");
+
+        // Two peers observe the probe passing: the failing node is now outvoted.
+        for _ in 0..2 {
+            let peer = NodeID::new();
+            let mut record = probe_at(&probe_name, now);
+            record.observers.insert(
+                peer.to_string(),
+                grey_api::ObserverState {
+                    streak: grey_api::Streak { covered_since: Some(now - chrono::Duration::days(1)), ..Default::default() },
+                    last_updated: now,
+                },
+            );
+            let mut diff = crate::cluster::ClusterStateDiff::new();
+            diff.update(peer, probe_name.clone(), crate::state::ReplicatedEntity::Probe(record));
+            crate::cluster::GossipStore::apply(&state, diff).await.unwrap();
+        }
+
+        let pooled = state.get_probe_states().await.unwrap();
+        let probe = &pooled[&probe_name];
+        assert_eq!(probe.observers.len(), 3);
+        assert_eq!(probe.quorum_size(), 2);
+        assert!(probe.healthy_at(now, window), "one failing observer of three is below the majority");
+
+        // Receiving peers' records must not pollute this node's own entry with their observers.
+        let txn = state.database.begin_read().unwrap();
+        let table = txn.open_table(PROBES_TABLE).unwrap();
+        let entry = table.get((state.node_id.into(), probe_name.clone())).unwrap().unwrap();
+        let (_version, data) = entry.value();
+        let own: ProbeState = rmp_serde::from_slice(data).unwrap();
+        assert_eq!(own.observers.len(), 1, "the own record only carries this node's observer entry");
+
+        // The derived node view sees this node disagreeing with the cluster on its only probe.
+        let nodes = state.get_nodes().await.unwrap();
+        let me = nodes.iter().find(|n| n.id == own_id).expect("this node observes the probe");
+        assert_eq!(me.status, grey_api::NodeStatus::Degraded);
+        assert_eq!((me.disagreeing, me.total), (1, 1));
+
+        // ...and the peers view carries it.
+        let peers = state.get_peers().await.unwrap();
+        let me = peers.iter().find(|p| p.current).unwrap();
+        assert_eq!(me.node.as_ref().map(|n| n.status), Some(grey_api::NodeStatus::Degraded));
+        let listed: Vec<_> = peers.iter().filter(|p| !p.current && p.node.is_some()).collect();
+        assert_eq!(listed.len(), 2, "observers without membership records are still listed");
+        assert!(listed.iter().all(|p| p.health == grey_api::PeerHealth::Offline));
+    }
+
+    /// A per-probe `alerting.quorum` overrides the cluster default when stamping the pooled view.
+    #[tokio::test]
+    async fn per_probe_quorum_overrides_the_cluster_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = State::test(dir.path().to_path_buf()).await;
+        let mut config = Config::test(&dir.path().to_path_buf());
+        config.cluster.quorum = grey_api::Quorum::Percent(60);
+        config.probes[0].alerting.quorum = Some(grey_api::Quorum::Count(1));
+        let probe_name = config.probes[0].name.clone();
+        state.set_config_for_test(config);
+
+        let pooled = state.get_probe_states().await.unwrap();
+        assert_eq!(pooled[&probe_name].quorum, Some(grey_api::Quorum::Count(1)));
     }
 
     /// GC must interpret the stored version as milliseconds; otherwise a millisecond timestamp read

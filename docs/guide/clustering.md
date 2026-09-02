@@ -331,6 +331,62 @@ cluster:
   gc_peer_expiry: 30m  # Default (30 minutes)
 ```
 
+## Quorum
+
+Every node runs its configured probes independently and gossips its **own** view of each one (the
+per-observer streak, keyed by node identifier). The pooled view of a probe therefore knows exactly
+which nodes observe it and what each of them currently sees, and its health is decided by **quorum**
+over those observers rather than by whichever node most recently saw a failure:
+
+- The probe reads as **failing** while at least the quorum of observers each report a failure that
+  has persisted for the probe's `alerting.debounce`.
+- It reads as **passing** (or recovered) while fewer than the quorum still do.
+
+The derivation is a pure function of the replicated state and the current time, so every node
+reaches the same verdict from its own replica and no coordinator is needed. The status page, the API
+and webhook events all use it; availability percentages continue to aggregate every observer's
+samples as before.
+
+```yaml
+cluster:
+  quorum: majority      # Default. Also accepts a count (2) or a percentage (60%).
+
+probes:
+  - name: example.web
+    alerting:
+      quorum: 2         # Per-probe override.
+```
+
+Some consequences worth knowing:
+
+- A standalone instance (one observer) is its own majority and behaves exactly as before.
+- An observer counts until its record is garbage collected (`gc_probe_expiry`), whether or not it is
+  still reporting; a node that has gone quiet simply stops counting as *failing*. This is deliberate:
+  a node cut off from its peers still sees them as observers, so it cannot out-vote them and raise an
+  alert on its own. Retire a decommissioned node by removing its probes (or its state) rather than
+  leaving it to age out, or lower `gc_probe_expiry`.
+- With an even number of observers a tied vote reads as passing; a strict majority is needed to
+  alert. A two-node cluster on `majority` therefore needs both nodes to agree, so prefer three or
+  more nodes, or set `quorum: 1` to alert on any observer.
+- The debounce is applied per observer before the quorum is counted.
+
+### Node health
+
+Because each node's view is kept apart, the cluster can also judge the **nodes themselves**. A node
+is `degraded` when a quorum of the probes it runs fail from its vantage point while the cluster's
+quorum reads them passing (a bad vantage point rather than an outage), and `silent` when it has
+stopped recording samples. Each node derives this for every node, itself included, and reports
+crossings as `node.state_changed` [webhook events](./webhooks.md#node-health-events); the cluster
+popover on the status page shows the same status next to each member.
+
+```yaml
+cluster:
+  alerting:
+    enabled: true       # Deliver node.state_changed events to the configured webhooks.
+    quorum: majority    # How many of a node's probes must disagree with the cluster.
+    silent_after: 1h    # Longer than the slowest probe interval on any node; 0s disables.
+```
+
 ## Peer Discovery and Health
 
 Alongside the probe-state anti-entropy, each node periodically broadcasts a small, fire-and-forget

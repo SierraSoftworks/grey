@@ -24,7 +24,7 @@ pub use header::Header;
 pub use incidents::{IncidentBlock, IncidentsSection};
 pub use popover::{Popover, PopoverAlign};
 pub use probe::Probe;
-pub use probe_history::ProbeHistory;
+pub use probe_history::{LiveStatus, ProbeHistory};
 pub use service_list::ServiceList;
 pub use skeleton::IncidentBlockSkeleton;
 pub use status_dot::StatusDot;

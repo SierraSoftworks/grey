@@ -782,6 +782,8 @@ mod tests {
             streak: grey_api::Streak::default(),
             debounce: None,
             retired: false,
+            observers: Default::default(),
+            quorum: None,
         };
 
         // Anonymous: only the public probe survives, but the orphan (no config entry) is kept.

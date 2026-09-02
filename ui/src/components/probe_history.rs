@@ -15,19 +15,33 @@ use {
 #[cfg(feature = "wasm")]
 use gloo_console as console;
 
+/// The probe's current, quorum-derived health (see [`grey_api::Probe::passing`]) and how long it has
+/// held it, used to render the most recent history segment (and its tooltip) from the live state
+/// rather than the bucket's average.
+#[derive(Clone, PartialEq, Debug)]
+pub struct LiveStatus {
+    pub healthy: bool,
+    pub since: Option<chrono::DateTime<Utc>>,
+}
+
+impl LiveStatus {
+    /// The live status of `probe`, or `None` for records (from older agents) that carry no streak at
+    /// all and so only have their bucket averages to go on.
+    pub fn of(probe: &grey_api::Probe) -> Option<Self> {
+        (!probe.streak.is_empty() || !probe.observers.is_empty()).then(|| Self {
+            healthy: probe.passing(),
+            since: probe.since(),
+        })
+    }
+}
+
 #[derive(Properties, PartialEq)]
 pub struct ProbeHistoryProps {
     pub samples: Vec<ProbeHistoryBucket>,
 
-    /// The probe's cluster-converged streak record, used to render the most recent
-    /// segment (and its tooltip) from the live state rather than the bucket's average.
+    /// The probe's live status, when known.
     #[prop_or_default]
-    pub streak: grey_api::Streak,
-
-    /// The probe's configured debounce/recovery window, so the live segment's debounced health
-    /// matches the rest of the UI. Defaults to the streak's default window.
-    #[prop_or_else(grey_api::Streak::default_recovery_window)]
-    pub window: chrono::Duration,
+    pub live: Option<LiveStatus>,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -111,8 +125,8 @@ pub fn probe_history(props: &ProbeHistoryProps) -> Html {
                 // performed on average, while one that has recovered is at worst degraded.
                 // Older segments only have their averages to go on.
                 let is_current = index + 1 == props.samples.len();
-                let current_streak = (is_current && !props.streak.is_empty()).then_some(&props.streak);
-                let current_passing = current_streak.map(|s| s.healthy_at(Utc::now(), props.window));
+                let current_live = if is_current { props.live.as_ref() } else { None };
+                let current_passing = current_live.map(|live| live.healthy);
                 let sample_class = sample_class(current_passing, sample.max_availability());
 
                 // Serialize the entire ProbeResult to JSON
@@ -130,7 +144,7 @@ pub fn probe_history(props: &ProbeHistoryProps) -> Html {
                     >
                         if is_tooltip_target {
                             if let Some(probe_result) = &tooltip_data.probe_result {
-                                {render_tooltip(probe_result, current_streak, props.window, auth_data.is_authenticated())}
+                                {render_tooltip(probe_result, current_live, auth_data.is_authenticated())}
                             } else {
                                 // Fallback for SSR or when probe_result is None
                                 <Popover status_class="unknown" status="Loading...">
@@ -150,17 +164,16 @@ pub fn probe_history(props: &ProbeHistoryProps) -> Html {
     }
 }
 
-fn render_tooltip(probe_result: &ProbeHistoryBucket, streak: Option<&grey_api::Streak>, window: chrono::Duration, include_observers: bool) -> Html {
-    let (status_text, status_class) = match streak {
-        Some(streak) => {
+fn render_tooltip(probe_result: &ProbeHistoryBucket, live: Option<&LiveStatus>, include_observers: bool) -> Html {
+    let (status_text, status_class) = match live {
+        Some(live) => {
             let now = Utc::now();
-            let healthy = streak.healthy_at(now, window);
-            let since = streak
-                .since_at(now, window)
+            let since = live
+                .since
                 .map(|t| format!(" for {}", compact_duration(now - t)))
                 .unwrap_or_default();
-            let label = if healthy { "Passing" } else { "Failing" };
-            (format!("{label}{since}"), pass_class(healthy))
+            let label = if live.healthy { "Passing" } else { "Failing" };
+            (format!("{label}{since}"), pass_class(live.healthy))
         }
         _ => (
             (if probe_result.max_availability() == 100.0 { "Passed" } else { "Failed" }).to_string(),
@@ -277,17 +290,16 @@ mod tests {
     #[derive(Properties, PartialEq)]
     struct HarnessProps {
         bucket: ProbeHistoryBucket,
-        streak: grey_api::Streak,
+        live: Option<LiveStatus>,
     }
 
     /// Renders the tooltip directly — in the app it only appears on hover, which SSR can't reach.
     #[function_component(Harness)]
     fn harness(props: &HarnessProps) -> Html {
-        let streak = (!props.streak.is_empty()).then_some(&props.streak);
-        render_tooltip(&props.bucket, streak, grey_api::Streak::default_recovery_window(), true)
+        render_tooltip(&props.bucket, props.live.as_ref(), true)
     }
 
-    async fn render(streak: grey_api::Streak) -> String {
+    async fn render(live: Option<LiveStatus>) -> String {
         let bucket = ProbeHistoryBucket {
             start_time: chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
             pass: true,
@@ -295,25 +307,44 @@ mod tests {
             validations: Default::default(),
             observations: Default::default(),
         };
-        yew::ServerRenderer::<Harness>::with_props(move || HarnessProps { bucket, streak })
+        yew::ServerRenderer::<Harness>::with_props(move || HarnessProps { bucket, live })
             .render()
             .await
     }
 
     #[tokio::test]
     async fn test_tooltip_shows_bucket_footer_and_streak_since() {
-        let mut streak = grey_api::Streak::default();
-        streak.observe(true, chrono::Utc::now() - chrono::Duration::days(5), grey_api::Streak::default_recovery_window());
+        let live = LiveStatus { healthy: true, since: Some(chrono::Utc::now() - chrono::Duration::days(5)) };
 
-        let html = render(streak).await;
+        let html = render(Some(live)).await;
         assert!(html.contains("popover__time"), "expected the bucket timestamp footer, got: {html}");
         assert!(html.contains("2023-11-14"), "expected the bucket timestamp value in the footer, got: {html}");
-        assert!(html.contains("Passing"), "expected the streak status, got: {html}");
+        assert!(html.contains("Passing for 5d"), "expected the live status, got: {html}");
     }
 
     #[tokio::test]
     async fn test_tooltip_omits_streak_row_for_legacy_records() {
-        let html = render(grey_api::Streak::default()).await;
+        let html = render(None).await;
         assert!(html.contains("popover__time"), "expected the bucket timestamp footer, got: {html}");
+        assert!(!html.contains("Passing"), "expected no live status, got: {html}");
+    }
+
+    #[test]
+    fn live_status_is_absent_for_legacy_records() {
+        let mut probe = grey_api::Probe {
+            name: "p".into(),
+            tags: Default::default(),
+            last_updated: chrono::Utc::now(),
+            history: vec![],
+            observations: Default::default(),
+            streak: Default::default(),
+            debounce: None,
+            retired: false,
+            observers: Default::default(),
+            quorum: None,
+        };
+        assert!(LiveStatus::of(&probe).is_none());
+        probe.observers.insert("a".into(), grey_api::ObserverState::default());
+        assert!(LiveStatus::of(&probe).is_some());
     }
 }
