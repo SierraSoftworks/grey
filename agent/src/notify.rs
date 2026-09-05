@@ -811,6 +811,7 @@ mod tests {
             disagreeing: 0,
             total: 3,
             quorum: 2,
+            labels: Default::default(),
         }
     }
 

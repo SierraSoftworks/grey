@@ -224,6 +224,13 @@ mod tests {
         assert_eq!(me.display_name(), "grey-syd-1");
         assert_eq!(me.label("region"), None, "dropped labels disappear");
         assert!(me.version() > first_version);
+
+        // The derived node view (which feeds the cluster page and node webhook events) is stamped
+        // with the published labels.
+        let nodes = state.get_nodes().await.unwrap();
+        let me = nodes.iter().find(|n| n.id == own_id).expect("this node observes the test probe");
+        assert_eq!(me.display_name(), "grey-syd-1");
+        assert_eq!(me.labels.get("hostname").map(String::as_str), Some("grey-syd-1"));
     }
 
     /// A peer's record arriving through the gossip apply path is stored and listed; a stale

@@ -435,6 +435,10 @@ When an administrator is signed in, the status page uses this to show hostnames 
 identifiers — in the cluster popover (where each member's remaining labels are shown as tags) and in
 the per-observer breakdown of a probe's history — with the raw identifier available as a tooltip.
 
+The labels also ride along on `node.state_changed` [webhook events](./webhooks.md#node-health-events):
+they appear as the event's `entity.tags` (so a webhook `filter` can route node health by
+`entity.tags.region`, say) and under `node.labels` in the embedded snapshot.
+
 ## Peer Discovery and Health
 
 Alongside the probe-state anti-entropy, each node periodically broadcasts a small, fire-and-forget

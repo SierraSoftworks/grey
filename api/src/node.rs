@@ -39,6 +39,12 @@ pub struct Node {
 
     /// How many disagreeing probes it takes for the node to read as degraded.
     pub quorum: usize,
+
+    /// The labels the node publishes about itself (see [`crate::NodeMetadata`]): its hostname and
+    /// any configured `cluster.labels`. Empty when the node has published none (or the record has
+    /// not reached this replica yet). Stamped by the agent after derivation, not part of it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub labels: BTreeMap<String, String>,
 }
 
 /// One probe as seen from a single node.
@@ -130,6 +136,7 @@ impl Node {
                     disagreeing: 0,
                     total: 0,
                     quorum: 0,
+                    labels: BTreeMap::new(),
                 });
 
                 node.last_updated = node.last_updated.max(Some(state.last_updated));
@@ -189,6 +196,15 @@ impl Node {
 
     pub fn status_token(&self) -> &'static str {
         self.status.as_str()
+    }
+
+    /// The name to show for the node: its published hostname when it has one, else its identifier.
+    pub fn display_name(&self) -> &str {
+        self.labels
+            .get(crate::HOSTNAME_LABEL)
+            .map(String::as_str)
+            .filter(|h| !h.trim().is_empty())
+            .unwrap_or(&self.id)
     }
 }
 
@@ -325,7 +341,19 @@ mod tests {
         assert_eq!(json["probes"]["web"]["cluster_failing"], false);
         assert_eq!(json["disagreeing"], 1);
         assert_eq!(json["quorum"], 1);
+        assert!(json.get("labels").is_none(), "no labels until the agent stamps them");
         let decoded: Node = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, nodes[0]);
+    }
+
+    #[test]
+    fn display_name_follows_the_hostname_label() {
+        let probes = [probe("web", [false, false, false])];
+        let mut node = Node::derive(&probes, ts(NOW), Quorum::Majority, None).remove(0);
+        assert_eq!(node.display_name(), "a");
+        node.labels.insert("hostname".into(), "grey-syd-1".into());
+        assert_eq!(node.display_name(), "grey-syd-1");
+        let json = serde_json::to_value(&node).unwrap();
+        assert_eq!(json["labels"]["hostname"], "grey-syd-1");
     }
 }

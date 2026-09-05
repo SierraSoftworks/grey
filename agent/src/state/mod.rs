@@ -389,15 +389,32 @@ impl State {
     /// Derives the health of every node observing a probe from the pooled probe state, using the
     /// configured node quorum and silence threshold. The same derivation feeds the cluster page and
     /// the `node.state_changed` webhook events.
+    ///
+    /// Each node is stamped with the labels it has published (see [`NodeMetadataStore`]), so the
+    /// cluster page and `node.state_changed` events can name it and route on its labels.
     pub async fn get_nodes(&self) -> Result<Vec<grey_api::Node>, Box<dyn Error>> {
         let config = self.get_config();
         let probes = ProbeStore::get_probe_states(self).await?;
-        Ok(grey_api::Node::derive(
+        let mut nodes = grey_api::Node::derive(
             probes.values(),
             chrono::Utc::now(),
             config.cluster.alerting.quorum,
             config.cluster.alerting.silent_after_chrono(),
-        ))
+        );
+
+        let mut metadata: std::collections::HashMap<String, NodeMetadata> = self
+            .get_node_metadata()
+            .await?
+            .into_iter()
+            .map(|m| (m.id.clone(), m))
+            .collect();
+        for node in nodes.iter_mut() {
+            if let Some(m) = metadata.remove(&node.id) {
+                node.labels = m.labels;
+            }
+        }
+
+        Ok(nodes)
     }
 
     fn generate_example_key(&self) -> String {

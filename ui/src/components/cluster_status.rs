@@ -171,6 +171,7 @@ mod tests {
             disagreeing: 2,
             total: 3,
             quorum: 2,
+            labels: Default::default(),
         });
         let html = render(vec![peer("local-node", PeerHealth::Online, true), degraded]).await;
         assert!(html.contains("peer__node degraded"), "expected the node status badge, got: {html}");
