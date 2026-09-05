@@ -15,8 +15,8 @@ use std::time::Duration;
 use chrono::{DateTime, Duration as Delta, Utc};
 use grey_api::{
     AdminUser, CheckIn, Cron, CronRun, CronRunReason, CronSchedule, CronStatus, Identifier, Impact,
-    Incident, IncidentUpdate, IncidentUpdateId, IncidentView, Observation, Peer, PeerHealth, Probe,
-    ProbeHistoryBucket, Streak, UiConfig, UiLink, ValidationResult,
+    Incident, IncidentUpdate, IncidentUpdateId, IncidentView, NodeMetadata, Observation, Peer,
+    PeerHealth, Probe, ProbeHistoryBucket, Streak, UiConfig, UiLink, ValidationResult,
 };
 use yew::prelude::*;
 
@@ -54,6 +54,7 @@ pub fn demo_app() -> Html {
                 crons={crons()}
                 incidents={incidents()}
                 peers={peers()}
+                nodes={nodes()}
                 user={Some(user())}
             >
                 { crate::client::render_router("/") }
@@ -94,11 +95,23 @@ pub fn user() -> AdminUser {
 pub fn peers() -> Vec<Peer> {
     let now = Utc::now();
     vec![
-        peer("grey-syd-1", PeerHealth::Online, now, true),
-        peer("grey-lhr-1", PeerHealth::Online, now - Delta::seconds(3), false),
-        peer("grey-iad-1", PeerHealth::Transitive, now - Delta::seconds(45), false),
-        peer("grey-fra-1", PeerHealth::Suspect, now - Delta::minutes(4), false),
-        peer("grey-sea-1", PeerHealth::Offline, now - Delta::hours(9), false),
+        peer("1p3x9kq2m7v4c8", PeerHealth::Online, now, true),
+        peer("7h2wz0r5t9d1na", PeerHealth::Online, now - Delta::seconds(3), false),
+        peer("c4j8l1y6b3f0ps", PeerHealth::Transitive, now - Delta::seconds(45), false),
+        peer("m9e3q7u2k5x1gw", PeerHealth::Suspect, now - Delta::minutes(4), false),
+        peer("t6a0n4v8h2r7zd", PeerHealth::Offline, now - Delta::hours(9), false),
+    ]
+}
+
+/// The metadata the demo nodes publish about themselves. One member (the offline `t6a0...`) has
+/// none, so the identifier fallback renders too.
+pub fn nodes() -> Vec<NodeMetadata> {
+    let now = Utc::now();
+    vec![
+        node(now, "1p3x9kq2m7v4c8", &[("hostname", "grey-syd-1"), ("cloud", "aws"), ("region", "ap-southeast-2"), ("az", "ap-southeast-2a"), ("cluster", "prod")]),
+        node(now, "7h2wz0r5t9d1na", &[("hostname", "grey-lhr-1"), ("cloud", "hetzner"), ("region", "eu-west"), ("cluster", "prod")]),
+        node(now, "c4j8l1y6b3f0ps", &[("hostname", "grey-iad-1"), ("cloud", "gcp"), ("region", "us-east4"), ("az", "us-east4-b"), ("cluster", "prod")]),
+        node(now, "m9e3q7u2k5x1gw", &[("hostname", "grey-fra-1.internal.example.com"), ("cloud", "azure"), ("region", "germanywestcentral"), ("cluster", "prod")]),
     ]
 }
 
@@ -236,6 +249,14 @@ fn tags(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         .collect()
 }
 
+fn node(now: DateTime<Utc>, id: &str, labels: &[(&str, &str)]) -> NodeMetadata {
+    NodeMetadata::new(
+        id,
+        labels.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+        now - Delta::minutes(17),
+    )
+}
+
 fn peer(id: &str, health: PeerHealth, last_seen: DateTime<Utc>, current: bool) -> Peer {
     Peer {
         id: id.into(),
@@ -281,8 +302,10 @@ fn probe(
     }
 }
 
-/// The observers reporting on every probe, with the baseline latency each contributes.
-const OBSERVERS: [(&str, u64); 3] = [("grey-syd-1", 42), ("grey-lhr-1", 180), ("grey-iad-1", 96)];
+/// The observers reporting on every probe (by node identifier, as the agent records them — the
+/// operator view resolves these to hostnames via [`nodes`]), with the baseline latency each
+/// contributes.
+const OBSERVERS: [(&str, u64); 3] = [("1p3x9kq2m7v4c8", 42), ("7h2wz0r5t9d1na", 180), ("c4j8l1y6b3f0ps", 96)];
 
 fn history(now: DateTime<Utc>, shape: Shape, seed: u64) -> Vec<ProbeHistoryBucket> {
     let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15));

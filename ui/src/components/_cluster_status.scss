@@ -67,8 +67,9 @@
 
     .peer {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
-        gap: 0.75rem;
+        gap: 0.35rem 0.75rem;
         padding: 0.5rem 0;
         border-top: 1px solid $color-separator;
 
@@ -85,13 +86,53 @@
         min-width: 0;
     }
 
-    .peer__id {
+    // The member's name: its published hostname, or the raw node identifier when it has none.
+    .peer__name {
         font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
         font-size: 0.85rem;
         color: $color-text;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+
+    // The member's other published labels (cloud, region, az, cluster, ...) as `key value` chips on
+    // their own row beneath the member.
+    .peer__labels {
+        flex: 1 0 100%;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.25rem 0.35rem;
+        padding-left: calc(10px + 0.5rem); // Align with the name, past the status dot.
+    }
+
+    .peer__label {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 0.25rem;
+        font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+        font-size: 0.7rem;
+        line-height: 1.2;
+        background-color: $background-base;
+        border: 1px solid $color-separator;
+        border-radius: $border-radius-small;
+        padding: 0.1rem 0.35rem;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+
+        .peer__label-key {
+            color: $color-text-muted;
+
+            &::after {
+                content: '=';
+            }
+        }
+
+        .peer__label-value {
+            color: $color-text;
+        }
     }
 
     .peer__current-tag {

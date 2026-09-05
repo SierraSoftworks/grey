@@ -1,12 +1,14 @@
-use crate::contexts::use_store;
+use crate::contexts::{Store, use_store};
 use crate::styles::cluster_class;
 use grey_api::{Peer, PeerHealth};
 use yew::prelude::*;
 
 /// A "Cluster" entry for the header status area: a coloured indicator summarising the health of
 /// the cluster, with a popover (hanging below and to the left) listing every member — including
-/// the node serving this page, which is tagged as the current one. Renders nothing when no
-/// members are known (for example when talking to an older agent which doesn't report itself).
+/// the node serving this page, which is tagged as the current one. Members are named by the
+/// hostname they publish (falling back to the node identifier) and carry their other published
+/// labels as tags. Renders nothing when no members are known (for example when talking to an older
+/// agent which doesn't report itself).
 #[function_component(ClusterStatus)]
 pub fn cluster_status() -> Html {
     let store = use_store();
@@ -45,20 +47,29 @@ pub fn cluster_status() -> Html {
                         <span>{"Cluster Members"}</span>
                         <span class="cluster-popover__summary">{format!("{online}/{} online", members.len())}</span>
                     </div>
-                    {for members.iter().map(render_member)}
+                    {for members.iter().map(|peer| render_member(&store, peer))}
                 </div>
             </div>
         </div>
     }
 }
 
-fn render_member(peer: &Peer) -> Html {
+fn render_member(store: &Store, peer: &Peer) -> Html {
     let class = peer.health.as_str();
+    let metadata = store.node_metadata(&peer.id);
+    let name = metadata
+        .map(|m| m.display_name().to_string())
+        .unwrap_or_else(|| peer.id.clone());
+    // The identifier stays reachable (as a tooltip) for correlating with logs and webhook payloads
+    // once the hostname has replaced it on screen.
+    let title = if name == peer.id { format!("Node {}", peer.id) } else { format!("Node {} ({name})", peer.id) };
+    let tags: Vec<(&str, &str)> = metadata.map(|m| m.tags().collect()).unwrap_or_default();
+
     html! {
         <div class="peer">
             <div class="peer__identity">
                 <div class={format!("peer__status-dot {class}")}></div>
-                <span class="peer__id">{&peer.id}</span>
+                <span class="peer__name" title={title}>{name}</span>
                 if peer.current {
                     <span class="peer__current-tag">{"this node"}</span>
                 }
@@ -71,6 +82,16 @@ fn render_member(peer: &Peer) -> Html {
             }
             <span class={format!("peer__health {class}")}>{peer.health.label()}</span>
             <span class="peer__last-seen">{relative_time(peer.last_seen)}</span>
+            if !tags.is_empty() {
+                <div class="peer__labels">
+                    {for tags.iter().map(|(key, value)| html! {
+                        <span class="peer__label" title={format!("{key}={value}")}>
+                            <span class="peer__label-key">{*key}</span>
+                            <span class="peer__label-value">{*value}</span>
+                        </span>
+                    })}
+                </div>
+            }
         </div>
     }
 }
@@ -95,22 +116,36 @@ mod tests {
     #[derive(Properties, PartialEq)]
     struct HarnessProps {
         peers: Vec<Peer>,
+        nodes: Vec<grey_api::NodeMetadata>,
     }
 
-    /// Wraps the component in the store it expects, seeded with the peers under test.
+    /// Wraps the component in the store it expects, seeded with the peers (and node metadata) under
+    /// test.
     #[function_component(Harness)]
     fn harness(props: &HarnessProps) -> Html {
         html! {
-            <StoreProvider peers={props.peers.clone()}>
+            <StoreProvider peers={props.peers.clone()} nodes={props.nodes.clone()}>
                 <ClusterStatus />
             </StoreProvider>
         }
     }
 
     async fn render(peers: Vec<Peer>) -> String {
-        yew::ServerRenderer::<Harness>::with_props(move || HarnessProps { peers })
+        render_with_nodes(peers, vec![]).await
+    }
+
+    async fn render_with_nodes(peers: Vec<Peer>, nodes: Vec<grey_api::NodeMetadata>) -> String {
+        yew::ServerRenderer::<Harness>::with_props(move || HarnessProps { peers, nodes })
             .render()
             .await
+    }
+
+    fn metadata(id: &str, labels: &[(&str, &str)]) -> grey_api::NodeMetadata {
+        grey_api::NodeMetadata::new(
+            id,
+            labels.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            chrono::Utc::now(),
+        )
     }
 
     fn peer(id: &str, health: PeerHealth, current: bool) -> Peer {
@@ -136,12 +171,35 @@ mod tests {
             disagreeing: 2,
             total: 3,
             quorum: 2,
+            labels: Default::default(),
         });
         let html = render(vec![peer("local-node", PeerHealth::Online, true), degraded]).await;
         assert!(html.contains("peer__node degraded"), "expected the node status badge, got: {html}");
         assert!(html.contains("Degraded"), "expected the node status label, got: {html}");
         assert!(html.contains("2 of 3 probes disagree"), "expected the disagreement summary, got: {html}");
         assert!(html.contains("cluster-status warning"), "a degraded node must warn on the chip, got: {html}");
+    }
+
+    /// A member with published metadata is named by its hostname (the raw identifier moves into the
+    /// tooltip) and carries its other labels as tags; one without stays identified by its id.
+    #[tokio::test]
+    async fn test_names_members_by_hostname_and_shows_labels() {
+        let html = render_with_nodes(
+            vec![peer("1p3x9k", PeerHealth::Online, true), peer("zz9plural", PeerHealth::Online, false)],
+            vec![metadata("1p3x9k", &[("hostname", "grey-syd-1"), ("region", "au-east"), ("cloud", "aws")])],
+        )
+        .await;
+
+        assert!(html.contains("grey-syd-1"), "expected the hostname, got: {html}");
+        assert!(!html.contains(">1p3x9k<"), "the identifier must not be shown as the name, got: {html}");
+        assert!(html.contains("Node 1p3x9k (grey-syd-1)"), "expected the id in the tooltip, got: {html}");
+        assert!(html.contains("peer__label-key\">region<") && html.contains("peer__label-value\">au-east<"), "expected the region tag, got: {html}");
+        assert!(html.contains(">cloud<"), "expected the cloud tag, got: {html}");
+        assert!(!html.contains(">hostname<"), "the hostname is the name, not a tag, got: {html}");
+
+        // A member without metadata falls back to its identifier and shows no tags.
+        assert!(html.contains(">zz9plural<"), "expected the unresolved id, got: {html}");
+        assert_eq!(html.matches("peer__labels").count(), 1, "only the labelled member has a tag row, got: {html}");
     }
 
     #[tokio::test]

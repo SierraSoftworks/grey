@@ -140,6 +140,10 @@ pub fn create_app() -> App<
                 // Cluster topology is operator-only: it exposes peer addresses and health, so it
                 // lives behind the admin gate rather than being surfaced to public viewers.
                 .route("/cluster/peers", web::get().to(cluster::get_peers))
+                // Node metadata resolves node identifiers to hostnames and labels; it describes
+                // the machines behind the cluster, so it is operator-only too.
+                .route("/cluster/nodes", web::get().to(cluster::get_nodes))
+                .route("/cluster/nodes/{id}", web::get().to(cluster::get_node))
                 .route("/incidents", web::get().to(admin::list_incidents))
                 .route("/incidents", web::post().to(admin::create_incident))
                 .route("/incidents/{id}", web::get().to(admin::get_incident))
@@ -336,6 +340,16 @@ mod tests {
         let req = test::TestRequest::get().uri("/api/v1/admin/cluster/peers").to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), actix_web::http::StatusCode::FORBIDDEN);
+
+        // Node metadata (hostnames and labels) is admin-only as well, and has no public route.
+        for uri in ["/api/v1/admin/cluster/nodes", "/api/v1/admin/cluster/nodes/some-id"] {
+            let req = test::TestRequest::get().uri(uri).to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), actix_web::http::StatusCode::FORBIDDEN, "{uri}");
+        }
+        let req = test::TestRequest::get().uri("/api/v1/cluster/nodes").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::NOT_FOUND);
     }
 
     /// With `admin` configured but no bearer token, the admin API responds 401 (authenticate),

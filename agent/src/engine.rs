@@ -6,7 +6,7 @@ use tracing_batteries::prelude::opentelemetry::trace::SpanKind as OpenTelemetryS
 use tracing_batteries::prelude::*;
 
 use crate::probe_runner::ProbeRunner;
-use crate::state::{ProbeStore, State};
+use crate::state::{NodeMetadataStore, ProbeStore, State};
 use crate::{Probe, cluster};
 
 pub struct Engine {
@@ -48,6 +48,12 @@ impl Engine {
         // node was down, so they stop appearing in the UI (and are dropped by our peers).
         if let Err(err) = self.state.reconcile_probe_config().await {
             error!(name: "engine.probes.reconcile", { exception = err }, "Failed to reconcile stored probe state with the configuration: {err}");
+        }
+
+        // Publish this node's metadata (hostname and configured labels) so peers can name it. The GC
+        // loop keeps the record fresh from here on.
+        if let Err(err) = self.state.refresh_node_metadata().await {
+            error!(name: "engine.node_metadata", { exception = err }, "Failed to publish this node's metadata: {err}");
         }
 
         {
@@ -191,8 +197,16 @@ impl Engine {
             let mut current_probes = state.get_config().probes.clone();
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-                if let Err(err) = state.reload().await {
-                    error!("Failed to reload config: {}", err);
+                match state.reload().await {
+                    // Re-publish the node's labels so a changed `cluster.labels` propagates now
+                    // rather than on the next GC pass.
+                    Ok(true) => {
+                        if let Err(err) = state.refresh_node_metadata().await {
+                            error!(name: "config.reload.node_metadata", { exception = err }, "Failed to republish this node's metadata: {err}");
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(err) => error!("Failed to reload config: {}", err),
                 }
 
                 let new_probes = state.get_config().probes.clone();

@@ -211,7 +211,10 @@ impl WebhookEvent {
         }
     }
 
-    /// An event for a Grey node whose derived health (see [`Node`]) crossed the healthy axis.
+    /// An event for a Grey node whose derived health (see [`Node`]) crossed the healthy axis. The
+    /// node's published labels (hostname, cloud, region, ...) are surfaced as `entity.tags`, so a
+    /// webhook filter can route node events by `entity.tags.<label>` exactly as it routes probe and
+    /// cron events by their configured tags.
     pub fn for_node(
         id: impl Into<String>,
         timestamp: DateTime<Utc>,
@@ -227,7 +230,7 @@ impl WebhookEvent {
             entity: WebhookEntity {
                 entity_type: WebhookEntityType::Node,
                 name: node.id.clone(),
-                tags: HashMap::new(),
+                tags: node.labels.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
             },
             state: WebhookState {
                 current: node.status_token().to_string(),
@@ -330,11 +333,18 @@ mod tests {
             disagreeing: 2,
             total: 3,
             quorum: 2,
+            labels: [("hostname", "grey-syd-1"), ("region", "au-east")]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
         };
         let event = WebhookEvent::for_node("evt-3", ts(1_000), &node, "healthy", true);
         assert_eq!(event.event, WebhookEventKind::NodeStateChanged);
         assert_eq!(event.entity.entity_type, WebhookEntityType::Node);
         assert_eq!(event.entity.name, "node-a");
+        // The node's labels double as the routable entity tags.
+        assert_eq!(event.entity.tags.get("hostname").map(String::as_str), Some("grey-syd-1"));
+        assert_eq!(event.entity.tags.get("region").map(String::as_str), Some("au-east"));
         assert_eq!(event.state.current, "degraded");
         assert_eq!(event.state.previous, "healthy");
         assert!(!event.state.healthy);
@@ -347,6 +357,8 @@ mod tests {
         assert_eq!(json["entity"]["type"], "node");
         assert_eq!(json["node"]["status"], "degraded");
         assert_eq!(json["node"]["disagreeing"], 2);
+        assert_eq!(json["node"]["labels"]["hostname"], "grey-syd-1");
+        assert_eq!(json["entity"]["tags"]["region"], "au-east");
         assert!(json.get("probe").is_none() && json.get("cron").is_none());
         let decoded: WebhookEvent = serde_json::from_value(json).unwrap();
         assert_eq!(decoded, event);

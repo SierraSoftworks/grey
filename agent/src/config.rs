@@ -465,6 +465,13 @@ pub struct ClusterConfig {
     #[serde(default)]
     pub secrets: Vec<String>,
 
+    /// Descriptive labels this node publishes about itself (for example `cloud`, `region`, `az` or
+    /// `cluster`), replicated to every peer as the node's metadata so operators can tell nodes apart
+    /// by more than their identifier. The `hostname` label is filled in from the operating system
+    /// when not set here; give it explicitly to override what the node reports.
+    #[serde(default)]
+    pub labels: HashMap<String, String>,
+
     #[serde(default = "default::cluster::gossip_interval")]
     #[serde(with = "humantime_serde")]
     pub gossip_interval: std::time::Duration,
@@ -581,6 +588,7 @@ impl Default for ClusterConfig {
             peers: vec![],
             secret: "".into(),
             secrets: vec![],
+            labels: HashMap::new(),
             gossip_interval: default::cluster::gossip_interval(),
             gossip_factor: default::cluster::gossip_factor(),
             message_mtu: default::cluster::message_mtu(),

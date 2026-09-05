@@ -11,7 +11,7 @@
 
 use grey_api::{
     AdminUser, ApiError, CreateIncident, CreateUpdate, IncidentUpdateId, IncidentView,
-    IncidentsPage, Peer, PutIncident, PutUpdate, UiAuthConfig,
+    IncidentsPage, NodeMetadata, Peer, PutIncident, PutUpdate, UiAuthConfig,
 };
 
 /// A client for the agent's HTTP API. Cheap to clone; holds only the public OIDC config it needs to
@@ -157,6 +157,12 @@ mod browser {
 
         pub async fn peers(&self) -> Result<Vec<Peer>, ApiError> {
             self.get_json(&format!("{ADMIN}/cluster/peers")).await
+        }
+
+        /// The metadata (hostname and labels) every known node publishes about itself, used to
+        /// resolve bare node identifiers to names.
+        pub async fn nodes(&self) -> Result<Vec<NodeMetadata>, ApiError> {
+            self.get_json(&format!("{ADMIN}/cluster/nodes")).await
         }
 
         /// The first page of incidents including hidden drafts (admin view).
@@ -320,6 +326,9 @@ impl ApiClient {
         Self::unavailable()
     }
     pub async fn peers(&self) -> Result<Vec<Peer>, ApiError> {
+        Self::unavailable()
+    }
+    pub async fn nodes(&self) -> Result<Vec<NodeMetadata>, ApiError> {
         Self::unavailable()
     }
     pub async fn admin_incidents(&self) -> Result<Vec<IncidentView>, ApiError> {

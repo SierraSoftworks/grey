@@ -132,7 +132,7 @@ Every delivery is an HTTP `POST` with a JSON body like this:
 | `timestamp` | When the event was generated (and the value signed in the `t=` of the signature). |
 | `entity.type` | `probe`, `cron` or `node`. |
 | `entity.name` | The probe/cron name, or the node identifier. |
-| `entity.tags` | The entity's configured tags (empty for nodes). |
+| `entity.tags` | The entity's configured tags. For a node, the labels it publishes about itself (`hostname` plus any `cluster.labels`; see [Node Metadata](./clustering.md#node-metadata)). |
 | `state.current` / `state.previous` | The status tokens before and after the transition (`passing`/`failing` for a probe; a cron health token for a cron; `healthy`/`degraded`/`silent` for a node). |
 | `state.healthy` / `state.was_healthy` | The same transition collapsed onto the pass/fail axis, so you can branch on health regardless of the specific failure mode. |
 | `state.since` | When the current state was entered, when known. |
@@ -161,7 +161,7 @@ peers. A node is:
 ```json
 {
   "event": "node.state_changed",
-  "entity": { "type": "node", "name": "1p3x9k...", "tags": {} },
+  "entity": { "type": "node", "name": "1p3x9k...", "tags": { "hostname": "grey-syd-1", "region": "ap-southeast-2" } },
   "state": { "current": "degraded", "previous": "healthy", "healthy": false, "was_healthy": true },
   "node": {
     "id": "1p3x9k...",
@@ -171,7 +171,8 @@ peers. A node is:
     "probes": { "example.web": { "failing": true, "cluster_failing": false, "since": "..." } },
     "disagreeing": 3,
     "total": 4,
-    "quorum": 3
+    "quorum": 3,
+    "labels": { "hostname": "grey-syd-1", "region": "ap-southeast-2" }
   }
 }
 ```
@@ -256,6 +257,9 @@ filter: 'entity.type == "cron" && state.healthy == false'
 
 # Route Grey's own node health to the team running Grey, not the service owners.
 filter: 'entity.type == "node"'
+
+# Node events carry the node's published labels as tags, so they route by placement too.
+filter: 'entity.type == "node" && entity.tags.region == "ap-southeast-2"'
 ```
 
 ## Additional headers

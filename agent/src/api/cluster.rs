@@ -1,6 +1,8 @@
 use actix_web::{HttpResponse, Result, web};
+use grey_api::ApiError;
 
 use super::AppState;
+use crate::state::NodeMetadataStore;
 
 /// `GET /api/v1/admin/cluster/peers` — the cluster's peers as seen by this node, sorted by id.
 ///
@@ -11,6 +13,25 @@ pub async fn get_peers(data: web::Data<AppState>) -> Result<HttpResponse> {
     peers.sort_by_key(|p| p.id.clone());
 
     Ok(HttpResponse::Ok().json(peers))
+}
+
+/// `GET /api/v1/admin/cluster/nodes` — the metadata every known node publishes about itself (its
+/// hostname and any configured labels), sorted by id. This is how a bare node identifier, as it
+/// appears in probe observations and on the cluster page, is resolved to a name an operator
+/// recognises.
+///
+/// It describes machines and deployment topology, so like the peer list it is operator-only.
+pub async fn get_nodes(data: web::Data<AppState>) -> Result<HttpResponse> {
+    let nodes = data.state.get_node_metadata().await?;
+    Ok(HttpResponse::Ok().json(nodes))
+}
+
+/// `GET /api/v1/admin/cluster/nodes/{id}` — the metadata of a single node by identifier.
+pub async fn get_node(data: web::Data<AppState>, id: web::Path<String>) -> Result<HttpResponse> {
+    match data.state.get_node_metadata_for(&id).await? {
+        Some(node) => Ok(HttpResponse::Ok().json(node)),
+        None => Ok(ApiError::not_found("No metadata has been published for the requested node.").into()),
+    }
 }
 
 #[cfg(test)]
@@ -37,5 +58,40 @@ mod tests {
         // One gossiped peer plus the serving node itself.
         assert_eq!(peers.len(), 2);
         assert_eq!(peers.iter().filter(|p| p.current).count(), 1);
+    }
+
+    /// The node listing resolves identifiers to their published labels, and a single-node lookup
+    /// returns the record or a 404.
+    #[actix_web::test]
+    async fn test_get_nodes_resolves_identifiers() {
+        let temp_dir = tempdir().unwrap();
+        let app_state = AppState::test(temp_dir.path().to_path_buf()).await;
+
+        let mut config = crate::Config::test(&temp_dir.path().to_path_buf());
+        config.cluster.labels = [("hostname", "grey-syd-1"), ("region", "au-east")]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        app_state.state.set_config_for_test(config);
+        app_state.state.refresh_node_metadata().await.unwrap();
+        let own_id = app_state.state.node_id().to_string();
+
+        let data = web::Data::new(app_state);
+        let resp = get_nodes(data.clone()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp.into_body().try_into_bytes().unwrap();
+        let nodes: Vec<grey_api::NodeMetadata> = serde_json::from_slice(&body).unwrap();
+        let me = nodes.iter().find(|n| n.id == own_id).expect("the serving node is listed");
+        assert_eq!(me.display_name(), "grey-syd-1");
+        assert_eq!(me.label("region"), Some("au-east"));
+
+        let resp = get_node(data.clone(), web::Path::from(own_id.clone())).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp.into_body().try_into_bytes().unwrap();
+        let node: grey_api::NodeMetadata = serde_json::from_slice(&body).unwrap();
+        assert_eq!(node.id, own_id);
+
+        let resp = get_node(data, web::Path::from("unknown".to_string())).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 }
