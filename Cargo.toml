@@ -74,7 +74,7 @@ tonic = { version = "0.14", features = [
 ] }
 tonic-health = "0.14"
 tracing = "0.1.44"
-tracing-batteries = { git = "https://github.com/sierrasoftworks/tracing-batteries-rs.git", features = [
+tracing-batteries = { git = "https://github.com/sierrasoftworks/tracing-batteries-rs.git", branch = "claude/otel-metrics-logs-e168tj", features = [
   "analytics",
   "opentelemetry",
 ] }

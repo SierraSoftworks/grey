@@ -9,6 +9,7 @@ use crate::{
     Probe, checks,
     result::ProbeResult,
     state::{ProbeStore, State},
+    telemetry::{ProbeStatus, metrics},
 };
 
 const NO_PARENT: Option<tracing::Id> = None;
@@ -132,6 +133,9 @@ impl ProbeRunner {
             .record("probe.checks", debug(&probe.checks))
             .record("probe.tags", debug(&probe.tags));
 
+        let node_id = self.state.node_id();
+        let probe_name = self.probe_name.as_str();
+
         let result = match tokio::time::timeout(
             probe.policy.timeout,
             async {
@@ -146,12 +150,28 @@ impl ProbeRunner {
                     {
                         Ok(res) => return Ok(res),
                         Err(err) => {
-                            debug!("Probe failed: {}", err);
                             sample.retries += 1;
                             sample.message = err.to_string();
                             if sample.retries >= total_attempts {
                                 return Err(err);
                             }
+
+                            // The attempt failed but the policy allows another: a retry is a
+                            // warning (the probe may yet pass), and an error only once the
+                            // attempts are exhausted.
+                            warn!(
+                                name: "probe.retry",
+                                {
+                                    probe.name = probe_name,
+                                    probe.target = %probe.target,
+                                    probe.attempt = sample.retries,
+                                    probe.attempts = total_attempts,
+                                    exception = err.as_ref(),
+                                },
+                                "Probe '{probe_name}' failed attempt {}/{} and will be retried: {err}",
+                                sample.retries, total_attempts,
+                            );
+                            metrics().record_probe_retry(probe_name, &node_id);
                         }
                     }
                 }
@@ -159,13 +179,7 @@ impl ProbeRunner {
                 Err("Probe was cancelled.".into())
         }).await {
             Ok(Ok(res)) => Ok(res),
-            Ok(Err(err)) => {
-                debug!("Probe failed: {}", err);
-                if sample.retries >= total_attempts {
-                    warn!("Probe failed after {} attempts: {}", sample.retries, err);
-                }
-                Err(err)
-            }
+            Ok(Err(err)) => Err((ProbeStatus::Fail, err)),
             // The timeout bounds the whole retry loop, so when it elapses the in-flight attempt
             // was dropped before its checks could be evaluated (and the retry counter can never
             // have reached the attempt limit — exhaustion returns through the arm above). The
@@ -177,29 +191,75 @@ impl ProbeRunner {
                     sample.retries + 1,
                     total_attempts
                 );
-                warn!("{message}");
                 sample.message = message.clone();
-                Err(message.into())
+                Err((ProbeStatus::Timeout, message.into()))
             }
         };
 
 
         Span::current().record("probe.attempts", sample.retries);
 
-        let result = match result {
+        let (status, result) = match result {
             Ok(_) => {
                 sample.pass = true;
                 sample.message = "Probe completed successfully.".to_owned();
-                Ok(())
+                (ProbeStatus::Pass, Ok(()))
             }
-            Err(e) => {
+            Err((status, e)) => {
                 sample.pass = false;
-                Err(e)
+                (status, Err(e))
             }
         };
 
+        let sample = sample.finish();
+        let latency = sample.duration.to_std().unwrap_or_default();
+
+        match &result {
+            Ok(()) => {
+                debug!(
+                    name: "probe.result",
+                    {
+                        probe.name = probe_name,
+                        probe.target = %probe.target,
+                        probe.status = status.as_str(),
+                        probe.retries = sample.retries,
+                        probe.latency_ms = latency.as_millis() as u64,
+                    },
+                    "Probe '{probe_name}' passed.",
+                );
+            }
+            Err(err) => {
+                let failed_checks: Vec<String> = sample
+                    .validations
+                    .iter()
+                    .filter(|(_, v)| !v.pass)
+                    .map(|(check, v)| {
+                        format!("{check}: {}", v.message.as_deref().unwrap_or_default())
+                    })
+                    .collect();
+
+                error!(
+                    name: "probe.result",
+                    {
+                        probe.name = probe_name,
+                        probe.target = %probe.target,
+                        probe.status = status.as_str(),
+                        probe.retries = sample.retries,
+                        probe.attempts = total_attempts,
+                        probe.latency_ms = latency.as_millis() as u64,
+                        probe.failed_checks = ?failed_checks,
+                        exception = err.as_ref(),
+                    },
+                    "Probe '{probe_name}' failed after {} attempt(s): {err}",
+                    sample.retries.max(1),
+                );
+            }
+        }
+
+        metrics().record_probe(probe_name, &node_id, status, latency);
+
         self.state
-            .update_probe_state(self.name().as_str(), sample.finish())
+            .update_probe_state(probe_name, sample)
             .await?;
         result
     }
@@ -254,7 +314,10 @@ impl ProbeRunner {
                     };
                     span.record("otel.status_code", "Error")
                         .record("otel.status_message", otel_message.as_str());
-                    error!(check = %check, "{otel_message}");
+                    // The attempt's outcome is reported by the caller (a warning when it will be
+                    // retried, an error once attempts are exhausted), so the individual check
+                    // failure is kept to debug to avoid double-reporting.
+                    debug!(check = %check, "{otel_message}");
                     result
                         .validations
                         .insert(check.to_string(), ValidationResult::fail(&message));

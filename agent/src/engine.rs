@@ -52,6 +52,14 @@ impl Engine {
 
         {
             let state = self.state.clone();
+            info!(
+                name: "engine.gc.start",
+                {
+                    gc.interval = ?state.get_config().cluster.gc_interval,
+                    gc.expiry = ?state.get_config().cluster.gc_probe_expiry,
+                },
+                "Starting state garbage collector.",
+            );
             tokio::task::spawn_local(async move {
                 state.gc_loop().await;
             });
@@ -63,6 +71,11 @@ impl Engine {
         // replaying everything already in flight.
         {
             let state = self.state.clone();
+            info!(
+                name: "engine.notifier.start",
+                { webhooks = state.get_config().webhooks.len() },
+                "Starting webhook notifier.",
+            );
             tokio::task::spawn_local(async move {
                 crate::notify::Notifier::new(state).run().await;
             });
@@ -74,13 +87,20 @@ impl Engine {
         // place before the notifier evaluates it.
         {
             let state = self.state.clone();
+            info!(
+                name: "engine.cron_monitor.start",
+                { crons = state.get_config().crons.len() },
+                "Starting cron monitor.",
+            );
             tokio::task::spawn_local(async move {
                 crate::cron_monitor::CronMonitor::new(state).run().await;
             });
         }
 
         // Start probe runners
-        for probe in self.probes.read().unwrap().values().cloned() {
+        let probes = self.probes.read().unwrap().values().cloned().collect::<Vec<_>>();
+        info!(name: "engine.probes.start", { probes = probes.len() }, "Starting {} probe runner(s).", probes.len());
+        for probe in probes {
             self.start_probe_runner(probe);
         }
 
@@ -131,6 +151,7 @@ impl Engine {
             }
         }
 
+        info!(name: "engine.stop", "Stopping probe runners.");
         self.stop_all_probe_runners();
 
         Ok(())
