@@ -30,6 +30,12 @@ pub struct Config {
     #[serde(rename = "state")]
     #[serde(default = "default::state")]
     pub state: PathBuf,
+
+    /// How often deferred state writes (probe samples, gossip merges) are flushed durably to disk.
+    /// Up to one interval of probe history may be lost on power loss; see `state::DEFERRED`.
+    #[serde(default = "default::state_flush_interval")]
+    #[serde(with = "humantime_serde")]
+    pub state_flush_interval: std::time::Duration,
 }
 
 /// Configuration for a "deadman's switch" cron monitor. A scheduled job reports check-ins to the
@@ -248,6 +254,7 @@ impl Config {
             ui: UiConfig::default(),
             cluster: ClusterConfig::default(),
             state: temp_dir.join("test_state.redb"),
+            state_flush_interval: default::state_flush_interval(),
         }
     }
 
@@ -851,6 +858,10 @@ mod default {
 
     pub fn state() -> PathBuf {
         PathBuf::from("state.redb")
+    }
+
+    pub fn state_flush_interval() -> std::time::Duration {
+        std::time::Duration::from_secs(30)
     }
 
     pub mod ui {

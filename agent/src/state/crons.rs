@@ -13,7 +13,7 @@ use std::error::Error;
 
 use chrono::{DateTime, Utc};
 use grey_api::{CheckIn, Cron, CronRun, CronRunReason, CronStatus};
-use redb::{ReadableDatabase, ReadableTable, TableDefinition};
+use redb::{Durability, ReadableDatabase, ReadableTable, TableDefinition};
 
 use crate::cluster::Versioned;
 use crate::cron::CronCheckin;
@@ -134,14 +134,17 @@ impl CronStore for State {
             return Ok(false);
         };
 
-        let txn = self.database.begin_write()?;
-        {
+        let cfg = cfg.clone();
+        let name = name.to_string();
+        let node_id = self.node_id;
+        let own: u128 = node_id.into();
+        self.write("record_cron_checkin", Durability::Immediate, move |txn| {
             let mut table = txn.open_table(CRON_TABLE)?;
 
             // Append to the latest global record this node holds (so history accumulates), falling
             // back to a fresh config-seeded record.
             let mut cron = table
-                .get(name)?
+                .get(name.as_str())?
                 .and_then(|existing| {
                     let (_version, _last_writer, data) = existing.value();
                     rmp_serde::from_slice::<Cron>(data).ok()
@@ -186,14 +189,16 @@ impl CronStore for State {
                 ),
             }
 
-            metrics().record_cron(name, &self.node_id, checkin.status, None, duration);
+            metrics().record_cron(name.as_str(), &node_id, checkin.status, None, duration);
 
             table.insert(
-                name,
-                (cron.version(), self.node_id.into(), rmp_serde::to_vec_named(&cron)?.as_slice()),
+                name.as_str(),
+                (cron.version(), own, rmp_serde::to_vec_named(&cron)?.as_slice()),
             )?;
-        }
-        txn.commit()?;
+
+            Ok(())
+        })
+        .await?;
 
         Ok(true)
     }
@@ -212,12 +217,15 @@ impl CronStore for State {
         let occurred_at = DateTime::from_timestamp_millis(occurred_at.timestamp_millis())
             .unwrap_or(occurred_at);
 
-        let txn = self.database.begin_write()?;
-        {
+        let cfg = cfg.clone();
+        let name = name.to_string();
+        let node_id = self.node_id;
+        let own: u128 = node_id.into();
+        self.write("record_cron_detection", Durability::Immediate, move |txn| {
             let mut table = txn.open_table(CRON_TABLE)?;
 
             let mut cron = table
-                .get(name)?
+                .get(name.as_str())?
                 .and_then(|existing| {
                     let (_version, _last_writer, data) = existing.value();
                     rmp_serde::from_slice::<Cron>(data).ok()
@@ -274,14 +282,16 @@ impl CronStore for State {
                 "Cron '{name}' is {}: {message}",
                 reason.as_str(),
             );
-            metrics().record_cron(name, &self.node_id, CronStatus::Failed, Some(reason), None);
+            metrics().record_cron(name.as_str(), &node_id, CronStatus::Failed, Some(reason), None);
 
             table.insert(
-                name,
-                (cron.version(), self.node_id.into(), rmp_serde::to_vec_named(&cron)?.as_slice()),
+                name.as_str(),
+                (cron.version(), own, rmp_serde::to_vec_named(&cron)?.as_slice()),
             )?;
-        }
-        txn.commit()?;
+
+            Ok(())
+        })
+        .await?;
 
         Ok(true)
     }

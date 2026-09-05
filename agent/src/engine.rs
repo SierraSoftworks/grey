@@ -65,6 +65,14 @@ impl Engine {
             });
         }
 
+        // Hot-path state writes commit with deferred durability; this periodically persists them.
+        {
+            let state = self.state.clone();
+            tokio::task::spawn_local(async move {
+                state.flush_loop().await;
+            });
+        }
+
         // Watch for probe/cron state transitions and deliver webhook notifications. Always started:
         // it continuously tracks the baseline state (cheaply when no webhooks are configured), so a
         // webhook added by a later config reload begins notifying on the next transition rather than
@@ -153,6 +161,11 @@ impl Engine {
 
         info!(name: "engine.stop", "Stopping probe runners.");
         self.stop_all_probe_runners();
+
+        // Persist whatever the deferred-durability commits have written since the last flush.
+        if let Err(err) = self.state.flush().await {
+            error!(name: "engine.state.flush", { exception = err }, "Failed to flush state to disk on shutdown: {err}");
+        }
 
         Ok(())
     }
