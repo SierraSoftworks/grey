@@ -38,6 +38,9 @@ pub const HISTORY_SIZE: usize = 24;
 
 static CANCEL: AtomicBool = AtomicBool::new(false);
 
+// The engine runs on a `LocalSet` on this one thread (the JavaScript probe targets are `!Send`),
+// so anything that blocks must go through the blocking pool — see `state::State::write` — rather
+// than run inline; `block_in_place` is unavailable on this flavor.
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ctrlc::set_handler(|| {

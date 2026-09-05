@@ -94,6 +94,19 @@ state: C:\ProgramData\Grey\state\  # Windows path
 
 If not specified, probe state will only be kept in memory and will be lost when the application restarts.
 
+### state_flush_interval <Badge text="default: 30s"/>
+
+How often probe results and gossip updates are flushed durably to disk. These frequent writes are committed
+without waiting for the disk (so a slow volume never stalls probing) and are persisted by a periodic flush,
+on shutdown, and by any other durable write. Up to one interval of probe history may be lost if the process
+is killed or the host loses power; peers in a cluster retain a copy of the lost samples through gossip.
+Rare writes such as incidents and cron check-ins are always persisted immediately.
+
+```yaml
+state: ./state/
+state_flush_interval: 30s
+```
+
 ### enabled <Badge text="required" type="danger"/>
 
 Whether to enable the web interface. When disabled, no web server will be started.

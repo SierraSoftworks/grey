@@ -13,8 +13,10 @@ use tracing_batteries::prelude::*;
 use crate::cluster::Versioned;
 use crate::result::ProbeResult;
 
+use redb::Durability;
+
 use super::{
-    PROBES_TABLE, CRON_TABLE, ProbeState, State,
+    PROBES_TABLE, CRON_TABLE, DEFERRED, ProbeState, State,
     gc_lww_table,
 };
 
@@ -158,32 +160,32 @@ impl ProbeStore for State {
     }
 
     async fn update_probe_config(&self, probe: &crate::Probe) -> Result<(), Box<dyn Error>> {
-        let txn = self.database.begin_write()?;
-        {
+        let own_id: u128 = self.node_id.into();
+        let probe = probe.clone();
+        self.write("update_probe_config", Durability::Immediate, move |txn| {
             let mut table = txn.open_table(PROBES_TABLE)?;
 
             let mut snapshot = table
-                .get((self.node_id.into(), probe.name.clone()))?
+                .get((own_id, probe.name.clone()))?
                 .map(|existing| {
                     let (_version, data) = existing.value();
-                    rmp_serde::from_slice::<ProbeState>(data).unwrap_or_else(|_| probe.into())
+                    rmp_serde::from_slice::<ProbeState>(data).unwrap_or_else(|_| (&probe).into())
                 })
-                .unwrap_or_else(|| probe.into());
+                .unwrap_or_else(|| (&probe).into());
 
-            let mut updated_probe: ProbeState = probe.into();
+            let mut updated_probe: ProbeState = (&probe).into();
             updated_probe.last_updated = snapshot.last_updated + chrono::Duration::milliseconds(1);
 
             snapshot.merge(&updated_probe);
 
             table.insert(
-                (self.node_id.into(), probe.name.clone()),
+                (own_id, probe.name.clone()),
                 (snapshot.version(), rmp_serde::to_vec_named(&snapshot)?.as_slice()),
             )?;
-        }
 
-        txn.commit()?;
-
-        Ok(())
+            Ok(())
+        })
+        .await
     }
 
     #[instrument(name="state.probes.reconcile", skip(self), fields(otel.kind = "internal", node.id=%self.node_id), err(Debug))]
@@ -191,8 +193,7 @@ impl ProbeStore for State {
         let config = self.get_config();
         let own_id: u128 = self.node_id.into();
 
-        let txn = self.database.begin_write()?;
-        {
+        self.write("reconcile_probe_config", Durability::Immediate, move |txn| {
             let mut table = txn.open_table(PROBES_TABLE)?;
 
             let mut updates: Vec<(String, ProbeState)> = Vec::new();
@@ -235,11 +236,10 @@ impl ProbeStore for State {
                     (snapshot.version(), rmp_serde::to_vec_named(&snapshot)?.as_slice()),
                 )?;
             }
-        }
 
-        txn.commit()?;
-
-        Ok(())
+            Ok(())
+        })
+        .await
     }
 
     async fn update_probe_state(
@@ -247,57 +247,56 @@ impl ProbeStore for State {
         probe_name: &str,
         probe_result: ProbeResult,
     ) -> Result<(), Box<dyn Error>> {
-        let txn = self.database.begin_write()?;
+        let Some(probe) = self.get_config().probes.iter().find(|p| p.name == probe_name).cloned() else {
+            return Err(format!("Probe '{probe_name}' is no longer present in the configuration, its history was not updated.").into());
+        };
 
-        if let Some(probe) = self.get_config().probes.iter().find(|p| p.name == probe_name) {
-            let result = {
-                let mut table = txn.open_table(PROBES_TABLE)?;
+        let node_id = self.node_id;
+        let own_id: u128 = node_id.into();
+        // The hottest write in the process (one per probe sample), so it commits with deferred
+        // durability; see `DEFERRED` for the trade-off.
+        self.write("update_probe_state", DEFERRED, move |txn| {
+            let mut table = txn.open_table(PROBES_TABLE)?;
 
-                let (mut snapshot, _version) = table
-                    .get((self.node_id.into(), probe.name.clone()))?
-                    .map(|existing| {
-                        let (version, data) = existing.value();
-                        match rmp_serde::from_slice::<ProbeState>(data) {
-                            Ok(snapshot) => (snapshot, version),
-                            Err(err) => {
-                                warn!("Failed to deserialize probe snapshot for '{probe_name}', resetting the state: {:?}", err);
-                                (probe.into(), version)
-                            },
-                        }
-                    })
-                    .unwrap_or_else(|| (probe.into(), 0));
+            let (mut snapshot, _version) = table
+                .get((own_id, probe.name.clone()))?
+                .map(|existing| {
+                    let (version, data) = existing.value();
+                    match rmp_serde::from_slice::<ProbeState>(data) {
+                        Ok(snapshot) => (snapshot, version),
+                        Err(err) => {
+                            warn!("Failed to deserialize probe snapshot for '{}', resetting the state: {:?}", probe.name, err);
+                            ((&probe).into(), version)
+                        },
+                    }
+                })
+                .unwrap_or_else(|| ((&probe).into(), 0));
 
-                probe_result.apply(self.node_id, &mut snapshot);
-                // A node's own records never pass through `merge` (the receive path), so this is
-                // where their history retention is enforced; without it they grow by one bucket per
-                // hour for as long as the probe keeps running.
-                snapshot.prune_history();
+            probe_result.apply(node_id, &mut snapshot);
+            // A node's own records never pass through `merge` (the receive path), so this is
+            // where their history retention is enforced; without it they grow by one bucket per
+            // hour for as long as the probe keeps running.
+            snapshot.prune_history();
 
-                let new_data = rmp_serde::to_vec_named(&snapshot)?;
-                table.insert(
-                    (self.node_id.into(), probe.name.clone()),
-                    (snapshot.version(), new_data.as_slice()),
-                )?;
+            let new_data = rmp_serde::to_vec_named(&snapshot)?;
+            table.insert(
+                (own_id, probe.name.clone()),
+                (snapshot.version(), new_data.as_slice()),
+            )?;
 
-                Ok(())
-            };
-
-            txn.commit()?;
-
-            result
-        } else {
-            Err(format!("Probe '{probe_name}' is no longer present in the configuration, its history was not updated.").into())
-        }
+            Ok(())
+        })
+        .await
     }
 
     #[instrument(name="state.gc", skip(self), fields(otel.kind = "internal", node.id=%self.node_id), err(Debug))]
     async fn gc(&self) -> Result<(), Box<dyn Error>> {
-        let txn = self.database.begin_write()?;
-        {
-            let mut table_fields = txn.open_table(PROBES_TABLE)?;
+        let history_expiry_threshold =
+            chrono::Utc::now() - self.get_config().cluster.gc_probe_expiry;
 
-            let history_expiry_threshold =
-                chrono::Utc::now() - self.get_config().cluster.gc_probe_expiry;
+        // Immediate durability here doubles as a periodic flush of the deferred hot-path commits.
+        self.write("gc", Durability::Immediate, move |txn| {
+            let mut table_fields = txn.open_table(PROBES_TABLE)?;
 
             // Peer/membership records live entirely in memory (the registry expires them itself);
             // only probe state is persisted, so the GC sweep here is concerned with probes alone.
@@ -323,16 +322,15 @@ impl ProbeStore for State {
             // delete tombstones. Incidents and incident updates are deliberately *not* swept here —
             // they form the historical record of outages and are retained indefinitely (their delete
             // tombstones likewise persist rather than being reaped on the probe-expiry cadence).
-            let dropped_crons = gc_lww_table(&txn, CRON_TABLE, history_expiry_threshold)?;
+            let dropped_crons = gc_lww_table(txn, CRON_TABLE, history_expiry_threshold)?;
 
             if dropped_crons > 0 {
                 info!(name: "state.gc.summary", { dropped_crons = %dropped_crons }, "Dropped stale cron records");
             }
-        }
 
-        txn.commit()?;
-
-        Ok(())
+            Ok(())
+        })
+        .await
     }
 
     async fn gc_loop(&self) {

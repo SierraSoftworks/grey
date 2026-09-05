@@ -5,8 +5,8 @@ use std::{
 };
 use std::error::Error;
 use grey_api::{Cron, Incident, IncidentUpdate, Probe};
-use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
-use tracing::info;
+use redb::{Database, Durability, ReadableDatabase, ReadableTable, TableDefinition, WriteTransaction};
+use tracing::{info, instrument};
 use tracing_batteries::prelude::*;
 
 use crate::{
@@ -55,6 +55,26 @@ const NODE_ID_KEY: &str = "node_id";
 const GENERATION_KEY: &str = "generation";
 
 type ProbeState = Probe;
+
+/// The error type for the body of a [`State::write`] transaction. A write body runs on tokio's
+/// blocking pool and its result has to cross back to the runtime, so it must be `Send`; the
+/// bare `Box<dyn Error>` used at the store's public boundary is not. Every error raised inside a
+/// write body (redb, msgpack, `format!`ed strings) converts into this, and [`State::write`] widens
+/// it back to `Box<dyn Error>` at the edge.
+pub(crate) type WriteError = Box<dyn Error + Send + Sync>;
+
+/// The durability used for hot-path writes (probe samples and gossip merges).
+///
+/// redb's default is [`Durability::Immediate`], which fsyncs the file on every commit; on slow
+/// storage a single commit can take seconds. The hot path instead commits with deferred durability:
+/// the transaction is applied and visible to every later transaction, but the on-disk header is
+/// only advanced by the next [`Durability::Immediate`] commit. [`State::flush`] issues one of those
+/// periodically (see [`State::flush_loop`]) and on shutdown, so at most one flush interval of probe
+/// history can be lost on power loss or a hard kill. That is acceptable because the lost samples
+/// are also held by every peer that gossiped with this node in the meantime, and the next sample
+/// re-establishes the record either way. Rare writes (configuration reconciliation, cron check-ins,
+/// incidents) keep the default immediate durability.
+pub(crate) const DEFERRED: Durability = Durability::None;
 
 #[derive(Clone)]
 pub struct State {
@@ -189,6 +209,66 @@ impl State {
         };
         write.commit()?;
         Ok(next as u64)
+    }
+
+    /// Runs `body` inside a redb write transaction and commits it with `durability`, on tokio's
+    /// blocking thread pool.
+    ///
+    /// redb commits synchronously (and, at immediate durability, fsync) — running them inline would
+    /// stall the runtime worker, and with it every probe scheduled on it, for the duration of the
+    /// disk write. The body runs under a `state.write` span parented to the caller's span, so the
+    /// time spent in the transaction is attributed to the operation that issued it.
+    pub(crate) async fn write<T, F>(
+        &self,
+        operation: &'static str,
+        durability: Durability,
+        body: F,
+    ) -> Result<T, Box<dyn Error>>
+    where
+        F: FnOnce(&WriteTransaction) -> Result<T, WriteError> + Send + 'static,
+        T: Send + 'static,
+    {
+        let database = self.database.clone();
+        let span = tracing::info_span!(
+            "state.write",
+            otel.kind = "internal",
+            db.operation = operation,
+            db.durability = ?durability,
+        );
+
+        let result = tokio::task::spawn_blocking(move || {
+            span.in_scope(|| {
+                let mut txn = database.begin_write()?;
+                txn.set_durability(durability)?;
+                let value = body(&txn)?;
+                txn.commit()?;
+                Ok::<T, WriteError>(value)
+            })
+        })
+        .await;
+
+        match result {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(err)) => Err(err),
+            Err(join) => Err(join.into()),
+        }
+    }
+
+    /// Persists every deferred-durability commit made so far (see [`DEFERRED`]) by committing an
+    /// empty transaction at [`Durability::Immediate`].
+    #[instrument(name = "state.flush", skip(self), fields(otel.kind = "internal"), err(Debug))]
+    pub async fn flush(&self) -> Result<(), Box<dyn Error>> {
+        self.write("flush", Durability::Immediate, |_txn| Ok(())).await
+    }
+
+    /// Runs [`State::flush`] on the configured `state_flush_interval`, forever.
+    pub async fn flush_loop(&self) {
+        loop {
+            tokio::time::sleep(self.get_config().state_flush_interval).await;
+            if let Err(err) = self.flush().await {
+                warn!(name: "state.flush", { exception = err }, "Failed to flush state to disk: {err}");
+            }
+        }
     }
 
     pub async fn reload(&self) -> Result<(), Box<dyn Error>> {
@@ -354,7 +434,7 @@ fn merge_into_table<T>(
     node_id: u128,
     name: &str,
     incoming: &T,
-) -> Result<(), Box<dyn Error>>
+) -> Result<(), WriteError>
 where
     T: Versioned<Diff = T> + serde::Serialize + serde::de::DeserializeOwned,
 {
@@ -440,7 +520,7 @@ pub(crate) fn gc_lww_table<K: redb::Key + 'static>(
     txn: &redb::WriteTransaction,
     def: TableDefinition<K, LwwFieldValue>,
     threshold: chrono::DateTime<chrono::Utc>,
-) -> Result<u64, Box<dyn Error>> {
+) -> Result<u64, WriteError> {
     let mut table = txn.open_table(def)?;
     let mut dropped = 0u64;
     table.retain(|_key, (version, _writer, _data)| {
@@ -558,14 +638,13 @@ impl GossipStore for State {
         diff: cluster::ClusterStateDiff<Self::Id, Self::State>,
     ) -> Result<(), Box<dyn Error>> {
         trace!(name: "state.apply", { host.node_id = %self.node_id, diff = ?diff }, "Applying cluster state diff.");
-        let txn = self.database.begin_write()?;
-        {
+        let own_id: u128 = self.node_id.into();
+        // Gossip merges arrive on every gossip round, so they commit with deferred durability.
+        self.write("apply", DEFERRED, move |txn| {
             let mut probe_table = txn.open_table(PROBES_TABLE)?;
             let mut cron_table = txn.open_table(CRON_TABLE)?;
             let mut incident_table = txn.open_table(INCIDENTS_TABLE)?;
             let mut update_table = txn.open_table(INCIDENT_UPDATES_TABLE)?;
-
-            let own_id: u128 = self.node_id.into();
 
             for (peer, node_diff) in diff.into_inner() {
                 let peer_id: u128 = peer.into();
@@ -637,11 +716,10 @@ impl GossipStore for State {
                     }
                 }
             }
-        }
 
-        txn.commit()?;
-
-        Ok(())
+            Ok(())
+        })
+        .await
     }
 }
 
@@ -707,6 +785,80 @@ mod tests {
         let (_version, data) = entry.value();
         let own_record: ProbeState = rmp_serde::from_slice(data).unwrap();
         assert_eq!(own_record.streak.covered_since, Some(streak_start));
+    }
+
+    /// The version of this node's record for the test probe as seen by a transaction against
+    /// `database`.
+    fn own_probe_version(database: &Database, state: &State) -> Option<u64> {
+        let probe = state.get_config().probes[0].name.clone();
+        let txn = database.begin_read().unwrap();
+        let table = txn.open_table(PROBES_TABLE).ok()?;
+        let entry = table.get((state.node_id.into(), probe)).unwrap()?;
+        Some(entry.value().0)
+    }
+
+    /// The version of this node's record for the test probe *as persisted on disk*: a byte copy of
+    /// the state file is opened, so it reflects only what has been durably committed — deferred
+    /// commits are visible through the live handle but not here until they are flushed.
+    fn on_disk_probe_version(state: &State) -> Option<u64> {
+        let path = state.get_config().state.clone();
+        let copy = path.with_extension("copy.redb");
+        std::fs::copy(&path, &copy).unwrap();
+        let database = Database::open(&copy).unwrap();
+        own_probe_version(&database, state)
+    }
+
+    async fn record_deferred_sample(state: &State) -> u64 {
+        let probe = state.get_config().probes[0].name.clone();
+        let mut result = crate::result::ProbeResult::test();
+        result.start_time = chrono::Utc::now() + chrono::Duration::seconds(5);
+        state.update_probe_state(&probe, result).await.unwrap();
+        own_probe_version(&state.database, state).expect("the live record")
+    }
+
+    /// Probe samples commit with deferred durability: they are visible immediately through the live
+    /// handle but only reach the file once `flush` (an immediate-durability commit) runs.
+    #[tokio::test]
+    async fn deferred_writes_are_persisted_by_flush() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = State::test(dir.path().to_path_buf()).await;
+
+        let live = record_deferred_sample(&state).await;
+        let before = on_disk_probe_version(&state);
+        assert!(before.is_none_or(|v| v < live), "the deferred sample should not be on disk yet");
+
+        state.flush().await.unwrap();
+        assert_eq!(on_disk_probe_version(&state), Some(live));
+    }
+
+    /// The flush loop persists deferred writes on the configured interval without any other write
+    /// taking place.
+    #[tokio::test]
+    async fn flush_loop_persists_on_the_configured_interval() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = State::test(dir.path().to_path_buf()).await;
+        let mut config = Config::test(&dir.path().to_path_buf());
+        config.state_flush_interval = std::time::Duration::from_millis(20);
+        state.set_config_for_test(config);
+
+        let live = record_deferred_sample(&state).await;
+
+        let flusher = tokio::spawn({
+            let state = state.clone();
+            async move { state.flush_loop().await }
+        });
+
+        let persisted = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                if on_disk_probe_version(&state) == Some(live) {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        flusher.abort();
+        persisted.expect("the flush loop should persist the deferred sample");
     }
 
     /// `digest` summarises both entity tables, and `diff` against an empty digest emits this node's

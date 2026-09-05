@@ -15,12 +15,12 @@ use grey_api::{
     CreateIncident, CreateUpdate, Identifier, Incident, IncidentUpdate, IncidentUpdateId,
     IncidentView, IncidentsPage, PutIncident, PutUpdate,
 };
-use redb::{ReadableDatabase, ReadableTable, TableDefinition};
+use redb::{Durability, ReadableDatabase, ReadableTable, TableDefinition};
 use tracing_batteries::prelude::*;
 
 use crate::cluster::Versioned;
 
-use super::{GlobalLwwEntity, INCIDENTS_TABLE, INCIDENT_UPDATES_TABLE, LwwFieldValue, State};
+use super::{GlobalLwwEntity, INCIDENTS_TABLE, INCIDENT_UPDATES_TABLE, LwwFieldValue, State, WriteError};
 
 /// The default page size for incident listings.
 pub const DEFAULT_INCIDENT_PAGE: usize = 20;
@@ -218,7 +218,7 @@ impl State {
     fn load_incident(
         table: &impl ReadableTable<u64, LwwFieldValue>,
         id: Identifier,
-    ) -> Result<Option<Incident>, Box<dyn Error>> {
+    ) -> Result<Option<Incident>, WriteError> {
         Ok(table
             .get(u64::from(id))?
             .map(|value| {
@@ -231,7 +231,7 @@ impl State {
     fn load_update(
         table: &impl ReadableTable<u128, LwwFieldValue>,
         id: IncidentUpdateId,
-    ) -> Result<Option<IncidentUpdate>, Box<dyn Error>> {
+    ) -> Result<Option<IncidentUpdate>, WriteError> {
         Ok(table
             .get(u128::from(id))?
             .map(|value| {
@@ -320,16 +320,20 @@ impl IncidentStore for State {
         }
         let own: u128 = self.node_id.into();
 
-        let txn = self.database.begin_write()?;
-        {
-            let mut incidents = txn.open_table(INCIDENTS_TABLE)?;
-            incidents.insert(u64::from(incident_id), (version, own, rmp_serde::to_vec_named(&incident)?.as_slice()))?;
-        }
-        {
-            let mut updates = txn.open_table(INCIDENT_UPDATES_TABLE)?;
-            updates.insert(u128::from(update.id), (version, own, update_bytes.as_slice()))?;
-        }
-        txn.commit()?;
+        let incident_bytes = rmp_serde::to_vec_named(&incident)?;
+        let update_key = u128::from(update.id);
+        self.write("create_incident", Durability::Immediate, move |txn| {
+            {
+                let mut incidents = txn.open_table(INCIDENTS_TABLE)?;
+                incidents.insert(u64::from(incident_id), (version, own, incident_bytes.as_slice()))?;
+            }
+            {
+                let mut updates = txn.open_table(INCIDENT_UPDATES_TABLE)?;
+                updates.insert(update_key, (version, own, update_bytes.as_slice()))?;
+            }
+            Ok(())
+        })
+        .await?;
 
         Ok(IncidentView::new(incident, vec![update]))
     }
@@ -343,24 +347,22 @@ impl IncidentStore for State {
         let own: u128 = self.node_id.into();
         let new_version = Utc::now().timestamp_millis() as u64;
 
-        let txn = self.database.begin_write()?;
-        let outcome = {
+        let outcome = self.write("put_incident", Durability::Immediate, move |txn| {
             let mut incidents = txn.open_table(INCIDENTS_TABLE)?;
-            match Self::load_incident(&incidents, id)? {
+            Ok(match Self::load_incident(&incidents, id)? {
                 None => CasOutcome::NotFound,
                 Some(existing) if existing.deleted => CasOutcome::NotFound,
                 Some(existing) if existing.version != expected_version => {
                     CasOutcome::VersionMismatch(existing.version)
                 }
-                Some(existing) => {
+                Some(_existing) => {
                     let updated = Incident { id, title: edit.title, version: new_version, deleted: false };
                     incidents.insert(u64::from(id), (new_version, own, rmp_serde::to_vec_named(&updated)?.as_slice()))?;
-                    let _ = existing;
                     CasOutcome::Updated(new_version, ())
                 }
-            }
-        };
-        txn.commit()?;
+            })
+        })
+        .await?;
 
         match outcome {
             CasOutcome::Updated(version, ()) => {
@@ -380,10 +382,9 @@ impl IncidentStore for State {
         let own: u128 = self.node_id.into();
         let new_version = Utc::now().timestamp_millis() as u64;
 
-        let txn = self.database.begin_write()?;
-        let outcome = {
+        self.write("delete_incident", Durability::Immediate, move |txn| {
             let mut incidents = txn.open_table(INCIDENTS_TABLE)?;
-            match Self::load_incident(&incidents, id)? {
+            Ok(match Self::load_incident(&incidents, id)? {
                 None => CasOutcome::NotFound,
                 Some(existing) if existing.deleted => CasOutcome::NotFound,
                 Some(existing) if existing.version != expected_version => {
@@ -395,10 +396,9 @@ impl IncidentStore for State {
                     incidents.insert(u64::from(id), (new_version, own, rmp_serde::to_vec_named(&existing)?.as_slice()))?;
                     CasOutcome::Updated(new_version, ())
                 }
-            }
-        };
-        txn.commit()?;
-        Ok(outcome)
+            })
+        })
+        .await
     }
 
     async fn create_update(
@@ -425,24 +425,24 @@ impl IncidentStore for State {
         }
         let own: u128 = self.node_id.into();
 
-        let txn = self.database.begin_write()?;
-        {
-            // The incident must exist and be live.
-            let incidents = txn.open_table(INCIDENTS_TABLE)?;
-            match Self::load_incident(&incidents, incident_id)? {
-                Some(incident) if !incident.deleted => {}
-                _ => {
-                    drop(incidents);
-                    txn.abort()?;
-                    return Ok(None);
+        let update_key = u128::from(new_update.id);
+        let inserted = self.write("create_update", Durability::Immediate, move |txn| {
+            {
+                // The incident must exist and be live.
+                let incidents = txn.open_table(INCIDENTS_TABLE)?;
+                match Self::load_incident(&incidents, incident_id)? {
+                    Some(incident) if !incident.deleted => {}
+                    _ => return Ok(false),
                 }
             }
-        }
-        {
             let mut updates = txn.open_table(INCIDENT_UPDATES_TABLE)?;
-            updates.insert(u128::from(new_update.id), (version, own, update_bytes.as_slice()))?;
+            updates.insert(update_key, (version, own, update_bytes.as_slice()))?;
+            Ok(true)
+        })
+        .await?;
+        if !inserted {
+            return Ok(None);
         }
-        txn.commit()?;
 
         let view = self.get_incident(incident_id).await?.ok_or("incident vanished after adding update")?;
         Ok(Some((version, view)))
@@ -457,10 +457,9 @@ impl IncidentStore for State {
         let own: u128 = self.node_id.into();
         let new_version = Utc::now().timestamp_millis() as u64;
 
-        let txn = self.database.begin_write()?;
-        let outcome = {
+        let outcome = self.write("put_update", Durability::Immediate, move |txn| {
             let mut updates = txn.open_table(INCIDENT_UPDATES_TABLE)?;
-            match Self::load_update(&updates, update_id)? {
+            Ok(match Self::load_update(&updates, update_id)? {
                 None => CasOutcome::NotFound,
                 Some(existing) if existing.deleted => CasOutcome::NotFound,
                 Some(existing) if existing.version != expected_version => {
@@ -478,9 +477,9 @@ impl IncidentStore for State {
                     updates.insert(u128::from(update_id), (new_version, own, rmp_serde::to_vec_named(&existing)?.as_slice()))?;
                     CasOutcome::Updated(new_version, ())
                 }
-            }
-        };
-        txn.commit()?;
+            })
+        })
+        .await?;
 
         match outcome {
             CasOutcome::Updated(version, ()) => {
@@ -503,10 +502,9 @@ impl IncidentStore for State {
         let own: u128 = self.node_id.into();
         let new_version = Utc::now().timestamp_millis() as u64;
 
-        let txn = self.database.begin_write()?;
-        let outcome = {
+        self.write("delete_update", Durability::Immediate, move |txn| {
             let mut updates = txn.open_table(INCIDENT_UPDATES_TABLE)?;
-            match Self::load_update(&updates, update_id)? {
+            Ok(match Self::load_update(&updates, update_id)? {
                 None => CasOutcome::NotFound,
                 Some(existing) if existing.deleted => CasOutcome::NotFound,
                 Some(existing) if existing.version != expected_version => {
@@ -518,10 +516,9 @@ impl IncidentStore for State {
                     updates.insert(u128::from(update_id), (new_version, own, rmp_serde::to_vec_named(&existing)?.as_slice()))?;
                     CasOutcome::Updated(new_version, ())
                 }
-            }
-        };
-        txn.commit()?;
-        Ok(outcome)
+            })
+        })
+        .await
     }
 }
 
