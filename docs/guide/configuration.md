@@ -176,7 +176,7 @@ cluster:
     cluster: prod
 ```
 
-Each node also publishes its hostname and any configured `labels` to its peers so administrators can
+Each node also publishes its hostname, Grey version and any configured `labels` to its peers so administrators can
 tell nodes apart on the status page and through the admin API; see
 [Node Metadata](./clustering.md#node-metadata).
 

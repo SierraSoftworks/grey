@@ -395,8 +395,9 @@ publishes a small set of **labels** describing itself, which is replicated throu
 probe state and persisted alongside it (so it survives restarts and reaches nodes the publisher never
 talks to directly).
 
-The `hostname` label is filled in from the operating system automatically; any further labels come
-from `cluster.labels`, which may also override the detected hostname:
+The `hostname` label is filled in from the operating system and `version` from the Grey build the
+node is running (handy for spotting stragglers mid-rollout); any further labels come from
+`cluster.labels`, which may also override the detected values:
 
 ```yaml
 cluster:
@@ -425,7 +426,7 @@ identifiers through the admin API:
 [
   {
     "id": "1p3x9kq2m7v4c8",
-    "labels": { "hostname": "grey-syd-1", "cloud": "aws", "region": "ap-southeast-2" },
+    "labels": { "hostname": "grey-syd-1", "version": "1.4.2", "cloud": "aws", "region": "ap-southeast-2" },
     "last_updated": 1750334400000
   }
 ]

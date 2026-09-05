@@ -108,10 +108,10 @@ pub fn peers() -> Vec<Peer> {
 pub fn nodes() -> Vec<NodeMetadata> {
     let now = Utc::now();
     vec![
-        node(now, "1p3x9kq2m7v4c8", &[("hostname", "grey-syd-1"), ("cloud", "aws"), ("region", "ap-southeast-2"), ("az", "ap-southeast-2a"), ("cluster", "prod")]),
-        node(now, "7h2wz0r5t9d1na", &[("hostname", "grey-lhr-1"), ("cloud", "hetzner"), ("region", "eu-west"), ("cluster", "prod")]),
-        node(now, "c4j8l1y6b3f0ps", &[("hostname", "grey-iad-1"), ("cloud", "gcp"), ("region", "us-east4"), ("az", "us-east4-b"), ("cluster", "prod")]),
-        node(now, "m9e3q7u2k5x1gw", &[("hostname", "grey-fra-1.internal.example.com"), ("cloud", "azure"), ("region", "germanywestcentral"), ("cluster", "prod")]),
+        node(now, "1p3x9kq2m7v4c8", &[("hostname", "grey-syd-1"), ("version", "1.4.2"), ("cloud", "aws"), ("region", "ap-southeast-2"), ("az", "ap-southeast-2a"), ("cluster", "prod")]),
+        node(now, "7h2wz0r5t9d1na", &[("hostname", "grey-lhr-1"), ("version", "1.4.2"), ("cloud", "hetzner"), ("region", "eu-west"), ("cluster", "prod")]),
+        node(now, "c4j8l1y6b3f0ps", &[("hostname", "grey-iad-1"), ("version", "1.4.1"), ("cloud", "gcp"), ("region", "us-east4"), ("az", "us-east4-b"), ("cluster", "prod")]),
+        node(now, "m9e3q7u2k5x1gw", &[("hostname", "grey-fra-1.internal.example.com"), ("version", "1.4.2"), ("cloud", "azure"), ("region", "germanywestcentral"), ("cluster", "prod")]),
     ]
 }
 

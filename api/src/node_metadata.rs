@@ -8,8 +8,13 @@ use serde::{Deserialize, Serialize};
 /// shows in place of the raw node identifier wherever a node is named.
 pub const HOSTNAME_LABEL: &str = "hostname";
 
+/// The well-known label under which a node publishes the Grey version it is running, so operators
+/// can spot mixed-version clusters and stragglers during a rollout.
+pub const VERSION_LABEL: &str = "version";
+
 /// Descriptive metadata a node publishes about itself: a generic container of labels (its hostname,
-/// the cloud/region/availability zone it runs in, the cluster it belongs to, ...), replicated through
+/// the Grey version it runs, the cloud/region/availability zone it runs in, the cluster it belongs
+/// to, ...), replicated through
 /// the cluster gossip so every node can resolve a bare node identifier — as it appears in probe
 /// `observers`/`observations` and on the cluster page — to something an operator recognises.
 ///
@@ -45,6 +50,11 @@ impl NodeMetadata {
     /// The value of one label, if the node publishes it.
     pub fn label(&self, key: &str) -> Option<&str> {
         self.labels.get(key).map(String::as_str)
+    }
+
+    /// The Grey version the node reports running, when it publishes one.
+    pub fn grey_version(&self) -> Option<&str> {
+        self.label(VERSION_LABEL).filter(|v| !v.trim().is_empty())
     }
 
     /// The node's hostname, when it publishes one (a blank value counts as absent).
@@ -85,6 +95,8 @@ mod tests {
         assert_eq!(metadata(&[]).display_name(), "1p3x9k");
         assert_eq!(metadata(&[("hostname", "  ")]).display_name(), "1p3x9k");
         assert_eq!(metadata(&[("region", "au-east")]).hostname(), None);
+        assert_eq!(metadata(&[("version", "1.2.3")]).grey_version(), Some("1.2.3"));
+        assert_eq!(metadata(&[("version", "")]).grey_version(), None);
     }
 
     #[test]
