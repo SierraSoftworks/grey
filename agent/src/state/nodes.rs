@@ -3,7 +3,8 @@
 //! [`NodeMetadata`].
 //!
 //! A node's metadata is the set of labels it publishes about itself — its hostname (read from the
-//! operating system unless configured) overlaid with the operator's `cluster.labels`. It is a
+//! operating system unless configured) and the Grey version it runs, overlaid with the operator's
+//! `cluster.labels`. It is a
 //! **single global record per node**, authored only by that node and resolved by last-writer-wins,
 //! so it needs no per-observer pooling: peers simply hold the latest record each node advertised.
 //!
@@ -16,7 +17,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 
 use chrono::{DateTime, Utc};
-use grey_api::{HOSTNAME_LABEL, NodeMetadata};
+use grey_api::{HOSTNAME_LABEL, NodeMetadata, VERSION_LABEL};
 use redb::{Durability, ReadableDatabase, ReadableTable, TableDefinition};
 use tracing_batteries::prelude::*;
 
@@ -63,7 +64,8 @@ impl GlobalLwwEntity for NodeMetadata {
 #[allow(async_fn_in_trait)]
 pub trait NodeMetadataStore {
     /// The labels this node should currently advertise: the operating-system hostname under
-    /// `hostname`, overlaid with the configured `cluster.labels` (which may override it).
+    /// `hostname` and the running Grey version under `version`, overlaid with the configured
+    /// `cluster.labels` (which may override either).
     fn local_node_labels(&self) -> BTreeMap<String, String>;
 
     /// Publishes this node's own metadata record, rewriting it (with a fresh version, so it gossips)
@@ -91,6 +93,7 @@ impl NodeMetadataStore for State {
             .map(|hostname| (HOSTNAME_LABEL.to_string(), hostname))
             .into_iter()
             .collect();
+        labels.insert(VERSION_LABEL.to_string(), crate::version!().to_string());
         for (key, value) in &config.cluster.labels {
             labels.insert(key.clone(), value.clone());
         }
@@ -197,8 +200,9 @@ mod tests {
         )
     }
 
-    /// The local record carries the OS hostname (unless overridden) plus the configured labels, is
-    /// only rewritten when something changes, and picks up label changes with a newer version.
+    /// The local record carries the OS hostname (unless overridden), the running Grey version and
+    /// the configured labels, is only rewritten when something changes, and picks up label changes
+    /// with a newer version.
     #[tokio::test]
     async fn publishes_and_refreshes_the_local_record() {
         let dir = tempfile::tempdir().unwrap();
@@ -209,6 +213,7 @@ mod tests {
         let me = state.get_node_metadata_for(&own_id).await.unwrap().expect("the local record");
         assert_eq!(me.label("region"), Some("au-east"));
         assert_eq!(me.hostname().is_some(), os_hostname().is_some(), "the OS hostname is published when known");
+        assert_eq!(me.grey_version(), Some(crate::version!()), "the running Grey version is published");
         let first_version = me.version();
 
         // Nothing changed: no rewrite, same version.

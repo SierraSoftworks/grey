@@ -468,7 +468,8 @@ pub struct ClusterConfig {
     /// Descriptive labels this node publishes about itself (for example `cloud`, `region`, `az` or
     /// `cluster`), replicated to every peer as the node's metadata so operators can tell nodes apart
     /// by more than their identifier. The `hostname` label is filled in from the operating system
-    /// when not set here; give it explicitly to override what the node reports.
+    /// and `version` from the running Grey build when not set here; give either explicitly to
+    /// override what the node reports.
     #[serde(default)]
     pub labels: HashMap<String, String>,
 
