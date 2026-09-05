@@ -5450,7 +5450,7 @@ dependencies = [
 [[package]]
 name = "tracing-batteries"
 version = "0.1.0"
-source = "git+https://github.com/sierrasoftworks/tracing-batteries-rs.git?branch=claude%2Fotel-metrics-logs-e168tj#10184342dedb0479d7302dd1fe6771f238e347fd"
+source = "git+https://github.com/sierrasoftworks/tracing-batteries-rs.git#165f0c8ec680560de7a526fb10a074ec51725544"
 dependencies = [
  "chrono",
  "hex",
