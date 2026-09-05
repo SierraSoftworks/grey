@@ -76,6 +76,13 @@ pub(crate) type WriteError = Box<dyn Error + Send + Sync>;
 /// incidents) keep the default immediate durability.
 pub(crate) const DEFERRED: Durability = Durability::None;
 
+/// How a [`State::transact`] body wants its transaction finished: committed, or abandoned (a no-op
+/// request that should not pay for a commit — at immediate durability, an fsync).
+pub(crate) enum WriteOutcome<T> {
+    Commit(T),
+    Abort(T),
+}
+
 #[derive(Clone)]
 pub struct State {
     config_path: PathBuf,
@@ -228,6 +235,21 @@ impl State {
         F: FnOnce(&WriteTransaction) -> Result<T, WriteError> + Send + 'static,
         T: Send + 'static,
     {
+        self.transact(operation, durability, |txn| body(txn).map(WriteOutcome::Commit))
+            .await
+    }
+
+    /// As [`State::write`], but the body decides whether the transaction is committed or aborted.
+    pub(crate) async fn transact<T, F>(
+        &self,
+        operation: &'static str,
+        durability: Durability,
+        body: F,
+    ) -> Result<T, Box<dyn Error>>
+    where
+        F: FnOnce(&WriteTransaction) -> Result<WriteOutcome<T>, WriteError> + Send + 'static,
+        T: Send + 'static,
+    {
         let database = self.database.clone();
         let span = tracing::info_span!(
             "state.write",
@@ -240,9 +262,16 @@ impl State {
             span.in_scope(|| {
                 let mut txn = database.begin_write()?;
                 txn.set_durability(durability)?;
-                let value = body(&txn)?;
-                txn.commit()?;
-                Ok::<T, WriteError>(value)
+                match body(&txn)? {
+                    WriteOutcome::Commit(value) => {
+                        txn.commit()?;
+                        Ok::<T, WriteError>(value)
+                    }
+                    WriteOutcome::Abort(value) => {
+                        txn.abort()?;
+                        Ok(value)
+                    }
+                }
             })
         })
         .await;

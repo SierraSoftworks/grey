@@ -20,7 +20,7 @@ use tracing_batteries::prelude::*;
 
 use crate::cluster::Versioned;
 
-use super::{GlobalLwwEntity, INCIDENTS_TABLE, INCIDENT_UPDATES_TABLE, LwwFieldValue, State, WriteError};
+use super::{GlobalLwwEntity, INCIDENTS_TABLE, INCIDENT_UPDATES_TABLE, LwwFieldValue, State, WriteError, WriteOutcome};
 
 /// The default page size for incident listings.
 pub const DEFAULT_INCIDENT_PAGE: usize = 20;
@@ -426,18 +426,19 @@ impl IncidentStore for State {
         let own: u128 = self.node_id.into();
 
         let update_key = u128::from(new_update.id);
-        let inserted = self.write("create_update", Durability::Immediate, move |txn| {
+        let inserted = self.transact("create_update", Durability::Immediate, move |txn| {
             {
-                // The incident must exist and be live.
+                // The incident must exist and be live; otherwise there is nothing to write, so the
+                // transaction is abandoned rather than paying for an (immediate) commit.
                 let incidents = txn.open_table(INCIDENTS_TABLE)?;
                 match Self::load_incident(&incidents, incident_id)? {
                     Some(incident) if !incident.deleted => {}
-                    _ => return Ok(false),
+                    _ => return Ok(WriteOutcome::Abort(false)),
                 }
             }
             let mut updates = txn.open_table(INCIDENT_UPDATES_TABLE)?;
             updates.insert(update_key, (version, own, update_bytes.as_slice()))?;
-            Ok(true)
+            Ok(WriteOutcome::Commit(true))
         })
         .await?;
         if !inserted {

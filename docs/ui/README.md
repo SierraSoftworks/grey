@@ -103,7 +103,7 @@ is killed or the host loses power; peers in a cluster retain a copy of the lost 
 Rare writes such as incidents and cron check-ins are always persisted immediately.
 
 ```yaml
-state: ./state/
+state: ./state.redb
 state_flush_interval: 30s
 ```
 
