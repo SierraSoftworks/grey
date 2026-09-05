@@ -144,7 +144,7 @@ pub fn probe_history(props: &ProbeHistoryProps) -> Html {
                     >
                         if is_tooltip_target {
                             if let Some(probe_result) = &tooltip_data.probe_result {
-                                {render_tooltip(probe_result, current_live, auth_data.is_authenticated())}
+                                {render_tooltip(probe_result, current_live, auth_data.is_authenticated().then_some(&auth_data))}
                             } else {
                                 // Fallback for SSR or when probe_result is None
                                 <Popover status_class="unknown" status="Loading...">
@@ -164,7 +164,13 @@ pub fn probe_history(props: &ProbeHistoryProps) -> Html {
     }
 }
 
-fn render_tooltip(probe_result: &ProbeHistoryBucket, live: Option<&LiveStatus>, include_observers: bool) -> Html {
+/// Renders a bucket's tooltip. The per-observer breakdown names nodes and so is operator-only: it is
+/// included only when `observers` carries the store to resolve node identifiers against (their
+/// published hostnames, falling back to the identifier), and omitted for anonymous viewers.
+fn render_tooltip(probe_result: &ProbeHistoryBucket, live: Option<&LiveStatus>, observers: Option<&crate::contexts::Store>) -> Html {
+    let include_observers = observers.is_some();
+    let observer_name = |id: &str| observers.map(|store| store.node_name(id)).unwrap_or_else(|| id.to_string());
+
     let (status_text, status_class) = match live {
         Some(live) => {
             let now = Utc::now();
@@ -242,7 +248,7 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket, live: Option<&LiveStatus>, 
                                         <div class="tooltip__section-entry-header">
                                             <StatusDot class={validation_class} />
                                             <span class="tooltip__section-entry-name">{availability(observation.success_rate())}</span>
-                                            <span class="tooltip__section-entry-message">{*name}</span>
+                                            <span class="tooltip__section-entry-message" title={format!("Node {name}")}>{observer_name(name)}</span>
                                         </div>
                                     </div>
                                 }
@@ -287,29 +293,73 @@ fn render_tooltip(probe_result: &ProbeHistoryBucket, live: Option<&LiveStatus>, 
 mod tests {
     use super::*;
 
-    #[derive(Properties, PartialEq)]
+    use crate::contexts::{StoreProvider, use_store};
+
+    #[derive(Properties, PartialEq, Clone)]
     struct HarnessProps {
         bucket: ProbeHistoryBucket,
         live: Option<LiveStatus>,
+        /// Whether to render as an operator (with the observer breakdown) or anonymously.
+        operator: bool,
+        nodes: Vec<grey_api::NodeMetadata>,
     }
 
     /// Renders the tooltip directly — in the app it only appears on hover, which SSR can't reach.
-    #[function_component(Harness)]
-    fn harness(props: &HarnessProps) -> Html {
-        render_tooltip(&props.bucket, props.live.as_ref(), true)
+    #[function_component(Tooltip)]
+    fn tooltip(props: &HarnessProps) -> Html {
+        let store = use_store();
+        render_tooltip(&props.bucket, props.live.as_ref(), props.operator.then_some(&store))
     }
 
-    async fn render(live: Option<LiveStatus>) -> String {
-        let bucket = ProbeHistoryBucket {
+    #[function_component(Harness)]
+    fn harness(props: &HarnessProps) -> Html {
+        html! {
+            <StoreProvider nodes={props.nodes.clone()}>
+                <Tooltip ..props.clone() />
+            </StoreProvider>
+        }
+    }
+
+    fn bucket_with_observers(ids: &[&str]) -> ProbeHistoryBucket {
+        ProbeHistoryBucket {
             start_time: chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
             pass: true,
             message: String::new(),
             validations: Default::default(),
-            observations: Default::default(),
-        };
-        yew::ServerRenderer::<Harness>::with_props(move || HarnessProps { bucket, live })
+            observations: ids.iter().map(|id| (id.to_string(), grey_api::Observation::default())).collect(),
+        }
+    }
+
+    async fn render_full(bucket: ProbeHistoryBucket, live: Option<LiveStatus>, operator: bool, nodes: Vec<grey_api::NodeMetadata>) -> String {
+        yew::ServerRenderer::<Harness>::with_props(move || HarnessProps { bucket, live, operator, nodes })
             .render()
             .await
+    }
+
+    async fn render(live: Option<LiveStatus>) -> String {
+        render_full(bucket_with_observers(&[]), live, true, vec![]).await
+    }
+
+    /// Operators see the observer breakdown with node identifiers resolved to their published
+    /// hostnames (unresolved ones keep the identifier); anonymous viewers see no observers at all.
+    #[tokio::test]
+    async fn test_observers_are_named_for_operators_only() {
+        let bucket = bucket_with_observers(&["1p3x9k", "zz9plural"]);
+        let nodes = vec![grey_api::NodeMetadata::new(
+            "1p3x9k",
+            [("hostname".to_string(), "grey-syd-1".to_string())].into_iter().collect(),
+            chrono::Utc::now(),
+        )];
+
+        let html = render_full(bucket.clone(), None, true, nodes.clone()).await;
+        assert!(html.contains("Observers"), "expected the observer section, got: {html}");
+        assert!(html.contains(">grey-syd-1<"), "expected the resolved hostname, got: {html}");
+        assert!(!html.contains(">1p3x9k<"), "the resolved id must not be shown as the name, got: {html}");
+        assert!(html.contains(">zz9plural<"), "an unresolved id falls back to itself, got: {html}");
+
+        let html = render_full(bucket, None, false, nodes).await;
+        assert!(!html.contains("Observers"), "anonymous viewers must not see observers, got: {html}");
+        assert!(!html.contains("grey-syd-1") && !html.contains("1p3x9k"), "no node names for anonymous viewers, got: {html}");
     }
 
     #[tokio::test]

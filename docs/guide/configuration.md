@@ -171,7 +171,14 @@ cluster:
     - 10.0.0.2:8888
     - 10.0.0.3:8888
   secret: /pL7XKDj1UrAGjNMv3t9jmb9leDOZT+64KkYE8k7UH8=
+  labels:
+    region: ap-southeast-2
+    cluster: prod
 ```
+
+Each node also publishes its hostname and any configured `labels` to its peers so administrators can
+tell nodes apart on the status page and through the admin API; see
+[Node Metadata](./clustering.md#node-metadata).
 
 You can read more about clustering in the [Clustering](../clustering/README.md) section of the documentation.
 

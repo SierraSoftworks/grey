@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, Mutex, RwLock},
 };
 use std::error::Error;
-use grey_api::{Cron, Incident, IncidentUpdate, Probe};
+use grey_api::{Cron, Incident, IncidentUpdate, NodeMetadata, Probe};
 use redb::{Database, Durability, ReadableDatabase, ReadableTable, TableDefinition, WriteTransaction};
 use tracing::{info, instrument};
 use tracing_batteries::prelude::*;
@@ -19,11 +19,13 @@ use crate::cluster::GossipStore;
 // over this `State`; the gossip/cluster plumbing remains here in the core store.
 mod crons;
 mod incidents;
+mod nodes;
 mod probes;
 mod replicated;
 
 pub use crons::CronStore;
 pub use incidents::{CasOutcome, DEFAULT_INCIDENT_PAGE, IncidentStore};
+pub use nodes::NodeMetadataStore;
 pub use probes::ProbeStore;
 pub use replicated::{GlobalLwwEntity, LwwFieldValue, ReplicatedEntity};
 
@@ -46,6 +48,12 @@ pub(crate) const INCIDENTS_TABLE: TableDefinition<u64, LwwFieldValue> =
     TableDefinition::new("incidents");
 pub(crate) const INCIDENT_UPDATES_TABLE: TableDefinition<u128, LwwFieldValue> =
     TableDefinition::new("incidents.updates");
+
+// Node metadata (the labels a node publishes about itself) is a global-LWW entity keyed by the node
+// identifier. Only the node itself ever writes its own record, so `last_writer` is always the
+// described node and the row is advertised under that node's own gossip partition.
+pub(crate) const NODE_METADATA_TABLE: TableDefinition<&str, LwwFieldValue> =
+    TableDefinition::new("nodes.metadata");
 
 // Stores this instance's persistent identity so that a restart resumes the same NodeID (and keeps
 // advertising its existing probe state) rather than appearing as a brand-new node.
@@ -300,7 +308,8 @@ impl State {
         }
     }
 
-    pub async fn reload(&self) -> Result<(), Box<dyn Error>> {
+    /// Reloads the configuration file if it has changed on disk. Returns whether it was reloaded.
+    pub async fn reload(&self) -> Result<bool, Box<dyn Error>> {
         let last_modified = *self.config_last_modified.lock().unwrap();
         if let Some((config, modified)) =
             Config::load_if_modified_since(&self.config_path, last_modified).await?
@@ -308,9 +317,10 @@ impl State {
             info!("Configuration file changed, reloading.");
             *self.config.write().unwrap() = Arc::new(config);
             *self.config_last_modified.lock().unwrap() = modified;
+            return Ok(true);
         }
 
-        Ok(())
+        Ok(false)
     }
 
     /// This node's stable cluster identity.
@@ -641,6 +651,7 @@ impl GossipStore for State {
         digest_lww::<Cron>(&txn, &mut digest)?;
         digest_lww::<Incident>(&txn, &mut digest)?;
         digest_lww::<IncidentUpdate>(&txn, &mut digest)?;
+        digest_lww::<NodeMetadata>(&txn, &mut digest)?;
 
         trace!(name: "state.digest", { host.node_id = %self.node_id, digest = %digest }, "Composed new cluster state digest.");
 
@@ -661,6 +672,7 @@ impl GossipStore for State {
         emit_lww_table_diffs::<Cron>(&txn, &digest, &mut delta, ReplicatedEntity::Cron)?;
         emit_lww_table_diffs::<Incident>(&txn, &digest, &mut delta, ReplicatedEntity::Incident)?;
         emit_lww_table_diffs::<IncidentUpdate>(&txn, &digest, &mut delta, ReplicatedEntity::IncidentUpdate)?;
+        emit_lww_table_diffs::<NodeMetadata>(&txn, &digest, &mut delta, ReplicatedEntity::NodeMetadata)?;
 
         trace!(name: "state.diff", { host.node_id = %self.node_id, digest = %digest, delta = ?delta }, "Composed new cluster state diff.");
 
@@ -679,6 +691,7 @@ impl GossipStore for State {
             let mut cron_table = txn.open_table(CRON_TABLE)?;
             let mut incident_table = txn.open_table(INCIDENTS_TABLE)?;
             let mut update_table = txn.open_table(INCIDENT_UPDATES_TABLE)?;
+            let mut node_table = txn.open_table(NODE_METADATA_TABLE)?;
 
             for (peer, node_diff) in diff.into_inner() {
                 let peer_id: u128 = peer.into();
@@ -745,6 +758,23 @@ impl GossipStore for State {
                                 let bytes = rmp_serde::to_vec_named(&incoming)
                                     .map_err(|e| format!("Failed to serialize incident update for update: {e:?}"))?;
                                 update_table.insert(key, (incoming.version(), peer_id, bytes.as_slice()))?;
+                            }
+                        }
+                        ReplicatedEntity::NodeMetadata(incoming) => {
+                            // A node is the sole author of its own metadata, so the record's `id`
+                            // must be the partition it arrives under (relays keep `last_writer` as
+                            // the originating node). Anything else is malformed and ignored.
+                            if incoming.id != peer.to_string() {
+                                warn!(name: "state.apply.node_metadata", { node.id = %incoming.id, peer.id = %peer }, "Ignoring node metadata advertised under another node's partition");
+                                continue;
+                            }
+                            let existing = node_table
+                                .get(incoming.id.as_str())?
+                                .map(|g| { let (v, w, _) = g.value(); (v, w) });
+                            if lww_supersedes(existing, (incoming.version(), peer_id)) {
+                                let bytes = rmp_serde::to_vec_named(&incoming)
+                                    .map_err(|e| format!("Failed to serialize node metadata for update: {e:?}"))?;
+                                node_table.insert(incoming.id.as_str(), (incoming.version(), peer_id, bytes.as_slice()))?;
                             }
                         }
                     }

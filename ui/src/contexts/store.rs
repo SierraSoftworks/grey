@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use grey_api::{
     AdminUser, ApiError, CreateIncident, CreateUpdate, Cron, Identifier, IncidentUpdateId,
-    IncidentView, Peer, Probe, PutIncident, PutUpdate, UiConfig,
+    IncidentView, NodeMetadata, Peer, Probe, PutIncident, PutUpdate, UiConfig,
 };
 use yew::prelude::*;
 
@@ -45,6 +45,9 @@ pub struct StoreState {
     /// The current ID token, mirrored here so views can gate admin UI and pass it to children.
     pub token: Option<String>,
     pub peers: Vec<Peer>,
+    /// The metadata (hostname and labels) each node publishes about itself. Operator-only, like
+    /// `peers`: empty for anonymous viewers, so node identifiers stay opaque to them.
+    pub nodes: Vec<NodeMetadata>,
     pub incidents: Vec<IncidentView>,
     pub probes: Vec<Probe>,
     pub crons: Vec<Cron>,
@@ -58,6 +61,7 @@ pub enum Action {
     SetProbes(Vec<Probe>),
     SetCrons(Vec<Cron>),
     SetPeers(Vec<Peer>),
+    SetNodes(Vec<NodeMetadata>),
     SetIncidents(Vec<IncidentView>),
     /// Insert or replace a single incident (after an admin create or edit), without waiting for the
     /// next poll.
@@ -86,6 +90,7 @@ impl Reducible for StoreState {
             Action::SetProbes(probes) => next.probes = probes,
             Action::SetCrons(crons) => next.crons = crons,
             Action::SetPeers(peers) => next.peers = peers,
+            Action::SetNodes(nodes) => next.nodes = nodes,
             Action::SetIncidents(mut incidents) => {
                 sort_incidents(&mut incidents);
                 next.incidents = incidents;
@@ -141,6 +146,23 @@ impl Store {
 
     pub fn peers(&self) -> &[Peer] {
         &self.state.peers
+    }
+
+    pub fn nodes(&self) -> &[NodeMetadata] {
+        &self.state.nodes
+    }
+
+    /// The published metadata of a node, when this viewer may see it and the node has published any.
+    pub fn node_metadata(&self, id: &str) -> Option<&NodeMetadata> {
+        self.state.nodes.iter().find(|node| node.id == id)
+    }
+
+    /// The name to show for a node wherever its identifier would otherwise appear: its published
+    /// hostname when the viewer is an operator and the node has one, otherwise the bare identifier.
+    pub fn node_name(&self, id: &str) -> String {
+        self.node_metadata(id)
+            .map(|node| node.display_name().to_string())
+            .unwrap_or_else(|| id.to_string())
     }
 
     pub fn incidents(&self) -> &[IncidentView] {
@@ -260,6 +282,8 @@ pub struct StoreProviderProps {
     #[prop_or_default]
     pub peers: Vec<Peer>,
     #[prop_or_default]
+    pub nodes: Vec<NodeMetadata>,
+    #[prop_or_default]
     pub incidents: Vec<IncidentView>,
     /// A pre-established session, used by demo mode to render the operator-only chrome. Normally
     /// `None`: the session is discovered from the stored OIDC token on mount.
@@ -288,6 +312,7 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
         let probes = props.probes.clone();
         let crons = props.crons.clone();
         let peers = props.peers.clone();
+        let nodes = props.nodes.clone();
         let incidents = props.incidents.clone();
         let user = props.user.clone();
         move || {
@@ -298,6 +323,7 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
                 user,
                 token: None,
                 peers,
+                nodes,
                 incidents,
                 probes,
                 crons,
@@ -384,8 +410,8 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
             });
         }
 
-        // Peers (cluster topology) are operator-only and change often, so refresh them on mount and
-        // then on the same interval.
+        // Peers (cluster topology) and node metadata are operator-only and change often, so refresh
+        // them on mount and then on the same interval.
         {
             let state = state.clone();
             let client = client.clone();
@@ -394,10 +420,12 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
                 if !demo {
                     wasm_bindgen_futures::spawn_local(async move {
                         state.dispatch(Action::SetPeers(load_peers(&client).await));
+                        state.dispatch(Action::SetNodes(load_nodes(&client).await));
                         loop {
                             gloo::timers::future::sleep(reload).await;
                             focus.active().await;
                             state.dispatch(Action::SetPeers(load_peers(&client).await));
+                            state.dispatch(Action::SetNodes(load_nodes(&client).await));
                         }
                     });
                 }
@@ -422,6 +450,9 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
                     wasm_bindgen_futures::spawn_local(async move {
                         state.dispatch(load_probes(&client).await);
                         state.dispatch(load_crons(&client).await);
+                        // Node names are unlocked by signing in and withdrawn on sign-out.
+                        state.dispatch(Action::SetPeers(load_peers(&client).await));
+                        state.dispatch(Action::SetNodes(load_nodes(&client).await));
                     });
                 }
                 || ()
@@ -545,6 +576,16 @@ async fn load_peers(client: &ApiClient) -> Vec<Peer> {
         return Vec::new();
     }
     client.peers().await.unwrap_or_default()
+}
+
+/// Node metadata (hostnames and labels) is operator-only, so like peers it is fetched only when
+/// signed in and any failure reads as "no metadata": identifiers simply stay unresolved.
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+async fn load_nodes(client: &ApiClient) -> Vec<NodeMetadata> {
+    if crate::auth::stored_token().is_none() {
+        return Vec::new();
+    }
+    client.nodes().await.unwrap_or_default()
 }
 
 /// Page-focus tracking used to pause background polling while the user is away.

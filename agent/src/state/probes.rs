@@ -16,7 +16,7 @@ use crate::result::ProbeResult;
 use redb::Durability;
 
 use super::{
-    PROBES_TABLE, CRON_TABLE, DEFERRED, ProbeState, State,
+    CRON_TABLE, DEFERRED, NODE_METADATA_TABLE, NodeMetadataStore, PROBES_TABLE, ProbeState, State,
     gc_lww_table,
 };
 
@@ -291,6 +291,11 @@ impl ProbeStore for State {
 
     #[instrument(name="state.gc", skip(self), fields(otel.kind = "internal", node.id=%self.node_id), err(Debug))]
     async fn gc(&self) -> Result<(), Box<dyn Error>> {
+        // Re-stamp this node's own metadata before the sweep so a live node's record never ages
+        // past the expiry below, while the records of nodes that have left do (see
+        // `NodeMetadataStore::refresh_node_metadata`).
+        self.refresh_node_metadata().await?;
+
         let history_expiry_threshold =
             chrono::Utc::now() - self.get_config().cluster.gc_probe_expiry;
 
@@ -328,11 +333,20 @@ impl ProbeStore for State {
                 info!(name: "state.gc.summary", { dropped_crons = %dropped_crons }, "Dropped stale cron records");
             }
 
+            // Node metadata follows the same expiry: a node that has stopped refreshing its record
+            // for this long has left the cluster (its probe records expire alongside it).
+            let dropped_nodes = gc_lww_table(txn, NODE_METADATA_TABLE, history_expiry_threshold)?;
+
+            if dropped_nodes > 0 {
+                info!(name: "state.gc.summary", { dropped_nodes = %dropped_nodes }, "Dropped stale node metadata records");
+            }
+
             info!(
                 name: "state.gc.pass",
                 {
                     dropped_probe_records,
                     dropped_crons,
+                    dropped_nodes,
                     expired_at = %history_expiry_threshold,
                 },
                 "Completed state garbage collection pass.",

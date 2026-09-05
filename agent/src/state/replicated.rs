@@ -8,12 +8,13 @@
 //! Two families share this enum but are keyed and merged differently:
 //! - **Per-observer** ([`Probe`]): stored under `(node_id, name)`, the gossip partition is the node
 //!   component of that key, and records merge via their CRDT [`Versioned::apply`].
-//! - **Global last-writer-wins** ([`GlobalLwwEntity`]: [`Cron`], [`Incident`], [`IncidentUpdate`]):
+//! - **Global last-writer-wins** ([`GlobalLwwEntity`]: [`Cron`], [`Incident`], [`IncidentUpdate`],
+//!   [`NodeMetadata`]):
 //!   stored as a single row keyed by the entity id alone, the gossip partition is the entity's
 //!   `last_writer` (carried in the redb value, not the key), and conflicts resolve by the total order
 //!   `(version, last_writer)`.
 
-use grey_api::{Cron, Incident, IncidentUpdate, Probe};
+use grey_api::{Cron, Incident, IncidentUpdate, NodeMetadata, Probe};
 use redb::TableDefinition;
 use serde::{Deserialize, Serialize};
 
@@ -54,6 +55,9 @@ pub enum ReplicatedEntity {
     Cron(Cron),
     Incident(Incident),
     IncidentUpdate(IncidentUpdate),
+    /// The labels a node publishes about itself (hostname, cloud, region, ...). Appended last so the
+    /// wire encoding of the earlier variants is unchanged.
+    NodeMetadata(NodeMetadata),
 }
 
 impl Versioned for ReplicatedEntity {
@@ -67,6 +71,7 @@ impl Versioned for ReplicatedEntity {
             ReplicatedEntity::Cron(cron) => cron.version(),
             ReplicatedEntity::Incident(incident) => incident.version(),
             ReplicatedEntity::IncidentUpdate(update) => update.version(),
+            ReplicatedEntity::NodeMetadata(node) => node.version(),
         }
     }
 
@@ -79,6 +84,9 @@ impl Versioned for ReplicatedEntity {
             }
             ReplicatedEntity::IncidentUpdate(update) => {
                 update.diff(version).map(ReplicatedEntity::IncidentUpdate)
+            }
+            ReplicatedEntity::NodeMetadata(node) => {
+                node.diff(version).map(ReplicatedEntity::NodeMetadata)
             }
         }
     }
@@ -96,6 +104,9 @@ impl Versioned for ReplicatedEntity {
                 ReplicatedEntity::IncidentUpdate(update),
                 ReplicatedEntity::IncidentUpdate(incoming),
             ) => update.apply(incoming),
+            (ReplicatedEntity::NodeMetadata(node), ReplicatedEntity::NodeMetadata(incoming)) => {
+                node.apply(incoming)
+            }
             // A single (node, field) entry never changes entity type, so a mismatched pair cannot
             // occur in practice; ignore it defensively rather than panicking on malformed input.
             _ => {}

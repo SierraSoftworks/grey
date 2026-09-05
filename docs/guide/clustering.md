@@ -387,6 +387,54 @@ cluster:
     silent_after: 1h    # Longer than the slowest probe interval on any node; 0s disables.
 ```
 
+## Node Metadata
+
+Grey identifies nodes by an opaque, randomly generated identifier, which is what appears in probe
+`observers`/`observations` and in webhook payloads. To make those identifiers meaningful, every node
+publishes a small set of **labels** describing itself, which is replicated through the same gossip as
+probe state and persisted alongside it (so it survives restarts and reaches nodes the publisher never
+talks to directly).
+
+The `hostname` label is filled in from the operating system automatically; any further labels come
+from `cluster.labels`, which may also override the detected hostname:
+
+```yaml
+cluster:
+  labels:
+    hostname: grey-syd-1        # Optional: overrides the OS hostname.
+    cloud: aws
+    region: ap-southeast-2
+    az: ap-southeast-2a
+    cluster: prod
+```
+
+A node re-publishes its labels when they change (picked up on config reload) and refreshes its record
+periodically so that a running node's metadata never ages out, while the metadata of a node that has
+left the cluster expires with its probe records after `gc_probe_expiry`.
+
+Because labels describe the machines behind the status page, they are **only visible to signed-in
+administrators**: anonymous viewers continue to see nothing about nodes at all. Operators can resolve
+identifiers through the admin API:
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /api/v1/admin/cluster/nodes` | Every known node's metadata (`id`, `labels`, `last_updated`), sorted by id. |
+| `GET /api/v1/admin/cluster/nodes/{id}` | One node's metadata, or `404` when it has published none. |
+
+```json
+[
+  {
+    "id": "1p3x9kq2m7v4c8",
+    "labels": { "hostname": "grey-syd-1", "cloud": "aws", "region": "ap-southeast-2" },
+    "last_updated": 1750334400000
+  }
+]
+```
+
+When an administrator is signed in, the status page uses this to show hostnames in place of node
+identifiers — in the cluster popover (where each member's remaining labels are shown as tags) and in
+the per-observer breakdown of a probe's history — with the raw identifier available as a tooltip.
+
 ## Peer Discovery and Health
 
 Alongside the probe-state anti-entropy, each node periodically broadcasts a small, fire-and-forget
