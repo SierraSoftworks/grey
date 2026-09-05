@@ -17,6 +17,8 @@ use redb::{Durability, ReadableDatabase, ReadableTable, TableDefinition};
 
 use crate::cluster::Versioned;
 use crate::cron::CronCheckin;
+use crate::telemetry::metrics;
+use tracing_batteries::prelude::*;
 
 use super::{CRON_TABLE, GlobalLwwEntity, LwwFieldValue, State};
 
@@ -134,7 +136,8 @@ impl CronStore for State {
 
         let cfg = cfg.clone();
         let name = name.to_string();
-        let own: u128 = self.node_id.into();
+        let node_id = self.node_id;
+        let own: u128 = node_id.into();
         self.write("record_cron_checkin", Durability::Immediate, move |txn| {
             let mut table = txn.open_table(CRON_TABLE)?;
 
@@ -151,6 +154,42 @@ impl CronStore for State {
             // Keep config-echo current in case the YAML changed since the last check-in.
             cfg.stamp(&mut cron);
             checkin.apply(&mut cron);
+
+            // A terminal check-in closes the in-flight run (which then carries its duration); a
+            // completion-only job records an instantaneous run with no duration.
+            let duration = match checkin.status {
+                CronStatus::Running => None,
+                CronStatus::Succeeded | CronStatus::Failed => {
+                    cron.runs.last().and_then(|run| run.duration)
+                }
+            };
+
+            match checkin.status {
+                CronStatus::Failed => error!(
+                    name: "cron.checkin",
+                    {
+                        cron.name = name,
+                        cron.status = checkin.status.as_str(),
+                        cron.message = %checkin.message,
+                        cron.duration_ms = duration.map(|d| d.as_millis() as u64),
+                    },
+                    "Cron '{name}' reported a failed run: {}",
+                    checkin.message,
+                ),
+                CronStatus::Running | CronStatus::Succeeded => debug!(
+                    name: "cron.checkin",
+                    {
+                        cron.name = name,
+                        cron.status = checkin.status.as_str(),
+                        cron.message = %checkin.message,
+                        cron.duration_ms = duration.map(|d| d.as_millis() as u64),
+                    },
+                    "Cron '{name}' checked in as {}.",
+                    checkin.status.as_str(),
+                ),
+            }
+
+            metrics().record_cron(name.as_str(), &node_id, checkin.status, None, duration);
 
             table.insert(
                 name.as_str(),
@@ -180,7 +219,8 @@ impl CronStore for State {
 
         let cfg = cfg.clone();
         let name = name.to_string();
-        let own: u128 = self.node_id.into();
+        let node_id = self.node_id;
+        let own: u128 = node_id.into();
         self.write("record_cron_detection", Durability::Immediate, move |txn| {
             let mut table = txn.open_table(CRON_TABLE)?;
 
@@ -230,6 +270,19 @@ impl CronStore for State {
             // Advance the record's version to now so the detection supersedes prior state and gossips
             // (a backfilled `occurred_at` in the past must not leave the version stale).
             cron.last_updated = cron.last_updated.max(Utc::now());
+
+            error!(
+                name: "cron.detection",
+                {
+                    cron.name = name,
+                    cron.status = CronStatus::Failed.as_str(),
+                    cron.reason = reason.as_str(),
+                    cron.occurred_at = %occurred_at,
+                },
+                "Cron '{name}' is {}: {message}",
+                reason.as_str(),
+            );
+            metrics().record_cron(name.as_str(), &node_id, CronStatus::Failed, Some(reason), None);
 
             table.insert(
                 name.as_str(),

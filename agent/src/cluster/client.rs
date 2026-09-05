@@ -8,6 +8,7 @@ use tracing::instrument;
 use tracing_batteries::prelude::*;
 
 use super::*;
+use crate::telemetry::{GossipDirection, metrics};
 
 pub struct GossipClient<S, T>
 where
@@ -83,6 +84,16 @@ where
     }
 
     pub async fn run(&self) {
+        info!(
+            name: "gossip.start",
+            {
+                gossip.interval = ?self.gossip_interval,
+                gossip.factor = self.gossip_factor,
+                gossip.seeds = ?self.seed_peers,
+            },
+            "Starting cluster gossip with {} seed peer(s).",
+            self.seed_peers.len(),
+        );
         tokio::join!(self.gossip_loop(), self.receive_loop(), self.resolve_loop());
     }
 
@@ -177,12 +188,21 @@ where
             // Probe-state anti-entropy (the established Syn/SynAck/Ack handshake). Best effort per
             // target: a failure to reach one peer must not prevent the remaining targets (including
             // the seeds) from being gossiped this round.
-            if let Err(err) = self
+            let sent = self
                 .transport
                 .send(addr.clone(), Message::Syn(syn_meta, digest.clone()))
                 .instrument(span.clone())
-                .await
-            {
+                .await;
+            span.in_scope(|| {
+                metrics().record_gossip(
+                    "syn",
+                    GossipDirection::Sent,
+                    &self_id,
+                    maybe_id.as_ref().map(|id| id as &dyn Display),
+                    sent.is_ok(),
+                )
+            });
+            if let Err(err) = sent {
                 warn!(name: "gossip.send", { peer.addr = %addr, exception = %err }, "Failed to send gossip syn to {addr}: {err:?}");
                 continue;
             }
@@ -193,12 +213,21 @@ where
             if !sample.is_empty() {
                 let member_meta =
                     span.in_scope(|| MessageMetadata::new(self_id.clone()).with_trace_context());
-                if let Err(err) = self
+                let sent = self
                     .transport
                     .send(addr.clone(), Message::MemberGossip(member_meta, sample.clone()))
-                    .instrument(span)
-                    .await
-                {
+                    .instrument(span.clone())
+                    .await;
+                span.in_scope(|| {
+                    metrics().record_gossip(
+                        "members",
+                        GossipDirection::Sent,
+                        &self_id,
+                        maybe_id.as_ref().map(|id| id as &dyn Display),
+                        sent.is_ok(),
+                    )
+                });
+                if let Err(err) = sent {
                     trace!("Failed to send membership gossip to {addr}: {err:?}");
                 }
             }
@@ -294,11 +323,20 @@ where
 
                     trace!(name: "gossip.receive", "Received gossip {} message from {}: {:?}", msg.kind(), addr, msg);
 
-                    match self.handle_message(self_id.clone(), &addr, msg).instrument(span).await {
-                        Ok(()) => {}
-                        Err(err) => {
-                            warn!(name: "gossip.handle", "Failed to handle gossip message from {addr}: {err:?}");
-                        }
+                    let kind = msg.kind();
+                    let from = meta.from.clone();
+                    let result = self.handle_message(self_id.clone(), &addr, msg).instrument(span.clone()).await;
+                    span.in_scope(|| {
+                        metrics().record_gossip(
+                            kind,
+                            GossipDirection::Received,
+                            &self_id,
+                            Some(&from),
+                            result.is_ok(),
+                        )
+                    });
+                    if let Err(err) = result {
+                        warn!(name: "gossip.handle", { peer.id = %from, peer.addr = %addr, message.kind = kind, exception = %err }, "Failed to handle gossip {kind} message from {addr}: {err:?}");
                     }
                 },
                 Ok(_) => {
@@ -335,13 +373,14 @@ where
                         .map_err(|e| format!("Failed to compute diff for peer {}: {e:?}", meta.from))?;
                     let digest = self.store.digest().await
                         .map_err(|e| format!("Failed to compute digest for node: {e:?}"))?;
-                    self.transport
+                    let sent = self.transport
                         .send(
                             addr.clone(),
                             Message::SynAck(MessageMetadata::new(self_id.clone()).with_trace_context(), digest, delta),
                         )
-                        .await
-                        .map_err(|e| format!("Failed to send synack gossip message to peer {} at {addr}: {e:?}", meta.from))?;
+                        .await;
+                    metrics().record_gossip("synack", GossipDirection::Sent, &self_id, Some(&meta.from), sent.is_ok());
+                    sent.map_err(|e| format!("Failed to send synack gossip message to peer {} at {addr}: {e:?}", meta.from))?;
                     trace!("Sent synack to {} at {}", meta.from, addr);
                 }
                 Message::SynAck(meta, digest, diff) => {
@@ -352,10 +391,11 @@ where
                         .map_err(|e| format!("Failed to compute diff for peer {}: {e:?}", meta.from))?;
                     self.store.apply(diff).await?;
 
-                    self.transport
+                    let sent = self.transport
                         .send(addr.clone(), Message::Ack(MessageMetadata::new(self_id.clone()).with_trace_context(), delta))
-                        .await
-                        .map_err(|e| format!("Failed to send ack gossip message to peer {} at {addr}: {e:?}", meta.from))?;
+                        .await;
+                    metrics().record_gossip("ack", GossipDirection::Sent, &self_id, Some(&meta.from), sent.is_ok());
+                    sent.map_err(|e| format!("Failed to send ack gossip message to peer {} at {addr}: {e:?}", meta.from))?;
 
                     trace!("Sent ack to {} at {}", meta.from, addr);
                 }
