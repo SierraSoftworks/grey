@@ -328,6 +328,16 @@ impl ProbeStore for State {
             if dropped_crons > 0 {
                 info!(name: "state.gc.summary", { dropped_crons = %dropped_crons }, "Dropped stale cron records");
             }
+
+            info!(
+                name: "state.gc.pass",
+                {
+                    dropped_probe_records,
+                    dropped_crons,
+                    expired_at = %history_expiry_threshold,
+                },
+                "Completed state garbage collection pass.",
+            );
         }
 
         txn.commit()?;

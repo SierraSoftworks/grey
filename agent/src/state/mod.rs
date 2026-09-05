@@ -204,6 +204,11 @@ impl State {
         Ok(())
     }
 
+    /// This node's stable cluster identity.
+    pub fn node_id(&self) -> NodeID {
+        self.node_id
+    }
+
     pub fn get_config(&self) -> Arc<Config> {
         self.config.read().unwrap().clone()
     }

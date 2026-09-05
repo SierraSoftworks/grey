@@ -54,6 +54,8 @@ impl CronMonitor {
     async fn evaluate(&self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Utc::now();
         let crons = self.state.get_cron_states().await?;
+        let evaluated = crons.len();
+        let mut detected = 0usize;
 
         for (name, cron) in crons {
             // An in-flight run that has overrun its `max_duration` is stuck. Mark it once (a marked
@@ -72,7 +74,7 @@ impl CronMonitor {
                     .record_cron_detection(&name, CronRunReason::Stuck, at)
                     .await?
                 {
-                    debug!(name: "cron.monitor.stuck", { cron.name = %name }, "Recorded an overrunning cron run.");
+                    detected += 1;
                 }
                 continue;
             }
@@ -89,10 +91,16 @@ impl CronMonitor {
                     .record_cron_detection(&name, CronRunReason::Missed, due)
                     .await?
                 {
-                    debug!(name: "cron.monitor.missing", { cron.name = %name }, "Recorded a missed cron run.");
+                    detected += 1;
                 }
             }
         }
+
+        debug!(
+            name: "cron.monitor.pass",
+            { crons.evaluated = evaluated, crons.detected = detected },
+            "Completed cron monitor pass.",
+        );
 
         Ok(())
     }
