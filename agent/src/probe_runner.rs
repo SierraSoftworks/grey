@@ -213,6 +213,13 @@ impl ProbeRunner {
 
         let sample = sample.finish();
         let latency = sample.duration.to_std().unwrap_or_default();
+        // `retries` counts attempts which completed and failed. A timeout additionally cut short
+        // the attempt that was in flight, so it counts towards the attempts made; a cancellation
+        // before any attempt ran legitimately reports zero.
+        let attempts_made = match status {
+            ProbeStatus::Timeout => sample.retries + 1,
+            ProbeStatus::Pass | ProbeStatus::Fail => sample.retries,
+        };
 
         match &result {
             Ok(()) => {
@@ -245,13 +252,13 @@ impl ProbeRunner {
                         probe.target = %probe.target,
                         probe.status = status.as_str(),
                         probe.retries = sample.retries,
+                        probe.attempts_made = attempts_made,
                         probe.attempts = total_attempts,
                         probe.latency_ms = latency.as_millis() as u64,
                         probe.failed_checks = ?failed_checks,
                         exception = err.as_ref(),
                     },
-                    "Probe '{probe_name}' failed after {} attempt(s): {err}",
-                    sample.retries.max(1),
+                    "Probe '{probe_name}' failed after {attempts_made} attempt(s): {err}",
                 );
             }
         }
