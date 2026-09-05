@@ -106,6 +106,11 @@ impl Reducible for StoreState {
             Action::ClearSession => {
                 next.user = None;
                 next.token = None;
+                // Operator-only state goes with the session, synchronously: the anonymous view
+                // must never keep showing cluster topology or resolved node names while the
+                // re-fetch that would empty them is still in flight.
+                next.peers.clear();
+                next.nodes.clear();
             }
             Action::SetError(error) => next.error = Some(error),
             Action::ClearError => next.error = None,
@@ -523,6 +528,37 @@ pub fn store_provider(props: &StoreProviderProps) -> Html {
 pub fn use_store() -> Store {
     use_context::<Store>()
         .expect("Store not found. Make sure to wrap your component with StoreProvider.")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn operator_state() -> StoreState {
+        StoreState {
+            user: Some(AdminUser { subject: "op".into(), email: None, name: None }),
+            token: Some("token".into()),
+            peers: vec![Peer {
+                id: "1p3x9k".into(),
+                last_seen: chrono::Utc::now(),
+                health: grey_api::PeerHealth::Online,
+                current: true,
+                node: None,
+            }],
+            nodes: vec![NodeMetadata::new("1p3x9k", Default::default(), chrono::Utc::now())],
+            ..Default::default()
+        }
+    }
+
+    /// Signing out drops the operator-only cluster state (peers and node metadata) in the same
+    /// reduction as the session, rather than leaving it visible until the next poll.
+    #[test]
+    fn clearing_the_session_drops_operator_only_state() {
+        let next = Rc::new(operator_state()).reduce(Action::ClearSession);
+        assert!(next.user.is_none() && next.token.is_none());
+        assert!(next.peers.is_empty(), "peers must be cleared with the session");
+        assert!(next.nodes.is_empty(), "node metadata must be cleared with the session");
+    }
 }
 
 /// Provides a process-wide [`focus::FocusTracker`], created once and shared by every polling loop so
