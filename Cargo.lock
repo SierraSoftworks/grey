@@ -735,7 +735,7 @@ dependencies = [
  "futures",
  "futures-lite",
  "http 1.5.0",
- "reqwest 0.13.4",
+ "reqwest 0.13.5",
  "rustc-hash",
  "serde_json",
  "url",
@@ -2322,7 +2322,7 @@ dependencies = [
  "rand 0.10.2",
  "rcgen",
  "redb",
- "reqwest 0.13.4",
+ "reqwest 0.13.5",
  "rmp-serde",
  "rustls",
  "rustls-native-certs",
@@ -3464,7 +3464,7 @@ dependencies = [
  "bytes",
  "http 1.5.0",
  "opentelemetry",
- "reqwest 0.13.4",
+ "reqwest 0.13.5",
 ]
 
 [[package]]
@@ -3479,7 +3479,7 @@ dependencies = [
  "opentelemetry-proto",
  "opentelemetry_sdk",
  "prost",
- "reqwest 0.13.4",
+ "reqwest 0.13.5",
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
@@ -4196,11 +4196,11 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.13.4"
+version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
+checksum = "16a1cfa75cc186dd73d5818e510e042e40927bccc9c236b061cea97e1eb08029"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "encoding_rs",
  "futures-channel",
@@ -4542,7 +4542,7 @@ checksum = "63207365db50cb817402f0ec8097d6dad3d644ef3fffd6ba30c75b3077e514da"
 dependencies = [
  "cfg_aliases",
  "httpdate",
- "reqwest 0.13.4",
+ "reqwest 0.13.5",
  "rustls",
  "sentry-actix",
  "sentry-core",
