@@ -13,7 +13,7 @@ readme = "README.md"
 grey-api = { path = "api" }
 grey-ui = { path = "ui", default-features = false }
 
-actix-web = "4.13"
+actix-web = { version = "4.13", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "compress-zstd", "cookies", "unicode", "compat", "ws"] }
 aes-gcm = "0.11.0"
 async-trait = "0.1"
 base64 = "0.23.0"
