@@ -1,11 +1,15 @@
 use std::{fmt::Display, str::FromStr, sync::atomic::AtomicBool};
 
-use serde::{Deserialize, Serialize};
-use trust_dns_resolver::{
-    TokioAsyncResolver,
-    config::{ResolverConfig, ResolverOpts},
-    proto::rr::RecordType,
+use hickory_resolver::{
+    TokioResolver,
+    config::{ConnectionConfig, GOOGLE, NameServerConfig, ResolverConfig, ResolverOpts},
+    net::runtime::TokioRuntimeProvider,
+    proto::{
+        op::Query,
+        rr::{Name, RData, Record, RecordType},
+    },
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{Sample, Target};
 
@@ -20,21 +24,68 @@ pub struct DnsTarget {
 impl Target for DnsTarget {
     async fn run(&self, _cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>> {
         let resolver_config = self.resolver_config()?;
-        let lookup = TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default())
-            .lookup(
-                self.domain.as_str(),
-                RecordType::from_str(self.record_type.as_deref().unwrap_or("A"))?,
-            )
-            .await?;
+        let lookup =
+            TokioResolver::builder_with_config(resolver_config, TokioRuntimeProvider::default())
+                .with_options(ResolverOpts::default())
+                .build()?
+                .lookup(
+                    self.domain.as_str(),
+                    RecordType::from_str(self.record_type.as_deref().unwrap_or("A"))?,
+                )
+                .await?;
 
         Ok(Sample::default().with(
             "dns.answers",
-            lookup
-                .iter()
-                .map(|addr| addr.to_string())
-                .collect::<Vec<String>>(),
+            answer_records(
+                lookup.query(),
+                lookup.answers(),
+                lookup.additionals(),
+                lookup.authorities(),
+            )
+            .map(|record| record.data.to_string())
+            .collect::<Vec<String>>(),
         ))
     }
+}
+
+/// Selects the records reported as `dns.answers`, reproducing the set that
+/// trust-dns 0.23's `Lookup::iter()` yielded. hickory-resolver keeps the
+/// response sections separate, whereas trust-dns merged the answer, additional
+/// and authority sections and kept records which (a) match the query type and
+/// name (or a CNAME target), (b) are intermediate CNAMEs, or (c) are A/AAAA
+/// glue for SRV targets and NS queries.
+fn answer_records<'a>(
+    query: &'a Query,
+    answers: &'a [Record],
+    additionals: &'a [Record],
+    authorities: &'a [Record],
+) -> impl Iterator<Item = &'a Record> + 'a {
+    let query_type = query.query_type();
+
+    // The names which trust-dns treated as the lookup's "search name": the
+    // queried name plus any names reached by following CNAMEs.
+    let mut names: Vec<&Name> = vec![query.name()];
+    names.extend(answers.iter().filter_map(|r| match &r.data {
+        RData::CNAME(cname) => Some(&cname.0),
+        _ => None,
+    }));
+
+    answers
+        .iter()
+        .chain(additionals)
+        .chain(authorities)
+        .filter(move |r| {
+            if r.dns_class != query.query_class() {
+                return false;
+            }
+
+            let record_type = r.record_type();
+            let name_matches = names.contains(&&r.name);
+            ((query_type.is_any() || query_type == record_type) && name_matches)
+                || record_type == RecordType::CNAME
+                || (query_type.is_srv() && record_type.is_ip_addr() && name_matches)
+                || (query_type.is_ns() && record_type.is_ip_addr())
+        })
 }
 
 impl Display for DnsTarget {
@@ -51,22 +102,90 @@ impl Display for DnsTarget {
 impl DnsTarget {
     fn resolver_config(&self) -> Result<ResolverConfig, Box<dyn std::error::Error>> {
         if let Some(nameservers) = &self.nameservers {
-            let mut config = ResolverConfig::new();
+            let mut config = ResolverConfig::from_name_servers(vec![]);
             for ns in nameservers {
                 let ns = match core::net::SocketAddr::from_str(&ns) {
                     Ok(addr) => Ok(addr),
-                    Err(_) => format!("{ns}:53").parse()
-                }.map_err(|e| format!("Invalid nameserver address '{}': {}", ns, e))?;
+                    Err(_) => format!("{ns}:53").parse(),
+                }
+                .map_err(|e| format!("Invalid nameserver address '{}': {}", ns, e))?;
 
-                config.add_name_server(trust_dns_resolver::config::NameServerConfig::new(
-                    ns,
-                    trust_dns_resolver::config::Protocol::Udp));
-
+                let mut connection = ConnectionConfig::udp();
+                connection.port = ns.port();
+                config.add_name_server(NameServerConfig::new(ns.ip(), true, vec![connection]));
             }
             Ok(config)
         } else {
-            Ok(ResolverConfig::default())
+            // Matches the previous trust-dns `ResolverConfig::default()`, which
+            // used Google Public DNS over UDP and TCP.
+            Ok(ResolverConfig::udp_and_tcp(&GOOGLE))
         }
+    }
+}
+
+#[cfg(test)]
+mod answer_tests {
+    use std::net::Ipv4Addr;
+
+    use hickory_resolver::proto::rr::rdata::{A, NS, TXT};
+
+    use super::*;
+
+    fn name(s: &str) -> Name {
+        Name::from_str(s).unwrap()
+    }
+
+    fn select(query: &Query, answers: &[Record], additionals: &[Record]) -> Vec<String> {
+        answer_records(query, answers, additionals, &[])
+            .map(|r| r.data.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn ns_lookup_includes_glue_records() {
+        let query = Query::query(name("example.com."), RecordType::NS);
+        let answers = [Record::from_rdata(
+            name("example.com."),
+            300,
+            RData::NS(NS(name("ns1.example.com."))),
+        )];
+        let additionals = [Record::from_rdata(
+            name("ns1.example.com."),
+            300,
+            RData::A(A(Ipv4Addr::new(192, 0, 2, 1))),
+        )];
+
+        assert_eq!(
+            select(&query, &answers, &additionals),
+            vec!["ns1.example.com.".to_string(), "192.0.2.1".to_string()]
+        );
+    }
+
+    #[test]
+    fn unrelated_additional_records_are_excluded() {
+        let query = Query::query(name("example.com."), RecordType::A);
+        let answers = [Record::from_rdata(
+            name("example.com."),
+            300,
+            RData::A(A(Ipv4Addr::new(192, 0, 2, 1))),
+        )];
+        let additionals = [
+            Record::from_rdata(
+                name("other.example.com."),
+                300,
+                RData::A(A(Ipv4Addr::new(192, 0, 2, 2))),
+            ),
+            Record::from_rdata(
+                name("example.com."),
+                300,
+                RData::TXT(TXT::new(vec!["hello".to_string()])),
+            ),
+        ];
+
+        assert_eq!(
+            select(&query, &answers, &additionals),
+            vec!["192.0.2.1".to_string()]
+        );
     }
 }
 

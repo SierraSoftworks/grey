@@ -79,7 +79,7 @@ tracing-batteries = { git = "https://github.com/sierrasoftworks/tracing-batterie
   "opentelemetry",
 ] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
-trust-dns-resolver = { version = "0.23", features = ["tokio-runtime"] }
+hickory-resolver = "0.26"
 uuid = { version = "1", features = ["v4"] }
 x509-parser = "0.18"
 yew = { version = "0.23", features = ["ssr"] }
