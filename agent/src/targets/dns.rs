@@ -1,11 +1,12 @@
 use std::{fmt::Display, str::FromStr, sync::atomic::AtomicBool};
 
-use serde::{Deserialize, Serialize};
-use trust_dns_resolver::{
-    TokioAsyncResolver,
-    config::{ResolverConfig, ResolverOpts},
+use hickory_resolver::{
+    TokioResolver,
+    config::{ConnectionConfig, GOOGLE, NameServerConfig, ResolverConfig, ResolverOpts},
+    net::runtime::TokioRuntimeProvider,
     proto::rr::RecordType,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{Sample, Target};
 
@@ -20,18 +21,22 @@ pub struct DnsTarget {
 impl Target for DnsTarget {
     async fn run(&self, _cancel: &AtomicBool) -> Result<Sample, Box<dyn std::error::Error>> {
         let resolver_config = self.resolver_config()?;
-        let lookup = TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default())
-            .lookup(
-                self.domain.as_str(),
-                RecordType::from_str(self.record_type.as_deref().unwrap_or("A"))?,
-            )
-            .await?;
+        let lookup =
+            TokioResolver::builder_with_config(resolver_config, TokioRuntimeProvider::default())
+                .with_options(ResolverOpts::default())
+                .build()?
+                .lookup(
+                    self.domain.as_str(),
+                    RecordType::from_str(self.record_type.as_deref().unwrap_or("A"))?,
+                )
+                .await?;
 
         Ok(Sample::default().with(
             "dns.answers",
             lookup
+                .answers()
                 .iter()
-                .map(|addr| addr.to_string())
+                .map(|record| record.data.to_string())
                 .collect::<Vec<String>>(),
         ))
     }
@@ -51,21 +56,23 @@ impl Display for DnsTarget {
 impl DnsTarget {
     fn resolver_config(&self) -> Result<ResolverConfig, Box<dyn std::error::Error>> {
         if let Some(nameservers) = &self.nameservers {
-            let mut config = ResolverConfig::new();
+            let mut config = ResolverConfig::from_name_servers(vec![]);
             for ns in nameservers {
                 let ns = match core::net::SocketAddr::from_str(&ns) {
                     Ok(addr) => Ok(addr),
-                    Err(_) => format!("{ns}:53").parse()
-                }.map_err(|e| format!("Invalid nameserver address '{}': {}", ns, e))?;
+                    Err(_) => format!("{ns}:53").parse(),
+                }
+                .map_err(|e| format!("Invalid nameserver address '{}': {}", ns, e))?;
 
-                config.add_name_server(trust_dns_resolver::config::NameServerConfig::new(
-                    ns,
-                    trust_dns_resolver::config::Protocol::Udp));
-
+                let mut connection = ConnectionConfig::udp();
+                connection.port = ns.port();
+                config.add_name_server(NameServerConfig::new(ns.ip(), true, vec![connection]));
             }
             Ok(config)
         } else {
-            Ok(ResolverConfig::default())
+            // Matches the previous trust-dns `ResolverConfig::default()`, which
+            // used Google Public DNS over UDP and TCP.
+            Ok(ResolverConfig::udp_and_tcp(&GOOGLE))
         }
     }
 }
