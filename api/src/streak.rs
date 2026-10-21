@@ -62,16 +62,21 @@ impl Streak {
 
     /// The debounced failing signal: whether the entity has been *continuously* failing for at least
     /// `window` at `now`. This is true only once a failure has been observed within the last `window`
-    /// (still failing) **and** the current episode began at least `window` ago — so a fault shorter
-    /// than `window` never trips it, and a genuine one trips exactly `window` after it began. Because
-    /// `failing_since` only advances at the start of a fresh episode, "began ≥ window ago" implies no
-    /// recovery occurred in between.
+    /// (still failing), the current episode began at least `window` ago, **and** the episode itself
+    /// spans at least `window` (its latest failing observation is that far past its onset) — so a
+    /// fault shorter than `window` never trips it, and a genuine one trips with the first failing
+    /// observation made `window` after it began. Because `failing_since` only advances at the start
+    /// of a fresh episode, "began ≥ window ago" implies no recovery occurred in between.
+    ///
+    /// The span requirement is what keeps a brief multi-sample blip quiet: without it, a fault
+    /// observed from `since` to `until` (shorter than `window`) would read as failing between
+    /// `since + window` and `until + window` — long after it had actually cleared.
     pub fn failing_for(&self, now: DateTime<Utc>, window: chrono::Duration) -> bool {
         self.failing_at(now, window)
-            && self
-                .failing_since
-                .map(|since| now - since >= window)
-                .unwrap_or(false)
+            && match (self.failing_since, self.failing_until) {
+                (Some(since), Some(until)) => now - since >= window && until - since >= window,
+                _ => false,
+            }
     }
 
     /// The debounced health at `now`: the entity reads healthy unless it has been continuously
@@ -284,6 +289,28 @@ mod tests {
         for offset in [0, 60, 120, 240, 299, 300, 301, 600] {
             let now = ts(1_000) + chrono::Duration::seconds(offset);
             assert!(!register.failing_for(now, window), "blip must not trip at +{offset}s");
+        }
+    }
+
+    /// A blip made of several failing samples, but still shorter than the window, must not trip the
+    /// debounced signal either — in particular not a window *after* it began, once the fault itself
+    /// is long gone but its last sample is still inside the recovery window.
+    #[test]
+    fn test_failing_for_ignores_short_multi_sample_blips() {
+        let window = chrono::Duration::minutes(5);
+        let mut register = streak(None, None, Some(0));
+
+        // Thirty seconds of failures, then nothing.
+        for offset in [0, 10, 20, 30] {
+            register.observe(false, ts(1_000 + offset), window);
+        }
+        assert_eq!(register.failing_since, Some(ts(1_000)));
+        assert_eq!(register.failing_until, Some(ts(1_030)));
+
+        for offset in [0, 30, 299, 300, 315, 329, 330, 331, 600] {
+            let now = ts(1_000) + chrono::Duration::seconds(offset);
+            assert!(!register.failing_for(now, window), "blip must not trip at +{offset}s");
+            assert!(register.healthy_at(now, window));
         }
     }
 
