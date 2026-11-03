@@ -266,7 +266,7 @@ impl Config {
             err
         })?;
 
-        let config: Self = serde_yaml::from_str(&config)?;
+        let config: Self = serde_norway::from_str(&config)?;
         config.validate_crons()?;
         config.validate_webhooks()?;
         Ok(config)
@@ -768,7 +768,7 @@ mod tests {
     #[test]
     fn quorum_and_node_alerting_config() {
         let yaml = "probes:\n  - name: p\n    policy: { interval: 5s, timeout: 2s }\n    target: !Http\n      url: https://example.com\n    alerting:\n      quorum: 2\n  - name: q\n    policy: { interval: 5s, timeout: 2s }\n    target: !Http\n      url: https://example.com\ncluster:\n  peers: []\n  secret: ''\n  quorum: 60%\n  alerting:\n    quorum: majority\n    silent_after: 0s\n";
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let config: Config = serde_norway::from_str(yaml).unwrap();
         assert_eq!(config.probes[0].alerting.quorum, Some(grey_api::Quorum::Count(2)));
         assert_eq!(config.probes[1].alerting.quorum, None);
         assert_eq!(config.cluster.quorum, grey_api::Quorum::Percent(60));
@@ -780,7 +780,7 @@ mod tests {
         assert_eq!(defaults.quorum, grey_api::Quorum::Majority);
         assert_eq!(defaults.alerting.silent_after_chrono(), Some(chrono::Duration::hours(1)));
 
-        assert!(serde_yaml::from_str::<Config>("cluster:\n  peers: []\n  secret: ''\n  quorum: most\n").is_err());
+        assert!(serde_norway::from_str::<Config>("cluster:\n  peers: []\n  secret: ''\n  quorum: most\n").is_err());
     }
 
     /// A webhook with a missing or non-http(s) endpoint must fail to load rather than silently
