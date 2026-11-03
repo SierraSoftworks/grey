@@ -68,7 +68,7 @@ target: !Http
 
     #[test]
     fn checks_default_to_empty() {
-        let probe: Probe = serde_yaml::from_str(BASE).expect("deserialize probe");
+        let probe: Probe = serde_norway::from_str(BASE).expect("deserialize probe");
         assert!(probe.checks.is_empty());
     }
 
@@ -77,7 +77,7 @@ target: !Http
         let yaml = format!(
             "{BASE}checks:\n  - http.status >= 200 && http.status < 300\n  - http.header.content-type contains \"html\"\n"
         );
-        let probe: Probe = serde_yaml::from_str(&yaml).expect("deserialize probe");
+        let probe: Probe = serde_norway::from_str(&yaml).expect("deserialize probe");
         assert_eq!(probe.checks.len(), 2);
         assert_eq!(
             probe.checks[0].raw(),
@@ -88,7 +88,7 @@ target: !Http
     #[test]
     fn invalid_check_expression_fails_to_deserialize() {
         let yaml = format!("{BASE}checks:\n  - \"http.status >\"\n");
-        assert!(serde_yaml::from_str::<Probe>(&yaml).is_err());
+        assert!(serde_norway::from_str::<Probe>(&yaml).is_err());
     }
 }
 

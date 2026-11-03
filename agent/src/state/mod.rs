@@ -114,7 +114,7 @@ impl State {
         // persisting the node identity), writing the in-memory test config to disk for it to load.
         let config = Config::test(&temp_dir);
         let config_path = temp_dir.join("config.yml");
-        tokio::fs::write(&config_path, serde_yaml::to_string(&config).unwrap())
+        tokio::fs::write(&config_path, serde_norway::to_string(&config).unwrap())
             .await
             .unwrap();
 
