@@ -89,7 +89,7 @@ jobs:
           components: llvm-tools-preview
 
       - name: install protoc
-        uses: SierraSoftworks/setup-protoc@v3.0.1
+        uses: SierraSoftworks/setup-protoc@v3.0.3
         with:
           version: ${{ env.PROTOC_VERSION }}
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -178,7 +178,7 @@ jobs:
 
     steps:
       - name: install protoc
-        uses: SierraSoftworks/setup-protoc@v3.0.1
+        uses: SierraSoftworks/setup-protoc@v3.0.3
         with:
           version: ${{ env.PROTOC_VERSION }}
           repo-token: ${{ secrets.GITHUB_TOKEN }}
