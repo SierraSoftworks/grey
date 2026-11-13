@@ -51,5 +51,6 @@ mod tests {
         for (query, expected) in cases {
             assert_eq!(Filter::new(query).matches(fields), expected, "query {query:?}");
         }
+        assert!(Filter::new("  ").is_empty() && !Filter::new("api").is_empty(), "blank queries filter nothing");
     }
 }

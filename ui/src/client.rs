@@ -175,3 +175,81 @@ fn switch(route: Route) -> Html {
         Route::NotFound => html! { <yew_router::prelude::Redirect<Route> to={Route::Home} /> },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::contexts::StoreProvider;
+    use crate::demo;
+    use yew_router::Router;
+    use yew_router::history::{AnyHistory, History, MemoryHistory};
+
+    #[derive(Properties, PartialEq)]
+    struct PageProps {
+        path: String,
+        operator: bool,
+    }
+
+    /// The whole app at one path, seeded from the demo fixtures: the shell around the routed page.
+    #[function_component(Page)]
+    fn page(props: &PageProps) -> Html {
+        let history = AnyHistory::from(MemoryHistory::new());
+        history.push(props.path.clone());
+
+        html! {
+            <StoreProvider
+                demo=true
+                config={demo::config()}
+                probes={demo::probes()}
+                crons={demo::crons()}
+                incidents={demo::incidents()}
+                peers={demo::peers()}
+                nodes={demo::nodes()}
+                user={props.operator.then(demo::user)}
+            >
+                <Router history={history}><AppContent /></Router>
+            </StoreProvider>
+        }
+    }
+
+    async fn render(path: &str, operator: bool) -> String {
+        let path = path.to_string();
+        yew::ServerRenderer::<Page>::with_props(move || PageProps { path, operator }).render().await
+    }
+
+    fn incident_path() -> String {
+        format!("/incidents/{}", demo::incidents()[0].id())
+    }
+
+    /// Every page a visitor can reach renders inside the shell and shows the content it is for.
+    #[tokio::test]
+    async fn pages_render_their_content_for_visitors() {
+        let title = demo::incidents()[0].title().to_string();
+        let cases = [
+            ("/".to_string(), "Recent incidents"),
+            ("/incidents".to_string(), title.as_str()),
+            (incident_path(), title.as_str()),
+            ("/incidents/unknown".to_string(), "Incident not found"),
+            ("/controls".to_string(), "Controls"),
+        ];
+
+        for (path, expected) in cases {
+            let html = render(&path, false).await;
+            assert!(html.contains(expected), "{path} should show {expected:?}");
+            assert!(html.contains("Grey Demo"), "{path} should sit inside the shell");
+            assert!(!html.contains(&demo::user().name.unwrap_or_default()), "{path} should not show operator chrome to visitors");
+        }
+    }
+
+    /// A signed-in operator is named in the shell on every page. The incident editors need the
+    /// operator's token, which only the browser holds, so they are left to the browser checks.
+    #[tokio::test]
+    async fn operators_keep_their_session_across_pages() {
+        let user = demo::user().name.unwrap_or_default();
+
+        for path in ["/".to_string(), "/incidents".to_string(), "/incidents/new".to_string(), incident_path()] {
+            let html = render(&path, true).await;
+            assert!(html.contains(&user), "{path} should name the signed-in operator");
+        }
+    }
+}

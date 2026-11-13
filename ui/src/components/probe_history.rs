@@ -240,6 +240,22 @@ mod tests {
         assert!(!html.contains("grey-syd-1") && !html.contains("1p3x9k"), "no node names for anonymous viewers, got: {html}");
     }
 
+    /// A failing bucket explains itself: its message, each check with its reason, and only the
+    /// least healthy observers, with the rest counted.
+    #[tokio::test]
+    async fn test_tooltip_explains_a_failing_bucket() {
+        let mut bucket = bucket_with_observers(&["a1", "b2", "c3", "d4", "e5"]);
+        bucket.pass = false;
+        bucket.message = "connection refused".into();
+        bucket.validations =
+            [("http.status".to_string(), grey_api::ValidationResult::fail("expected 200, got 503"))].into_iter().collect();
+
+        let html = render_full(bucket, None, true, vec![]).await;
+        assert!(html.contains("connection refused"), "expected the bucket's message, got: {html}");
+        assert!(html.contains("http.status") && html.contains("expected 200, got 503"), "expected the failed check, got: {html}");
+        assert!(html.contains("and 2 more"), "expected the remaining observers to be counted, got: {html}");
+    }
+
     #[tokio::test]
     async fn test_tooltip_shows_bucket_footer_and_streak_since() {
         let live = LiveStatus { healthy: true, since: Some(chrono::Utc::now() - chrono::Duration::days(5)) };
