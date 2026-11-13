@@ -45,8 +45,10 @@ pub fn home_view() -> Html {
 
     html! {
         <>
-            <Banner class="status-banner" {tone} bold=true size={Size::Large}>{ status_text }</Banner>
-            <ServiceList />
+            <div class="status-sheet">
+                <Banner class="status-banner" {tone} bold=true size={Size::Large}>{ status_text }</Banner>
+                <ServiceList />
+            </div>
             <IncidentsSection incidents={recent_incidents} />
         </>
     }

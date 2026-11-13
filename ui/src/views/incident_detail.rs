@@ -330,7 +330,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
     html! {
         <div class="incidents incident-edit">
             { breadcrumbs(current.title()) }
-            <Card class="incident">
+            <article class="incident">
                 <div class="incident__header">
                     <div class="incident-edit__title">
                         <TextInput
@@ -483,7 +483,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
                         }
                     }) }
                 </Timeline>
-            </Card>
+            </article>
 
             <div class="incident-edit__footer">
                 <Text size={TextSize::Sm} color={TextColor::Muted}>

@@ -154,7 +154,7 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
                     </Breadcrumbs>
                 }}
             />
-            <Card class="incident-form">
+            <div class="incident-form">
                 <form onsubmit={onsubmit}>
                     <Stack gap={Space::Lg}>
                         <Field label={html! { { "Title" } }}>
@@ -187,7 +187,7 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
                         </div>
                     </Stack>
                 </form>
-            </Card>
+            </div>
         </>
     }
 }

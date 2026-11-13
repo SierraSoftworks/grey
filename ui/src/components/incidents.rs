@@ -84,13 +84,13 @@ pub fn incident_summary(props: &IncidentSummaryProps) -> Html {
     let latest_message = incident.sorted_updates().last().map(|u| u.message.clone());
 
     html! {
-        <Card class="incident incident--summary">
+        <article class="incident incident--summary">
             { incident_header(incident) }
             if let Some(message) = latest_message {
                 <Markdown class="incident__message" source={message} top_heading={HeadingLevel::H4} />
             }
             <HorizontalTimeline incident={incident.clone()} />
-        </Card>
+        </article>
     }
 }
 
@@ -105,10 +105,10 @@ pub fn incident_block(props: &IncidentBlockProps) -> Html {
     let incident = &props.incident;
 
     html! {
-        <Card class="incident">
+        <article class="incident">
             { incident_header(incident) }
             <VerticalTimeline updates={incident.updates.clone()} />
-        </Card>
+        </article>
     }
 }
 
@@ -117,7 +117,7 @@ pub fn incident_block(props: &IncidentBlockProps) -> Html {
 #[function_component(IncidentBlockSkeleton)]
 pub fn incident_block_skeleton() -> Html {
     html! {
-        <Card class="incident incident--skeleton" attrs={attrs! { "aria-hidden" => "true" }}>
+        <div class="incident incident--skeleton" aria-hidden="true">
             <div class="incident__header">
                 <Skeleton width="18rem" />
                 <Skeleton width="5rem" />
@@ -130,7 +130,7 @@ pub fn incident_block_skeleton() -> Html {
                     </Stack>
                 }) }
             </Stack>
-        </Card>
+        </div>
     }
 }
 

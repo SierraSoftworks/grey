@@ -27,9 +27,32 @@ $narrow: 40rem;
 // -----------------------------------------------------------------------------
 
 :root {
-  // The Sierra Softworks blue, and a lighter cut of it that holds up on a dark
-  // background.
-  --yi-accent: light-dark(#0f5a80, #4aa8d8);
+  --yi-accent: #3498db;
+
+  // Grey's status colours: saturated, and the same in both themes. They are
+  // fills (banner, history cells, dots, rails, a service's edge), which is
+  // where a status page wants its colour to carry from across the room.
+  --grey-ok: #28a745;
+  --grey-warn: #e67e22;
+  --grey-danger: #e74c3c;
+  --grey-info: #5dade2;
+  --grey-active: #5dade2;
+  --grey-neutral: #7f8c8d;
+}
+
+// yewi's own tones are tuned to be read as text on a surface, so they stay for
+// text (pills, alerts) and are swapped only on the components that paint them
+// as a fill.
+.yi-banner--bold,
+.yi-history-strip,
+.yi-status-dot,
+.yi-timeline__item {
+  --yi-ok: var(--grey-ok);
+  --yi-warn: var(--grey-warn);
+  --yi-danger: var(--grey-danger);
+  --yi-info: var(--grey-info);
+  --yi-active: var(--grey-active);
+  --yi-neutral: var(--grey-neutral);
 }
 
 .yi-app-bar__brand img {
@@ -62,8 +85,23 @@ $narrow: 40rem;
   flex-direction: column;
 }
 
-.status-banner {
+// The status page is one sheet: the top-line banner, then every service as a
+// band beneath it, with no cards of their own.
+.status-sheet {
   border-radius: var(--yi-radius-card);
+  background: var(--yi-surface);
+  box-shadow: var(--yi-shadow-card);
+  overflow: clip;
+
+  @media (max-width: $narrow) {
+    margin-inline: calc(min(var(--yi-app-shell-padding), var(--yi-space-lg)) * -1);
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+.status-banner {
+  --yi-banner-padding: var(--yi-space-xl);
 }
 
 .page {
@@ -88,25 +126,49 @@ $narrow: 40rem;
 .services {
   display: flex;
   flex-direction: column;
-  gap: var(--yi-space-lg);
 }
 
-// A service's health runs down the leading edge of its card, so the state of
-// the whole page reads at a glance.
+// A service is a flat band on the page, not a card: its health runs down a
+// heavy leading edge, so the state of the whole page reads at a glance.
 .service {
-  border-inline-start: 4px solid var(--service-tone, var(--yi-neutral));
-  // The sidebar links here; keep the card clear of the app bar.
+  display: flex;
+  flex-direction: column;
+  gap: var(--yi-space-md);
+  padding: var(--yi-space-lg) var(--yi-space-xl);
+  border-inline-start: 10px solid var(--service-tone, var(--grey-neutral));
+  // The sidebar links here; keep the band clear of the app bar.
   scroll-margin-block-start: calc(var(--yi-app-shell-bar-height) + var(--yi-space-md));
 
   @each $tone in (ok, warn, danger, neutral) {
     &--#{$tone} {
-      --service-tone: var(--yi-#{$tone});
+      --service-tone: var(--grey-#{$tone});
     }
   }
+
+  @media (max-width: $narrow) {
+    padding-inline: var(--yi-space-md);
+    border-inline-start-width: 6px;
+  }
+}
+
+.service__title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--yi-space-md);
+}
+
+.service__name {
+  margin: 0;
+  font-family: var(--yi-font-heading);
+  font-size: 1.5rem;
+  font-weight: 300;
 }
 
 .service__availability {
   color: var(--yi-fg-muted);
+  font-size: var(--yi-text-lg);
+  font-weight: 300;
   font-variant-numeric: tabular-nums;
 }
 
@@ -151,7 +213,7 @@ $narrow: 40rem;
 .check__name {
   margin: 0;
   font: inherit;
-  font-weight: 500;
+  font-size: var(--yi-text-xl);
   // Probe names are often URLs: let them break rather than widen the page.
   overflow-wrap: anywhere;
 }
@@ -175,6 +237,13 @@ $narrow: 40rem;
   color: var(--yi-fg);
   font-size: var(--yi-text-md);
   font-variant-numeric: tabular-nums;
+}
+
+// Availability is an unbroken bar, lifted off the sheet.
+.probe-history {
+  --yi-history-strip-gap: 0px;
+
+  box-shadow: 1px 1px 4px rgb(0 0 0 / 0.35);
 }
 
 .cron__schedule {
@@ -286,10 +355,17 @@ $narrow: 40rem;
   gap: var(--yi-space-md);
 }
 
-.incident > .yi-card__body {
+// An incident is flat on the page; successive ones are parted by a rule.
+.incident {
   display: flex;
   flex-direction: column;
   gap: var(--yi-space-md);
+
+  .incidents > & + &,
+  .incidents-section > & + & {
+    padding-block-start: var(--yi-space-lg);
+    border-block-start: 1px solid var(--yi-line);
+  }
 }
 
 .incident__header {

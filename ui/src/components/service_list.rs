@@ -106,20 +106,22 @@ pub fn service_list() -> Html {
             }
 
             Some(html! {
-                <Card
+                <section
                     key={name.to_string()}
                     id={service_anchor(name)}
                     class={classes!("service", format!("service--{}", health.as_str()))}
-                    title={name.to_string()}
-                    actions={html! { <span class="service__availability">{ summary }</span> }}
                 >
+                    <header class="service__title">
+                        <h2 class="service__name">{ name.to_string() }</h2>
+                        <span class="service__availability">{ summary }</span>
+                    </header>
                     { for probes.into_iter().map(|probe| html! {
                         <ProbeComponent key={probe.name.clone()} probe={(*probe).clone()} />
                     }) }
                     { for crons.into_iter().map(|cron| html! {
                         <CronComponent key={cron.name.clone()} cron={(*cron).clone()} />
                     }) }
-                </Card>
+                </section>
             })
         })
         .collect();
