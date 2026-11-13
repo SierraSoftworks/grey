@@ -1,4 +1,3 @@
-use chrono::Datelike;
 #[cfg(feature = "wasm")]
 use grey_api::UiConfig;
 use yew::prelude::*;
@@ -9,7 +8,7 @@ use crate::views::{
     AuthCallback, AuthLogout, HomeView, IncidentDetail, IncidentsList, NewIncident,
 };
 
-use super::components::{ErrorBanner, Header};
+use super::components::Shell;
 
 /// The props that seed the app: the public config plus the server-rendered snapshot of the publicly
 /// visible live entities. On the client these come from the `#app` element's data attributes (see
@@ -151,23 +150,15 @@ pub(crate) fn render_router(url: &str) -> Html {
     }
 }
 
-// Layout shared by every route: the header, the routed page, and the footer.
+// Layout shared by every route: the shell (app bar, sidebar, footer) around the routed page.
 #[function_component(AppContent)]
 fn app_content() -> Html {
     use yew_router::prelude::*;
 
     html! {
-        <>
-            <Header/>
-
-            <ErrorBanner/>
-
+        <Shell>
             <Switch<Route> render={switch} />
-
-            <footer>
-                <p>{format!("Copyright © {} Sierra Softworks", chrono::Utc::now().year())}</p>
-            </footer>
-        </>
+        </Shell>
     }
 }
 

@@ -1,35 +1,37 @@
+use super::filter::use_filter;
 use super::{Cron as CronComponent, Probe as ProbeComponent};
 use crate::contexts::use_store;
 use crate::formatters::availability;
 use std::collections::HashMap;
 use yew::prelude::*;
+use yewi::prelude::*;
 
 /// The probes and crons that share a `service` tag, rendered together under one service group.
 #[derive(Default)]
-struct ServiceGroup<'a> {
-    probes: Vec<&'a grey_api::Probe>,
-    crons: Vec<&'a grey_api::Cron>,
+pub struct ServiceGroup<'a> {
+    pub probes: Vec<&'a grey_api::Probe>,
+    pub crons: Vec<&'a grey_api::Cron>,
 }
 
 impl ServiceGroup<'_> {
-    /// The service's health class plus the summary shown on the right of its title: the
-    /// probe-averaged availability when the service has probes, otherwise a healthy-count (a
-    /// cron-only service has no availability percentage to report).
-    fn summary(&self, now: chrono::DateTime<chrono::Utc>) -> (&'static str, String) {
+    /// The service's health plus the summary shown on the right of its title: the probe-averaged
+    /// availability when the service has probes, otherwise a healthy-count (a cron-only service has
+    /// no availability percentage to report).
+    pub fn summary(&self, now: chrono::DateTime<chrono::Utc>) -> (Tone, String) {
         let total = self.probes.len() + self.crons.len();
         if total == 0 {
-            return ("unknown", String::new());
+            return (Tone::Neutral, String::new());
         }
 
         let healthy = self.probes.iter().filter(|p| p.passing()).count()
             + self.crons.iter().filter(|c| c.passing(now, c.window())).count();
 
         let health = if healthy == total {
-            "ok"
+            Tone::Ok
         } else if healthy * 2 >= total {
-            "warn"
+            Tone::Warn
         } else {
-            "error"
+            Tone::Danger
         };
 
         let summary = if !self.probes.is_empty() {
@@ -44,63 +46,95 @@ impl ServiceGroup<'_> {
     }
 }
 
+/// The name of the service an entry belongs to: its `service` tag, falling back to "Other".
+fn service_of(tags: &HashMap<String, String>) -> &str {
+    tags.get("service").map(String::as_str).unwrap_or("Other")
+}
+
+/// Every probe and cron grouped by service, sorted by name with "Other" kept at the end.
+pub fn services<'a>(
+    probes: &'a [grey_api::Probe],
+    crons: &'a [grey_api::Cron],
+) -> Vec<(&'a str, ServiceGroup<'a>)> {
+    let mut groups: HashMap<&str, ServiceGroup> = HashMap::new();
+    for probe in probes {
+        groups.entry(service_of(&probe.tags)).or_default().probes.push(probe);
+    }
+    for cron in crons {
+        groups.entry(service_of(&cron.tags)).or_default().crons.push(cron);
+    }
+
+    let mut groups: Vec<_> = groups.into_iter().collect();
+    groups.sort_by(|(a, _), (b, _)| (*a == "Other").cmp(&(*b == "Other")).then_with(|| a.cmp(b)));
+    groups
+}
+
+/// The id of a service's card, which the sidebar links to.
+pub fn service_anchor(name: &str) -> String {
+    let slug: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .collect();
+    format!("service-{slug}")
+}
+
+/// Whether an entry matches the app bar's filter, by its name, its service or any `name:value` tag.
+fn matches(filter: &super::Filter, name: &str, service: &str, tags: &HashMap<String, String>) -> bool {
+    let tags: Vec<String> = tags.iter().map(|(name, value)| format!("{name}:{value}")).collect();
+    filter.matches([name, service].into_iter().chain(tags.iter().map(String::as_str)))
+}
+
 /// The status page's service list: every probe and cron grouped by its `service` tag (falling back
-/// to "Other"), so a service's active probes and its scheduled jobs appear together.
+/// to "Other"), so a service's active probes and its scheduled jobs appear together. The app bar's
+/// filter narrows the entries shown; a service's summary always covers the whole service.
 #[function_component(ServiceList)]
 pub fn service_list() -> Html {
     let store = use_store();
+    let filter = use_filter();
     let now = chrono::Utc::now();
 
-    let mut groups: HashMap<String, ServiceGroup> = HashMap::new();
-    for probe in store.probes() {
-        let service = probe
-            .tags
-            .get("service")
-            .cloned()
-            .unwrap_or_else(|| "Other".to_string());
-        groups.entry(service).or_default().probes.push(probe);
-    }
-    for cron in store.crons() {
-        let service = cron
-            .tags
-            .get("service")
-            .cloned()
-            .unwrap_or_else(|| "Other".to_string());
-        groups.entry(service).or_default().crons.push(cron);
+    let cards: Vec<Html> = services(store.probes(), store.crons())
+        .into_iter()
+        .filter_map(|(name, group)| {
+            let (health, summary) = group.summary(now);
+            let probes: Vec<_> =
+                group.probes.iter().filter(|p| matches(&filter, &p.name, name, &p.tags)).collect();
+            let crons: Vec<_> =
+                group.crons.iter().filter(|c| matches(&filter, &c.name, name, &c.tags)).collect();
+            if probes.is_empty() && crons.is_empty() {
+                return None;
+            }
+
+            Some(html! {
+                <section
+                    key={name.to_string()}
+                    id={service_anchor(name)}
+                    class={classes!("service", format!("service--{}", health.as_str()))}
+                >
+                    <header class="service__title">
+                        <h2 class="service__name">{ name.to_string() }</h2>
+                        <span class="service__availability">{ summary }</span>
+                    </header>
+                    { for probes.into_iter().map(|probe| html! {
+                        <ProbeComponent key={probe.name.clone()} probe={(*probe).clone()} />
+                    }) }
+                    { for crons.into_iter().map(|cron| html! {
+                        <CronComponent key={cron.name.clone()} cron={(*cron).clone()} />
+                    }) }
+                </section>
+            })
+        })
+        .collect();
+
+    if cards.is_empty() && !filter.is_empty() {
+        return html! {
+            <EmptyState title="Nothing matches the filter" icon={icons::SEARCH}>
+                { "No probe or scheduled job has a name, service or tag that matches." }
+            </EmptyState>
+        };
     }
 
-    // Sort service names alphabetically, but keep "Other" at the end.
-    let mut service_names: Vec<String> = groups.keys().cloned().collect();
-    service_names.sort_by(|a, b| match (a.as_str(), b.as_str()) {
-        ("Other", "Other") => std::cmp::Ordering::Equal,
-        ("Other", _) => std::cmp::Ordering::Greater,
-        (_, "Other") => std::cmp::Ordering::Less,
-        _ => a.cmp(b),
-    });
-
-    html! {
-        <>
-            {for service_names.iter().map(|service_name| {
-                let group = groups.get(service_name).unwrap();
-                let (service_health, summary) = group.summary(now);
-
-                html! {
-                    <div class={format!("section service {}", service_health)}>
-                        <div class="service__title">
-                            <h2 class="service__name">{service_name}</h2>
-                            <span class="service__availability">{summary}</span>
-                        </div>
-                        {for group.probes.iter().map(|probe| html! {
-                            <ProbeComponent probe={(*probe).clone()} />
-                        })}
-                        {for group.crons.iter().map(|cron| html! {
-                            <CronComponent cron={(*cron).clone()} />
-                        })}
-                    </div>
-                }
-            })}
-        </>
-    }
+    html! { <div class="services">{ for cards }</div> }
 }
 
 #[cfg(test)]
@@ -170,7 +204,7 @@ mod tests {
         // A single "Backups" service group contains both the probe and the cron, and there is no
         // separate cron section any more.
         assert_eq!(
-            html.matches("service__name").count(),
+            html.matches("service__availability").count(),
             1,
             "expected exactly one service group: {html}"
         );

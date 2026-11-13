@@ -1,8 +1,11 @@
-use super::{Popover, PopoverAlign, StatusDot};
+use std::rc::Rc;
+
+use super::{detail, probe::tags};
 use crate::formatters::compact_duration;
-use crate::styles::{cron_class, cron_run_class};
+use crate::tones::{cron_run_tone, cron_tone};
 use grey_api::{CronHealth, CronRun, CronRunReason, CronSchedule, CronStatus};
 use yew::prelude::*;
+use yewi::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct CronProps {
@@ -17,10 +20,7 @@ pub fn cron(props: &CronProps) -> Html {
     let cron = &props.cron;
     let now = chrono::Utc::now();
     let health = cron.health(now, cron.window());
-    let class = cron_class(health);
-
-    // Which run's popover is currently open (on hover).
-    let hovered = use_state(|| Option::<usize>::None);
+    let tone = cron_tone(health);
 
     // "healthy for 5d" / "missed run for 2h" — how long the cron has held its current state.
     let state_text = cron
@@ -50,80 +50,67 @@ pub fn cron(props: &CronProps) -> Html {
         format!("{} ago", compact_duration(now.signed_duration_since(at)))
     });
 
-    let run_count = cron.runs.len();
+    let cells: Rc<[HistoryCell]> = cron
+        .runs
+        .iter()
+        .map(|run| HistoryCell::new(
+            cron_run_tone(run),
+            format!("{}, {}", run.started_at.format("%Y-%m-%d %H:%M UTC"), run_status(run)),
+        ))
+        .collect();
+    let detail = {
+        let runs = cron.runs.clone();
+        Callback::from(move |index: usize| runs.get(index).map(run_detail).unwrap_or_default())
+    };
 
     html! {
-        <div class="cron">
-            <div class="cron__title">
-                <div class="cron__name-section">
-                    <StatusDot class={class} active={health == CronHealth::Running} />
-                    <h3 class="cron__name">{&cron.name}</h3>
-                    <span class={classes!("cron__badge", class)}>{"cron"}</span>
+        <div class="check cron">
+            <div class="check__title">
+                <div class="check__identity">
+                    <div class="check__label">
+                        <StatusDot {tone} active={health == CronHealth::Running} />
+                        <h3 class="check__name">{ &cron.name }</h3>
+                    </div>
+                    <Pill {tone} dot=false>{ "cron" }</Pill>
                     if let Some(schedule) = schedule {
-                        <span class="cron__schedule">{schedule}</span>
+                        <span class="cron__schedule">{ schedule }</span>
                     }
-                    if !cron.tags.is_empty() {
-                        <div class="cron__tags">
-                            {for cron.tags.iter().filter(|(name, _)| *name != "service").map(|(name, value)| html! {
-                                <div class="cron__tag">
-                                    <span class="cron__tag-name">{name}{":"}</span>
-                                    <strong class="cron__tag-value">{value}</strong>
-                                </div>
-                            })}
-                        </div>
+                    { tags(&cron.tags) }
+                </div>
+                <div class="check__state">
+                    <span class="cron__state">{ state_text }</span>
+                    if let Some(last_success) = last_success {
+                        <span class="check__figure cron__last-checkin">{ last_success }</span>
                     }
                 </div>
-                <div class="cron__state">{state_text}</div>
-                if let Some(last_success) = last_success {
-                    <div class="cron__last-checkin">{last_success}</div>
-                }
             </div>
 
-            <div class="cron__runs">
-                if cron.runs.is_empty() {
-                    <span class="cron__no-runs">{"No runs recorded yet."}</span>
-                } else {
-                    {for cron.runs.iter().enumerate().map(|(index, run)| {
-                        let is_hovered = *hovered == Some(index);
-                        let onmouseenter = {
-                            let hovered = hovered.clone();
-                            Callback::from(move |_: MouseEvent| hovered.set(Some(index)))
-                        };
-                        let onmouseleave = {
-                            let hovered = hovered.clone();
-                            Callback::from(move |_: MouseEvent| hovered.set(None))
-                        };
-                        html! {
-                            <span
-                                class={classes!("cron-run", cron_run_class(run), is_hovered.then_some("tooltip-target"))}
-                                {onmouseenter}
-                                {onmouseleave}
-                            >
-                                if is_hovered {
-                                    { render_run_popover(run, align_for(index, run_count)) }
-                                }
-                            </span>
-                        }
-                    })}
-                }
-            </div>
+            if cron.runs.is_empty() {
+                <span class="cron__no-runs">{ "No runs recorded yet." }</span>
+            } else {
+                <HistoryStrip
+                    class="cron__runs"
+                    label="Recent runs"
+                    variant={HistoryStripVariant::Discrete}
+                    {cells}
+                    {detail}
+                />
+            }
         </div>
     }
 }
 
-/// Anchors the popover inward at the ends of the strip so it never runs off the page.
-fn align_for(index: usize, len: usize) -> PopoverAlign {
-    if index == 0 {
-        PopoverAlign::Left
-    } else if index + 1 == len {
-        PopoverAlign::Right
-    } else {
-        PopoverAlign::Center
+/// A run's status in words. A synthesised placeholder is labelled by its detected fault
+/// (missed/stuck) rather than the underlying status it carries to progress the streak.
+fn run_status(run: &CronRun) -> &'static str {
+    match run.reason {
+        Some(CronRunReason::Missed) => "Missed run",
+        Some(CronRunReason::Stuck) => "Overrunning",
+        None => run.status.label(),
     }
 }
 
-fn render_run_popover(run: &CronRun, align: PopoverAlign) -> Html {
-    let timestamp = run.started_at.format("%Y-%m-%d %H:%M:%S UTC").to_string();
+fn run_detail(run: &CronRun) -> HistoryDetail {
     let duration = match run.duration {
         Some(duration) => Some(compact_duration(
             chrono::Duration::from_std(duration).unwrap_or_default(),
@@ -132,31 +119,17 @@ fn render_run_popover(run: &CronRun, align: PopoverAlign) -> Html {
         None => None,
     };
 
-    // A synthesised placeholder is labelled by its detected fault (missed/stuck) rather than the
-    // underlying status it carries to progress the streak.
-    let status = match run.reason {
-        Some(CronRunReason::Missed) => "Missed run",
-        Some(CronRunReason::Stuck) => "Overrunning",
-        None => run.status.label(),
+    let content = html! {
+        <div class="detail">
+            if let Some(duration) = duration {
+                { detail::row("Duration", duration) }
+            }
+        </div>
     };
 
-    html! {
-        <Popover
-            {align}
-            status_class={cron_run_class(run)}
-            status={status}
-            timestamp={timestamp}
-        >
-            <div class="tooltip__details">
-                if let Some(duration) = duration {
-                    <div class="tooltip__row">
-                        <span class="tooltip__label">{"Duration:"}</span>
-                        <span>{duration}</span>
-                    </div>
-                }
-            </div>
-        </Popover>
-    }
+    HistoryDetail::new(content)
+        .header(detail::status_line(cron_run_tone(run), run_status(run)))
+        .footer(html! { { run.started_at.format("%Y-%m-%d %H:%M:%S UTC").to_string() } })
 }
 
 #[cfg(test)]
@@ -205,7 +178,7 @@ mod tests {
             message: "done".into(),
         });
         let html = render(cron).await;
-        assert!(html.contains("cron-run"), "expected a run cell, got: {html}");
+        assert!(html.contains("Succeeded"), "expected a labelled run cell, got: {html}");
         assert!(html.contains("cron__last-checkin"), "expected the since-last-success time, got: {html}");
         assert!(html.contains("healthy for"), "{html}");
     }
@@ -251,8 +224,8 @@ mod tests {
         assert!(!html.contains("cron__last-checkin"), "expected no since-last-success block, got: {html}");
     }
 
-    /// The run popover itself only appears on hover (which SSR can't reach), so render it directly to
-    /// confirm it uses the shared popover styling.
+    /// The run popover itself only appears on hover (which SSR can't reach), so render its parts
+    /// directly.
     #[derive(Properties, PartialEq)]
     struct PopoverHarnessProps {
         run: CronRun,
@@ -260,11 +233,12 @@ mod tests {
 
     #[function_component(PopoverHarness)]
     fn popover_harness(props: &PopoverHarnessProps) -> Html {
-        render_run_popover(&props.run, PopoverAlign::Center)
+        let detail = run_detail(&props.run);
+        html! { <div>{ detail.header }{ detail.content }{ detail.footer }</div> }
     }
 
     #[tokio::test]
-    async fn run_popover_uses_shared_style() {
+    async fn run_popover_shows_status_duration_and_time() {
         let run = CronRun {
             started_at: chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
             status: CronStatus::Succeeded,
@@ -275,11 +249,8 @@ mod tests {
             .render()
             .await;
 
-        assert!(html.contains("popover"), "expected the shared popover, got: {html}");
-        assert!(html.contains("popover__status"), "{html}");
         assert!(html.contains("Succeeded"), "{html}");
-        assert!(html.contains("popover__time"), "expected the timestamp footer, got: {html}");
-        assert!(html.contains("2023-11-14"), "{html}");
-        assert!(html.contains("Duration:"), "{html}");
+        assert!(html.contains("2023-11-14"), "expected the run's start time, got: {html}");
+        assert!(html.contains("Duration"), "{html}");
     }
 }

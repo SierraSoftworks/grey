@@ -1,12 +1,11 @@
 use grey_api::IncidentView;
 use yew::prelude::*;
-// The router prelude (`Link`) and `Route` are only used by the wasm-only admin list below, so they
-// are unused in the SSR build.
-#[cfg(not(feature = "ssr"))]
-use yew_router::prelude::*;
+use yewi::prelude::*;
 
 use crate::components::IncidentBlock;
+use crate::components::filter::use_filter;
 use crate::contexts::use_store;
+// `Route` is only used by the wasm-only admin list below, so it is unused in the SSR build.
 #[cfg(not(feature = "ssr"))]
 use crate::routes::Route;
 
@@ -27,25 +26,54 @@ pub fn incidents_list() -> Html {
     let _ = &store;
 
     html! {
-        <div class="page">
-            <h1>{"Incidents"}</h1>
-            { incident_list_body(store.incidents()) }
-        </div>
+        <>
+            <PageHeader title="Incidents" />
+            <IncidentList incidents={store.incidents().to_vec()} />
+        </>
     }
 }
 
-fn incident_list_body(incidents: &[IncidentView]) -> Html {
-    if incidents.is_empty() {
+#[derive(Properties, PartialEq)]
+struct IncidentListProps {
+    incidents: Vec<IncidentView>,
+}
+
+/// The incidents, narrowed by the app bar's filter (matched against titles and update messages).
+#[function_component(IncidentList)]
+fn incident_list(props: &IncidentListProps) -> Html {
+    let filter = use_filter();
+
+    if props.incidents.is_empty() {
         return html! {
-            <crate::components::EmptyState title="No incidents reported">
+            <EmptyState title="No incidents reported" icon={icons::CHECK} tone={Tone::Ok}>
                 {"Everything has been operating normally. Incidents will appear here if a problem is reported."}
-            </crate::components::EmptyState>
+            </EmptyState>
         };
     }
+
+    let shown: Vec<&IncidentView> = props
+        .incidents
+        .iter()
+        .filter(|incident| {
+            filter.matches(
+                std::iter::once(incident.title()).chain(incident.updates.iter().map(|u| u.message.as_str())),
+            )
+        })
+        .collect();
+    if shown.is_empty() {
+        return html! {
+            <EmptyState title="Nothing matches the filter" icon={icons::SEARCH}>
+                {"No incident has a title or an update that matches."}
+            </EmptyState>
+        };
+    }
+
     html! {
-        { for incidents.iter().map(|incident| html! {
-            <IncidentBlock key={incident.id().to_string()} incident={incident.clone()} />
-        }) }
+        <div class="incidents">
+            { for shown.into_iter().map(|incident| html! {
+                <IncidentBlock key={incident.id().to_string()} incident={incident.clone()} />
+            }) }
+        </div>
     }
 }
 
@@ -84,23 +112,27 @@ fn admin_incidents_list(props: &AdminIncidentsListProps) -> Html {
         });
     }
 
+    let declare = html! {
+        <Button
+            variant={ButtonVariant::Primary}
+            icon={icons::TRIANGLE_ALERT}
+            href={NavTarget::route(Route::NewIncident)}
+        >
+            {"Declare incident"}
+        </Button>
+    };
+
     html! {
-        <div class="page">
-            <div class="incidents-list-header">
-                <h1>{"Incidents"}</h1>
-                <Link<Route> to={Route::NewIncident} classes="declare-incident">
-                    { crate::components::icons::warning_icon() }
-                    <span>{"Declare Incident"}</span>
-                </Link<Route>>
-            </div>
+        <>
+            <PageHeader title="Incidents" actions={declare} />
             if *loading && incidents.is_empty() {
                 // Seed was empty and the admin fetch (which adds hidden drafts) is still in flight;
                 // wait for it before deciding between the list and the empty state, so a drafts-only
                 // system doesn't briefly flash "no incidents".
-                <></>
+                <Loading layout={LoadingLayout::Block} />
             } else {
-                { incident_list_body(&incidents) }
+                <IncidentList incidents={(*incidents).clone()} />
             }
-        </div>
+        </>
     }
 }

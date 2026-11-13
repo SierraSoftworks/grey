@@ -26,8 +26,6 @@ pub fn auth_logout() -> Html {
     }
 
     html! {
-        <div class="page">
-            <p class="empty-state">{"Signing you out…"}</p>
-        </div>
+        <yewi::Loading label="Signing you out…" layout={yewi::LoadingLayout::Block} />
     }
 }

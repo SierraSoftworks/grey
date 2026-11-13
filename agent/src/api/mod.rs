@@ -12,6 +12,7 @@ mod auth;
 mod cluster;
 mod config;
 mod cron;
+mod design;
 mod incidents;
 mod page;
 mod probes;
@@ -154,6 +155,9 @@ pub fn create_app() -> App<
                 .route("/incidents/{id}/updates/{uid}", web::delete().to(admin::delete_update)),
         )
         .route("/robots.txt", web::get().to(robots))
+        // The design system's stylesheet and fonts are compiled in, not part of `ui/dist`, so they
+        // are matched ahead of the embedded files.
+        .route("/static/design/{fingerprint}/{file}", web::get().to(design::serve))
         .route("/static/{filename:.*}", web::get().to(serve_static));
 
     // The SPA's control gallery is compiled into debug builds of the UI only, so only serve its

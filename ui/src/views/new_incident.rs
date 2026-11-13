@@ -1,4 +1,5 @@
 use yew::prelude::*;
+use yewi::prelude::*;
 
 use crate::contexts::use_store;
 
@@ -11,10 +12,9 @@ pub fn new_incident() -> Html {
 
     if !store.is_authenticated() {
         return html! {
-            <div class="page">
-                <h1>{"New incident"}</h1>
-                <p class="empty-state">{"Sign in as an administrator to create an incident."}</p>
-            </div>
+            <EmptyState title="Sign in to declare an incident" icon={icons::LOCK}>
+                {"Sign in as an administrator to create an incident."}
+            </EmptyState>
         };
     }
 
@@ -38,8 +38,9 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
     use crate::formatters::resolve_update_timestamp;
     use crate::routes::Route;
     use grey_api::Impact;
-    use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
-    use yew_router::prelude::*;
+    use std::rc::Rc;
+    use web_sys::HtmlInputElement;
+    use yew_router::prelude::use_navigator;
 
     // The `<select>` captions are richer than `Impact::label()` ("Operational (no impact)" rather
     // than "Operational"), so the order/value list comes from `Impact::ALL` while the wording stays
@@ -67,17 +68,11 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
 
     let on_title = {
         let title = title.clone();
-        Callback::from(move |e: InputEvent| {
-            let el: HtmlInputElement = e.target_unchecked_into();
-            title.set(el.value());
-        })
+        Callback::from(move |value: String| title.set(value))
     };
     let on_impact = {
         let impact = impact.clone();
-        Callback::from(move |e: Event| {
-            let el: HtmlSelectElement = e.target_unchecked_into();
-            impact.set(el.value());
-        })
+        Callback::from(move |value: String| impact.set(value))
     };
     let on_started = {
         let started = started.clone();
@@ -88,10 +83,7 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
     };
     let on_message = {
         let message = message.clone();
-        Callback::from(move |e: InputEvent| {
-            let el: HtmlTextAreaElement = e.target_unchecked_into();
-            message.set(el.value());
-        })
+        Callback::from(move |value: String| message.set(value))
     };
 
     let onsubmit = {
@@ -147,36 +139,80 @@ fn new_incident_form(props: &NewIncidentFormProps) -> Html {
         })
     };
 
+    let impact_options: Rc<[(AttrValue, AttrValue)]> =
+        Impact::ALL.into_iter().map(|opt| (opt.as_str().into(), impact_caption(opt).into())).collect();
+
     html! {
-        <div class="page">
-            <h1>{"New incident"}</h1>
-            <form class="incident-form" onsubmit={onsubmit}>
-                <label>{"Title"}
-                    <input type="text" value={(*title).clone()} oninput={on_title} />
-                </label>
-                <label>{"Initial impact"}
-                    <select onchange={on_impact}>
-                        { for Impact::ALL.into_iter().map(|opt| html! {
-                            <option value={opt.as_str()} selected={*impact == opt.as_str()}>{impact_caption(opt)}</option>
-                        }) }
-                    </select>
-                </label>
-                <label>{"Started (UTC)"}
-                    <input type="datetime-local" value={(*started).clone()} oninput={on_started} />
-                    <small class="incident-form__hint">
-                        {"Leave blank to start the incident now, or backdate it to when the problem began."}
-                    </small>
-                </label>
-                <label>{"Initial update"}
-                    <textarea rows="4" value={(*message).clone()} oninput={on_message} placeholder="Enter initial update in markdown form..." />
-                </label>
-                <div class="incident-form__actions">
-                    <button type="submit" class="primary-button" disabled={*saving}>
-                        { if *saving { "Creating…" } else { "Create incident" } }
-                    </button>
-                </div>
-            </form>
-        </div>
+        <>
+            <PageHeader
+                title="Declare an incident"
+                subtitle={html! { { "Tell people what is affected. You can post further updates as the incident is worked on." } }}
+                breadcrumbs={html! {
+                    <Breadcrumbs>
+                        <Crumb href={NavTarget::route(Route::Incidents)}>{ "Incidents" }</Crumb>
+                        <Crumb>{ "New" }</Crumb>
+                    </Breadcrumbs>
+                }}
+            />
+            <div class="incident-form">
+                <form onsubmit={onsubmit}>
+                    <Stack gap={Space::Lg}>
+                        <Field label={html! { { "Title" } }}>
+                            <TextInput value={(*title).clone()} on_input={on_title} />
+                        </Field>
+                        <div class="incident-form__row">
+                            <Field label={html! { { "Initial impact" } }}>
+                                <NativeSelect options={impact_options} value={(*impact).clone()} on_change={on_impact} />
+                            </Field>
+                            <Field
+                                label={html! { { "Started (UTC)" } }}
+                                hint={html! { { "Leave blank to start the incident now, or backdate it to when the problem began." } }}
+                            >
+                                <StartedInput value={(*started).clone()} oninput={on_started} />
+                            </Field>
+                        </div>
+                        <Field label={html! { { "Initial update" } }}>
+                            <TextArea
+                                rows=4
+                                value={(*message).clone()}
+                                on_input={on_message}
+                                placeholder="Enter initial update in markdown form..."
+                            />
+                        </Field>
+                        <div class="incident-form__actions">
+                            <Button href={NavTarget::route(Route::Incidents)} variant={ButtonVariant::Subtle}>{ "Cancel" }</Button>
+                            <Button kind={ButtonKind::Submit} variant={ButtonVariant::Primary} loading={*saving}>
+                                { "Create incident" }
+                            </Button>
+                        </div>
+                    </Stack>
+                </form>
+            </div>
+        </>
+    }
+}
+
+/// The start time as a native date and time picker, wired to its [`Field`] (label, hint).
+#[cfg(feature = "wasm")]
+#[derive(Properties, PartialEq)]
+struct StartedInputProps {
+    value: AttrValue,
+    oninput: Callback<InputEvent>,
+}
+
+#[cfg(feature = "wasm")]
+#[function_component(StartedInput)]
+fn started_input(props: &StartedInputProps) -> Html {
+    let field = use_field_control(None, false, false, false);
+    html! {
+        <input
+            class="yi-input yi-input--md"
+            type="datetime-local"
+            id={field.id}
+            aria-describedby={field.described_by}
+            value={props.value.clone()}
+            oninput={props.oninput.clone()}
+        />
     }
 }
 

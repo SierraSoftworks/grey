@@ -75,6 +75,9 @@ pub async fn index(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpRe
     let mut index_html_before =
         index_html_before_head.replace("<title></title>", &format!("<title>{}</title>", title));
     
+    // The design system's stylesheet and fonts come first, so anything the operator injects can
+    // build on (or override) them.
+    index_html_before.push_str(&super::design::head_links());
     index_html_before.push_str(&config.ui.inject);
     index_html_before.push_str("</head>");
     index_html_before.push_str(index_html_after_head);
@@ -111,6 +114,7 @@ mod tests {
         assert!(body.contains("<title>Grey</title>"), "Failed to find title in HTML body");
         assert!(body.contains(r#"data-probes="[{&quot;"#), "Failed to find probes data in HTML body");
         assert!(body.contains(r#"data-config="{&quot;"#), "Failed to find config data in HTML body");
+        assert!(body.contains("/yewi.css\">"), "Failed to find the design system's stylesheet link in the head");
         assert!(body.trim().ends_with("</html>"), "Body did not end with the HTML closing tag");
     }
 

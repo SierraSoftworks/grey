@@ -1,27 +1,556 @@
-// CSS Variables and Global Styles
-@use 'src/styles/variables';
-@use 'src/styles/base';
-@use 'src/styles/layout';
-@use 'src/styles/tooltip';
+// =============================================================================
+// Grey status page stylesheet
+//
+// The look comes from yewi, whose stylesheet the agent serves: every control,
+// the shell, cards, timelines and history strips are its components, and every
+// colour, space and radius below is one of its `--yi-*` tokens. yewi keeps its
+// rules in `@layer yewi.*`, so the unlayered rules here win without
+// specificity games.
+//
+// What is left for this file is what yewi cannot know about: the page column
+// and the layouts of the rows that are Grey's own.
+//   1. Theme and page frame
+//   2. Status page (services, probes, crons)
+//   3. History popovers
+//   4. Incidents
+//   5. Cluster members
+//   6. Control gallery (debug builds only)
+// =============================================================================
 
-// Shared base element styles
-@use 'src/styles/status';
-@use 'src/styles/buttons';
-@use 'src/styles/forms';
-@use 'src/styles/page';
-@use 'src/styles/markdown';
-@use 'src/styles/controls';
+// The width a status page reads comfortably at.
+$page-width: 64rem;
+// Below this the title row of a probe stacks.
+$narrow: 40rem;
 
-// Component Styles
-@use 'src/components/header';
-@use 'src/components/error_banner';
-@use 'src/components/status_dot';
-@use 'src/components/popover';
-@use 'src/components/probe_history';
-@use 'src/components/probe';
-@use 'src/components/cron';
-@use 'src/components/cluster_status';
-@use 'src/components/incident_timeline';
-@use 'src/components/incidents';
-@use 'src/components/skeleton';
-@use 'src/components/empty_state';
+// -----------------------------------------------------------------------------
+// 1. Theme and page frame
+// -----------------------------------------------------------------------------
+
+:root {
+  --yi-accent: #3498db;
+
+  // Grey's status colours: saturated, and the same in both themes. They are
+  // fills (banner, history cells, dots, rails, a service's edge), which is
+  // where a status page wants its colour to carry from across the room.
+  --grey-ok: #28a745;
+  --grey-warn: #e67e22;
+  --grey-danger: #e74c3c;
+  --grey-info: #5dade2;
+  --grey-active: #5dade2;
+  --grey-neutral: #7f8c8d;
+}
+
+// yewi's own tones are tuned to be read as text on a surface, so they stay for
+// text (pills, alerts) and are swapped only on the components that paint them
+// as a fill.
+.yi-banner--bold,
+.yi-history-strip,
+.yi-status-dot,
+.yi-timeline__item {
+  --yi-ok: var(--grey-ok);
+  --yi-warn: var(--grey-warn);
+  --yi-danger: var(--grey-danger);
+  --yi-info: var(--grey-info);
+  --yi-active: var(--grey-active);
+  --yi-neutral: var(--grey-neutral);
+}
+
+.yi-app-bar__brand img {
+  height: 28px;
+  width: auto;
+}
+
+// The filter takes the middle of the app bar, the way a browser's address bar
+// does.
+.shell__filter {
+  flex: 1;
+  min-width: 5rem;
+  max-width: 32rem;
+  margin-inline: auto;
+}
+
+// On a phone the bar has room for the filter or the word, not both; the dot
+// still carries the cluster's health.
+@media (max-width: $narrow) {
+  .cluster-status__label {
+    display: none;
+  }
+}
+
+// The page is a column the height of the window, so a short page still has its
+// footer at the bottom.
+.shell > .yi-app-shell__body > .yi-app-shell__main {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+}
+
+// The status page is one sheet: the top-line banner, then every service as a
+// band beneath it, with no cards of their own.
+.status-sheet {
+  border-radius: var(--yi-radius-card);
+  background: var(--yi-surface);
+  box-shadow: var(--yi-shadow-card);
+  overflow: clip;
+
+  @media (max-width: $narrow) {
+    margin-inline: calc(min(var(--yi-app-shell-padding), var(--yi-space-lg)) * -1);
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+.status-banner {
+  --yi-banner-padding: var(--yi-space-xl);
+}
+
+.page {
+  flex: 1;
+  width: 100%;
+  max-width: $page-width;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--yi-space-lg);
+}
+
+.shell__footer {
+  margin-block-start: var(--yi-space-2xl);
+  text-align: center;
+}
+
+// -----------------------------------------------------------------------------
+// 2. Status page
+// -----------------------------------------------------------------------------
+
+.services {
+  display: flex;
+  flex-direction: column;
+}
+
+// A service is a flat band on the page, not a card: its health runs down a
+// heavy leading edge, so the state of the whole page reads at a glance.
+.service {
+  display: flex;
+  flex-direction: column;
+  gap: var(--yi-space-md);
+  padding: var(--yi-space-lg) var(--yi-space-xl);
+  border-inline-start: 10px solid var(--service-tone, var(--grey-neutral));
+  // The sidebar links here; keep the band clear of the app bar.
+  scroll-margin-block-start: calc(var(--yi-app-shell-bar-height) + var(--yi-space-md));
+
+  @each $tone in (ok, warn, danger, neutral) {
+    &--#{$tone} {
+      --service-tone: var(--grey-#{$tone});
+    }
+  }
+
+  @media (max-width: $narrow) {
+    padding-inline: var(--yi-space-md);
+    border-inline-start-width: 6px;
+  }
+}
+
+.service__title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--yi-space-md);
+}
+
+.service__name {
+  margin: 0;
+  font-family: var(--yi-font-heading);
+  font-size: 1.5rem;
+  font-weight: 300;
+}
+
+.service__availability {
+  color: var(--yi-fg-muted);
+  font-size: var(--yi-text-lg);
+  font-weight: 300;
+  font-variant-numeric: tabular-nums;
+}
+
+// One probe or cron: a title row over its history strip.
+.check {
+  display: flex;
+  flex-direction: column;
+  gap: var(--yi-space-xs);
+
+  & + & {
+    margin-block-start: var(--yi-space-sm);
+  }
+}
+
+.check__title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--yi-space-xs) var(--yi-space-md);
+
+  @media (max-width: $narrow) {
+    flex-direction: column;
+  }
+}
+
+.check__identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--yi-space-xs) var(--yi-space-sm);
+  min-width: 0;
+}
+
+// The dot stays beside the first line of a name that wraps.
+.check__label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--yi-space-sm);
+  min-width: 0;
+}
+
+.check__name {
+  margin: 0;
+  font: inherit;
+  font-size: var(--yi-text-xl);
+  // Probe names are often URLs: let them break rather than widen the page.
+  overflow-wrap: anywhere;
+}
+
+.check__state {
+  display: flex;
+  align-items: baseline;
+  gap: var(--yi-space-sm);
+  flex-shrink: 0;
+  color: var(--yi-fg-muted);
+  font-size: var(--yi-text-sm);
+  white-space: nowrap;
+
+  @media (max-width: $narrow) {
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+}
+
+.check__figure {
+  color: var(--yi-fg);
+  font-size: var(--yi-text-md);
+  font-variant-numeric: tabular-nums;
+}
+
+// Availability is an unbroken bar, lifted off the sheet.
+.probe-history {
+  --yi-history-strip-gap: 0px;
+
+  box-shadow: 1px 1px 4px rgb(0 0 0 / 0.35);
+}
+
+.cron__schedule {
+  color: var(--yi-fg-muted);
+  font-family: var(--yi-font-mono);
+  font-size: var(--yi-text-sm);
+}
+
+// A grey run is one the monitor noticed was missed or overrunning: a detected
+// fault, so it keeps its weight where a strip's "no data" cells recede.
+.cron__runs .yi-history-strip__cell--neutral {
+  --yi-history-strip-color: var(--yi-neutral);
+}
+
+.cron__no-runs {
+  align-self: flex-end;
+  color: var(--yi-fg-subtle);
+  font-size: var(--yi-text-sm);
+}
+
+// -----------------------------------------------------------------------------
+// 3. History popovers
+// -----------------------------------------------------------------------------
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--yi-space-2xs);
+  min-width: 14rem;
+  max-width: 22rem;
+  font-size: var(--yi-text-sm);
+}
+
+.detail__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--yi-space-xs);
+  font-weight: 600;
+}
+
+.detail__message {
+  margin-block-end: var(--yi-space-2xs);
+  overflow-wrap: anywhere;
+}
+
+.detail__row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--yi-space-lg);
+}
+
+.detail__label,
+.detail__more {
+  color: var(--yi-fg-muted);
+}
+
+.detail__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.detail__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--yi-space-2xs);
+  margin-block-start: var(--yi-space-xs);
+  padding-block-start: var(--yi-space-xs);
+  border-block-start: 1px solid var(--yi-line);
+}
+
+.detail__section-title {
+  color: var(--yi-fg-muted);
+  font-size: var(--yi-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.detail__entry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--yi-space-2xs) var(--yi-space-xs);
+}
+
+.detail__entry-note {
+  color: var(--yi-fg-muted);
+  overflow-wrap: anywhere;
+}
+
+// -----------------------------------------------------------------------------
+// 4. Incidents
+// -----------------------------------------------------------------------------
+
+.incidents,
+.incidents-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--yi-space-md);
+}
+
+.incidents-section {
+  margin-block-start: var(--yi-space-lg);
+}
+
+.incidents-section__heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--yi-space-md);
+}
+
+// An incident is flat on the page; successive ones are parted by a rule.
+.incident {
+  display: flex;
+  flex-direction: column;
+  gap: var(--yi-space-md);
+
+  .incidents > & + &,
+  .incidents-section > & + & {
+    padding-block-start: var(--yi-space-lg);
+    border-block-start: 1px solid var(--yi-line);
+  }
+}
+
+.incident__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--yi-space-sm) var(--yi-space-md);
+
+  @media (max-width: $narrow) {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+.incident__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--yi-space-2xs) var(--yi-space-sm);
+  margin: 0;
+  font-family: var(--yi-font-heading);
+  font-size: 1.2rem;
+  font-weight: 400;
+
+  // The title link reads as the heading, not as a link of its own weight.
+  a {
+    font-weight: inherit;
+  }
+}
+
+.incident__date {
+  color: var(--yi-fg-subtle);
+  font-family: var(--yi-font-body);
+  font-size: var(--yi-text-sm);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.incident__message {
+  color: var(--yi-fg-muted);
+}
+
+// The editor (administrators only).
+.incident-edit__title {
+  display: flex;
+  align-items: center;
+  gap: var(--yi-space-sm);
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
+
+  .yi-input {
+    flex: 1;
+  }
+}
+
+.incident-edit__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--yi-space-sm);
+}
+
+.incident-edit__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--yi-space-sm);
+
+  .yi-button {
+    margin-inline-start: auto;
+  }
+}
+
+.incident-edit__time {
+  width: auto;
+}
+
+.incident-edit__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--yi-space-md);
+}
+
+.incident-form__row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--yi-space-lg);
+  align-items: start;
+}
+
+.incident-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--yi-space-sm);
+}
+
+// -----------------------------------------------------------------------------
+// 5. Cluster members
+// -----------------------------------------------------------------------------
+
+.cluster__title {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--yi-space-lg);
+  padding-block-end: var(--yi-space-xs);
+  font-weight: 600;
+}
+
+.cluster__summary {
+  color: var(--yi-fg-muted);
+  font-weight: 400;
+}
+
+.cluster__members {
+  display: flex;
+  flex-direction: column;
+  min-width: min(22rem, 80vw);
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.peer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--yi-space-2xs) var(--yi-space-md);
+  padding-block: var(--yi-space-xs);
+
+  & + & {
+    border-block-start: 1px solid var(--yi-line);
+  }
+}
+
+.peer__identity,
+.peer__state {
+  display: flex;
+  align-items: center;
+  gap: var(--yi-space-xs);
+  min-width: 0;
+}
+
+.peer__state {
+  white-space: nowrap;
+}
+
+.peer__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.peer__last-seen {
+  color: var(--yi-fg-subtle);
+  font-size: var(--yi-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.peer__labels {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--yi-space-2xs);
+}
+
+// -----------------------------------------------------------------------------
+// 6. Control gallery (debug builds only)
+// -----------------------------------------------------------------------------
+
+.controls,
+.controls__section {
+  display: flex;
+  flex-direction: column;
+}
+
+.controls {
+  gap: var(--yi-space-2xl);
+}
+
+.controls__section {
+  gap: var(--yi-space-xs);
+  scroll-margin-block-start: calc(var(--yi-app-shell-bar-height) + var(--yi-space-md));
+}
+
+.controls__body {
+  margin-block-start: var(--yi-space-sm);
+}

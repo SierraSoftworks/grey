@@ -34,8 +34,6 @@ pub fn auth_callback() -> Html {
     }
 
     html! {
-        <div class="page">
-            <p class="empty-state">{"Completing sign-in…"}</p>
-        </div>
+        <yewi::Loading label="Completing sign-in…" layout={yewi::LoadingLayout::Block} />
     }
 }

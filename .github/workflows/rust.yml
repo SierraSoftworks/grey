@@ -124,7 +124,7 @@ jobs:
           RUSTFLAGS: -Cinstrument-coverage
 
       - name: grcov
-        run: grcov . --binary-path target/debug/deps/ -s . -t lcov --ignore-not-existing --ignore '../**' --ignore '/*' --ignore 'C:/' -o ./lcov.info
+        run: grcov . --binary-path target/debug/ -s . -t lcov --ignore-not-existing --ignore '../**' --ignore '/*' --ignore 'C:/' -o ./lcov.info
 
       - name: codecov upload
         uses: codecov/codecov-action@v7.1.1

@@ -7,7 +7,7 @@ mod contexts;
 pub mod demo;
 pub mod formatters;
 pub mod routes;
-mod styles;
+mod tones;
 mod views;
 
 // Export components for both SSR and WASM usage
@@ -25,6 +25,8 @@ fn main() {
     // iterated on with nothing but `trunk serve`.
     #[cfg(all(feature = "wasm", debug_assertions))]
     if demo::enabled() {
+        // No agent rendered this page, so nothing has linked the design system's stylesheet.
+        yewi::install_styles();
         yew::Renderer::<demo::DemoApp>::new().render();
         return;
     }
