@@ -84,7 +84,8 @@ uuid = { version = "1", features = ["v4"] }
 x509-parser = "0.18"
 yew = { version = "0.23", features = ["ssr"] }
 yew-router = { version = "0.20" }
-pulldown-cmark = { version = "0.13" }
+# The design system the UI is built from. Its stylesheet and fonts are served by the agent.
+yewi = { version = "0.2" }
 
 gloo = { version = "0.12" }
 gloo-console = { version = "0.4" }

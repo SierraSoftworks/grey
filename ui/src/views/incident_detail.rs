@@ -1,14 +1,24 @@
 use grey_api::Identifier;
 use yew::prelude::*;
 
+use yewi::prelude::*;
+
 use crate::components::IncidentBlock;
 use crate::contexts::use_store;
-// `StatusDot` and `time_format` are only used by the wasm-only admin editor below, so they are
-// unused in the SSR build.
-#[cfg(not(feature = "ssr"))]
-use crate::components::StatusDot;
+use crate::routes::Route;
+// `time_format` is only used by the wasm-only admin editor below, so it is unused in the SSR build.
 #[cfg(not(feature = "ssr"))]
 use crate::formatters::time_format;
+
+/// The trail back to the incident list, shown above every incident.
+fn breadcrumbs(title: &str) -> Html {
+    html! {
+        <Breadcrumbs>
+            <Crumb href={NavTarget::route(Route::Incidents)}>{ "Incidents" }</Crumb>
+            <Crumb>{ title }</Crumb>
+        </Breadcrumbs>
+    }
+}
 
 /// The `/incidents/{id}` page. Public visitors see the read-only incident; signed-in administrators
 /// get an inline editor: edit the title, add updates, edit an update's message, remove updates, and
@@ -35,15 +45,20 @@ pub fn incident_detail(props: &IncidentDetailProps) -> Html {
     let incident = store.incidents().iter().find(|i| Some(i.id()) == wanted).cloned();
 
     html! {
-        <div class="page">
-            if let Some(incident) = incident {
+        if let Some(incident) = incident {
+            <div class="incidents">
+                { breadcrumbs(incident.title()) }
                 <IncidentBlock incident={incident} />
-            } else {
-                <crate::components::EmptyState title="Incident not found">
-                    {"This incident does not exist or is not publicly visible."}
-                </crate::components::EmptyState>
-            }
-        </div>
+            </div>
+        } else {
+            <EmptyState
+                title="Incident not found"
+                icon={icons::SEARCH_X}
+                actions={html! { <Button href={NavTarget::route(Route::Incidents)}>{ "All incidents" }</Button> }}
+            >
+                {"This incident does not exist or is not publicly visible."}
+            </EmptyState>
+        }
     }
 }
 
@@ -57,15 +72,14 @@ struct AdminIncidentDetailProps {
 #[cfg(feature = "wasm")]
 #[function_component(AdminIncidentDetail)]
 fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
-    use crate::components::icons::{check_icon, edit_icon, save_icon, trash_icon};
-    use crate::components::markdown::render_markdown;
-    use crate::formatters::{changed_update_timestamp, datetime_local_value, resolve_update_timestamp};
-    use crate::routes::Route;
-    use crate::styles::impact_class;
+    use crate::components::incident_timeline::message;
+    use crate::formatters::{changed_update_timestamp, datetime_local_value, incident_status, resolve_update_timestamp};
+    use crate::tones::impact_tone;
     use chrono::{DateTime, Utc};
     use grey_api::{CreateUpdate, Impact, IncidentUpdateId, IncidentView, PutIncident, PutUpdate};
-    use web_sys::{HtmlInputElement, HtmlSelectElement, HtmlTextAreaElement};
-    use yew_router::prelude::*;
+    use std::rc::Rc;
+    use web_sys::HtmlInputElement;
+    use yew_router::prelude::use_navigator;
 
     // The canonical incident (with its updates + versions) plus the editable draft fields.
     let loaded = use_state(|| Option::<IncidentView>::None);
@@ -81,6 +95,8 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
     let new_message = use_state(String::new);
     let new_timestamp = use_state(String::new);
     let saving = use_state(|| false);
+    // Deleting an incident cannot be undone, so it is confirmed first.
+    let confirming_delete = use_state(|| false);
     let navigator = use_navigator();
     let store = use_store();
     let client = store.client().clone();
@@ -109,11 +125,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
     }
 
     let Some(current) = (*loaded).clone() else {
-        return html! {
-            <div class="page">
-                <crate::components::IncidentBlockSkeleton />
-            </div>
-        };
+        return html! { <crate::components::IncidentBlockSkeleton /> };
     };
 
     let incident_version = current.incident.version;
@@ -121,10 +133,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
 
     let on_title = {
         let title = title.clone();
-        Callback::from(move |e: InputEvent| {
-            let el: HtmlInputElement = e.target_unchecked_into();
-            title.set(el.value());
-        })
+        Callback::from(move |value: String| title.set(value))
     };
 
     // Replaces the just-saved incident everywhere and refreshes the local draft state.
@@ -253,8 +262,10 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
         let id_value = current.id();
         let navigator = navigator.clone();
         let store = store.clone();
+        let confirming_delete = confirming_delete.clone();
         Callback::from(move |_| {
             let (navigator, store) = (navigator.clone(), store.clone());
+            confirming_delete.set(false);
             wasm_bindgen_futures::spawn_local(async move {
                 match store.delete_incident(id_value, incident_version).await {
                     Ok(()) => {
@@ -268,24 +279,17 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
         })
     };
 
-    let status_class = impact_class(current.current_impact());
     // Newest update first in the editor.
     let mut updates = current.updates.clone();
     updates.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
     let on_new_impact = {
         let new_impact = new_impact.clone();
-        Callback::from(move |e: Event| {
-            let el: HtmlSelectElement = e.target_unchecked_into();
-            new_impact.set(el.value());
-        })
+        Callback::from(move |value: String| new_impact.set(value))
     };
     let on_new_message = {
         let new_message = new_message.clone();
-        Callback::from(move |e: InputEvent| {
-            let el: HtmlTextAreaElement = e.target_unchecked_into();
-            new_message.set(el.value());
-        })
+        Callback::from(move |value: String| new_message.set(value))
     };
     let on_new_timestamp = {
         let new_timestamp = new_timestamp.clone();
@@ -296,10 +300,7 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
     };
     let on_draft_message = {
         let message_draft = message_draft.clone();
-        Callback::from(move |e: InputEvent| {
-            let el: HtmlTextAreaElement = e.target_unchecked_into();
-            message_draft.set(el.value());
-        })
+        Callback::from(move |value: String| message_draft.set(value))
     };
     let on_draft_timestamp = {
         let timestamp_draft = timestamp_draft.clone();
@@ -308,130 +309,206 @@ fn admin_incident_detail(props: &AdminIncidentDetailProps) -> Html {
             timestamp_draft.set(el.value());
         })
     };
+    let on_cancel_edit = {
+        let editing = editing.clone();
+        Callback::from(move |_| editing.set(None))
+    };
+    let on_ask_delete = {
+        let confirming_delete = confirming_delete.clone();
+        Callback::from(move |_: MouseEvent| confirming_delete.set(true))
+    };
+    let on_cancel_delete = {
+        let confirming_delete = confirming_delete.clone();
+        Callback::from(move |_: ()| confirming_delete.set(false))
+    };
+
+    let impact_options: Rc<[(AttrValue, AttrValue)]> =
+        Impact::ALL.into_iter().map(|impact| (impact.as_str().into(), impact.label().into())).collect();
+    let new_tone = impact_tone(new_impact.parse().unwrap_or_default());
+    let (status_text, status_tone) = incident_status(&current);
 
     html! {
-        <div class="page incident-edit">
-            <article class="incident-block">
-                <div class="incident-block__header">
-                    <div class="incident-edit__title-block">
-                        <input
-                            class="incident-edit__title-input"
-                            type="text"
+        <div class="incidents incident-edit">
+            { breadcrumbs(current.title()) }
+            <Card class="incident">
+                <div class="incident__header">
+                    <div class="incident-edit__title">
+                        <TextInput
+                            size={Size::Large}
                             value={(*title).clone()}
-                            oninput={on_title}
+                            on_input={on_title}
+                            attrs={attrs! { "aria-label" => "Incident title" }}
                         />
-                        <span class="incident-id">{format!("#{}", current.id())}</span>
+                        if title_dirty {
+                            <IconButton
+                                icon={icons::SAVE}
+                                label="Save title"
+                                variant={ButtonVariant::Primary}
+                                loading={*saving}
+                                on_click={on_save_title}
+                            />
+                        }
                     </div>
-                    if title_dirty {
-                        <button
-                            class={classes!("incident-edit__save-icon", (*saving).then_some("saving"))}
-                            title="Save title"
-                            disabled={*saving}
-                            onclick={on_save_title}
-                        >
-                            { save_icon() }
-                        </button>
-                    }
+                    <Pill tone={status_tone} active={current.is_active()}>{ status_text }</Pill>
                 </div>
 
-                <ul class="incident-timeline incident-timeline--editing">
-                    <li class="incident-timeline__item incident-timeline__item--new">
-                        <div class="incident-timeline__rail">
-                            <span class={classes!("incident-timeline__circle", impact_class(new_impact.parse().unwrap_or_default()))}></span>
-                            <span class={classes!("incident-timeline__tail", impact_class(new_impact.parse().unwrap_or_default()))}></span>
-                        </div>
-                        <div class="incident-timeline__body">
-                            <div class="incident-timeline__time">
-                                <select onchange={on_new_impact}>
-                                    { for Impact::ALL.into_iter().map(|opt| html! {
-                                        <option value={opt.as_str()} selected={opt.as_str() == *new_impact}>{opt.label()}</option>
-                                    }) }
-                                </select>
-
+                <Timeline label="Updates" run_off={TimelineRunOff::End}>
+                    // The next update: where the incident stands now, and what to tell people.
+                    <TimelineItem
+                        class="incident-edit__new"
+                        tone={new_tone}
+                        marker={TimelineMarker::Ring}
+                        title={html! { { "Post an update" } }}
+                    >
+                        <div class="incident-edit__form">
+                            <TextArea
+                                rows=3
+                                value={(*new_message).clone()}
+                                on_input={on_new_message}
+                                placeholder="Enter your next incident update in markdown form..."
+                                attrs={attrs! { "aria-label" => "Update message" }}
+                            />
+                            <div class="incident-edit__controls">
+                                <NativeSelect
+                                    label="Impact"
+                                    fit=true
+                                    options={impact_options}
+                                    value={(*new_impact).clone()}
+                                    on_change={on_new_impact}
+                                />
                                 <input
-                                    class="incident-edit__time-input"
+                                    class="yi-input yi-input--md incident-edit__time"
                                     type="datetime-local"
+                                    aria-label="When this update happened (UTC)"
                                     title="When this update happened (UTC) — leave blank to post it as of now"
                                     value={(*new_timestamp).clone()}
                                     oninput={on_new_timestamp}
                                 />
-
-                                <button type="button" class="incident-edit__icon-button" disabled={*saving} onclick={on_add_update}>{check_icon()}</button>
-                            </div>
-                            <div class={classes!("incident-timeline__card", status_class)}>
-                                <textarea
-                                    class="incident-timeline__message-input"
-                                    rows="3"
-                                    value={(*new_message).clone()}
-                                    oninput={on_new_message}
-                                    placeholder="Enter your next incident update in markdown form..."
-                                />
+                                <Button
+                                    variant={ButtonVariant::Primary}
+                                    icon={icons::SEND}
+                                    disabled={*saving}
+                                    on_click={on_add_update}
+                                >
+                                    { "Post update" }
+                                </Button>
                             </div>
                         </div>
-                    </li>
+                    </TimelineItem>
 
                     { for updates.iter().map(|update| {
-                        let class = impact_class(update.impact);
                         let uid = update.id;
                         let version = update.version;
                         let is_editing = *editing == Some(uid);
+                        let on_edit = {
+                            let editing = editing.clone();
+                            let message_draft = message_draft.clone();
+                            let timestamp_draft = timestamp_draft.clone();
+                            let msg = update.message.clone();
+                            let at = datetime_local_value(update.timestamp);
+                            Callback::from(move |_| {
+                                message_draft.set(msg.clone());
+                                timestamp_draft.set(at.clone());
+                                editing.set(Some(uid));
+                            })
+                        };
+                        let aside = if is_editing {
+                            html! {
+                                <>
+                                    <input
+                                        class="yi-input yi-input--sm incident-edit__time"
+                                        type="datetime-local"
+                                        aria-label="When this update happened (UTC)"
+                                        title="When this update happened (UTC)"
+                                        value={(*timestamp_draft).clone()}
+                                        oninput={on_draft_timestamp.clone()}
+                                    />
+                                    <IconButton
+                                        icon={icons::CHECK}
+                                        label="Save update"
+                                        size={Size::Small}
+                                        variant={ButtonVariant::Primary}
+                                        disabled={*saving}
+                                        on_click={on_save_update(uid, version, update.timestamp)}
+                                    />
+                                    <IconButton
+                                        icon={icons::X}
+                                        label="Cancel"
+                                        size={Size::Small}
+                                        variant={ButtonVariant::Subtle}
+                                        on_click={on_cancel_edit.clone()}
+                                    />
+                                </>
+                            }
+                        } else {
+                            html! {
+                                <>
+                                    <time datetime={update.timestamp.to_rfc3339()}>{ time_format(update.timestamp) }</time>
+                                    <IconButton
+                                        icon={icons::PENCIL}
+                                        label="Edit update"
+                                        size={Size::Small}
+                                        variant={ButtonVariant::Subtle}
+                                        on_click={on_edit}
+                                    />
+                                    <IconButton
+                                        icon={icons::TRASH_2}
+                                        label="Remove update"
+                                        size={Size::Small}
+                                        variant={ButtonVariant::Subtle}
+                                        disabled={*saving}
+                                        on_click={on_remove_update(uid, version)}
+                                    />
+                                </>
+                            }
+                        };
                         html! {
-                            <li class="incident-timeline__item">
-                                <div class="incident-timeline__rail">
-                                    <span class={classes!("incident-timeline__circle", class)}></span>
-                                    <span class={classes!("incident-timeline__tail", class)}></span>
-                                </div>
-                                <div class="incident-timeline__body">
-                                    <div class="incident-timeline__time">
-                                        <span class={classes!("incident-status-pill", class)}>{update.impact.label()}</span>
-                                        if is_editing {
-                                            <input
-                                                class="incident-edit__time-input"
-                                                type="datetime-local"
-                                                title="When this update happened (UTC)"
-                                                value={(*timestamp_draft).clone()}
-                                                oninput={on_draft_timestamp.clone()}
-                                            />
-                                            <button type="button" class="incident-edit__icon-button" title="Save update"
-                                                disabled={*saving} onclick={on_save_update(uid, version, update.timestamp)}>
-                                                { check_icon() }
-                                            </button>
-                                        } else {
-                                            <time datetime={update.timestamp.to_rfc3339()}>{time_format(update.timestamp)}</time>
-                                            <button type="button" class="incident-edit__icon-button" title="Edit update"
-                                                onclick={ let editing = editing.clone(); let message_draft = message_draft.clone(); let timestamp_draft = timestamp_draft.clone(); let msg = update.message.clone(); let at = datetime_local_value(update.timestamp); Callback::from(move |_| { message_draft.set(msg.clone()); timestamp_draft.set(at.clone()); editing.set(Some(uid)); }) }>
-                                                { edit_icon() }
-                                            </button>
-                                            <button type="button" class="incident-edit__icon-button danger" title="Remove update" disabled={*saving} onclick={on_remove_update(uid, version)}>{ trash_icon() }</button>
-                                        }
-                                    </div>
-                                    <div class={classes!("incident-timeline__card", class)}>
-                                        if is_editing {
-                                            <textarea
-                                                class="incident-timeline__message-input"
-                                                rows="3"
-                                                value={(*message_draft).clone()}
-                                                oninput={on_draft_message.clone()}
-                                            />
-                                        } else {
-                                            <div class="incident-timeline__card-message markdown">{ render_markdown(&update.message) }</div>
-                                        }
-                                    </div>
-                                </div>
-                            </li>
+                            <TimelineItem
+                                key={uid.to_string()}
+                                tone={impact_tone(update.impact)}
+                                title={html! { { update.impact.label() } }}
+                                {aside}
+                            >
+                                if is_editing {
+                                    <TextArea
+                                        rows=3
+                                        value={(*message_draft).clone()}
+                                        on_input={on_draft_message.clone()}
+                                        attrs={attrs! { "aria-label" => "Update message" }}
+                                    />
+                                } else {
+                                    { message(update) }
+                                }
+                            </TimelineItem>
                         }
                     }) }
-                </ul>
+                </Timeline>
+            </Card>
 
-                <div class="incident-admin-controls">
-                    <button type="button" class="danger" disabled={*saving} onclick={on_delete}>{"Delete incident"}</button>
-                </div>
+            <div class="incident-edit__footer">
+                <Text size={TextSize::Sm} color={TextColor::Muted}>
+                    { format!("#{} · {} update(s)", current.id(), current.updates.len()) }
+                </Text>
+                <Button
+                    variant={ButtonVariant::Danger}
+                    icon={icons::TRASH_2}
+                    disabled={*saving}
+                    on_click={on_ask_delete}
+                >
+                    { "Delete incident" }
+                </Button>
+            </div>
 
-                <p class="incident-edit__hint">
-                    { format!("Current status: {} · {} update(s)", current.current_impact().label(), current.updates.len()) }
-                    <StatusDot class={status_class} size=10 />
-                </p>
-            </article>
+            <ConfirmDialog
+                open={*confirming_delete}
+                title={format!("Delete \u{201c}{}\u{201d}?", current.title())}
+                confirm_label="Delete incident"
+                danger=true
+                on_confirm={on_delete}
+                on_cancel={on_cancel_delete}
+            >
+                { "The incident and every update posted to it are removed from the status page. This cannot be undone." }
+            </ConfirmDialog>
         </div>
     }
 }

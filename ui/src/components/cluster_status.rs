@@ -1,14 +1,25 @@
 use crate::contexts::{Store, use_store};
-use crate::styles::cluster_class;
-use grey_api::{Peer, PeerHealth};
+use crate::tones::{cluster_tone, peer_tone};
+use grey_api::{NodeStatus, Peer, PeerHealth};
 use yew::prelude::*;
+use yewi::prelude::*;
 
-/// A "Cluster" entry for the header status area: a coloured indicator summarising the health of
-/// the cluster, with a popover (hanging below and to the left) listing every member — including
-/// the node serving this page, which is tagged as the current one. Members are named by the
-/// hostname they publish (falling back to the node identifier) and carry their other published
-/// labels as tags. Renders nothing when no members are known (for example when talking to an older
-/// agent which doesn't report itself).
+/// The members in display order: the current node first, then healthiest (PeerHealth is ordered
+/// healthiest-first), then by id for a stable order.
+fn sorted_members(peers: &[Peer]) -> Vec<Peer> {
+    let mut members = peers.to_vec();
+    members.sort_by(|a, b| {
+        b.current
+            .cmp(&a.current)
+            .then_with(|| a.health.cmp(&b.health))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    members
+}
+
+/// A "Cluster" entry for the app bar: a coloured indicator summarising the health of the cluster,
+/// which opens a popover listing every member (see [`ClusterMembers`]). Renders nothing when no
+/// members are known (for example when talking to an older agent which doesn't report itself).
 #[function_component(ClusterStatus)]
 pub fn cluster_status() -> Html {
     let store = use_store();
@@ -17,45 +28,46 @@ pub fn cluster_status() -> Html {
         return html! {};
     }
 
-    // Current node first, then healthiest (PeerHealth is ordered healthiest-first), then by id for a
-    // stable order.
-    let mut members = store.peers().to_vec();
-    members.sort_by(|a, b| {
-        b.current
-            .cmp(&a.current)
-            .then_with(|| a.health.cmp(&b.health))
-            .then_with(|| a.id.cmp(&b.id))
-    });
-
-    let online = members
-        .iter()
-        .filter(|p| p.health == PeerHealth::Online)
-        .count();
-
-    let level_class = cluster_class(&members);
+    let tone = cluster_tone(store.peers());
 
     html! {
-        // tabindex makes the chip focusable so the popover also opens via keyboard/touch
-        // (the stylesheet shows it on :hover and :focus-within).
-        <div class={format!("status-indicator cluster-status {level_class}")} tabindex="0">
-            <div class="status-dot active"></div>
-            <span class="status-text">{"Cluster"}</span>
+        <Popover
+            class={classes!("cluster-status", format!("cluster-status--{}", tone.as_str()))}
+            label="Cluster members"
+            placement={Placement::BottomEnd}
+            content={html! { <ClusterMembers /> }}
+        >
+            <Button variant={ButtonVariant::Subtle}>
+                <StatusDot {tone} active=true />
+                <span class="cluster-status__label">{ "Cluster" }</span>
+            </Button>
+        </Popover>
+    }
+}
 
-            <div class="cluster-popover">
-                <div class="cluster-popover__content">
-                    <div class="cluster-popover__title">
-                        <span>{"Cluster Members"}</span>
-                        <span class="cluster-popover__summary">{format!("{online}/{} online", members.len())}</span>
-                    </div>
-                    {for members.iter().map(|peer| render_member(&store, peer))}
-                </div>
+/// Every member of the cluster, including the node serving this page, which is tagged as the
+/// current one. Members are named by the hostname they publish (falling back to the node
+/// identifier) and carry their other published labels as tags.
+#[function_component(ClusterMembers)]
+fn cluster_members() -> Html {
+    let store = use_store();
+    let members = sorted_members(store.peers());
+    let online = members.iter().filter(|p| p.health == PeerHealth::Online).count();
+
+    html! {
+        <div class="cluster">
+            <div class="cluster__title">
+                <span>{ "Cluster members" }</span>
+                <span class="cluster__summary">{ format!("{online}/{} online", members.len()) }</span>
+            </div>
+            <div class="cluster__members">
+                { for members.iter().map(|peer| render_member(&store, peer)) }
             </div>
         </div>
     }
 }
 
 fn render_member(store: &Store, peer: &Peer) -> Html {
-    let class = peer.health.as_str();
     let metadata = store.node_metadata(&peer.id);
     let name = metadata
         .map(|m| m.display_name().to_string())
@@ -68,28 +80,31 @@ fn render_member(store: &Store, peer: &Peer) -> Html {
     html! {
         <div class="peer">
             <div class="peer__identity">
-                <div class={format!("peer__status-dot {class}")}></div>
-                <span class="peer__name" title={title}>{name}</span>
+                <StatusDot tone={peer_tone(peer.health)} />
+                <span class="peer__name" title={title}>{ name }</span>
                 if peer.current {
-                    <span class="peer__current-tag">{"this node"}</span>
+                    <Pill dot=false>{ "this node" }</Pill>
                 }
             </div>
-            if let Some(node) = &peer.node {
-                <span
-                    class={format!("peer__node {}", node.status.as_str())}
-                    title={format!("{} of {} probes disagree with the cluster (quorum {})", node.disagreeing, node.total, node.quorum)}
-                >{node.status.label()}</span>
-            }
-            <span class={format!("peer__health {class}")}>{peer.health.label()}</span>
-            <span class="peer__last-seen">{relative_time(peer.last_seen)}</span>
+            <div class="peer__state">
+                if let Some(node) = &peer.node {
+                    <span title={format!("{} of {} probes disagree with the cluster (quorum {})", node.disagreeing, node.total, node.quorum)}>
+                        <Pill
+                            tone={if node.status == NodeStatus::Healthy { Tone::Ok } else { Tone::Warn }}
+                            dot=false
+                        >
+                            { node.status.label() }
+                        </Pill>
+                    </span>
+                }
+                <Text tone={peer_tone(peer.health)} size={TextSize::Sm}>{ peer.health.label() }</Text>
+                <span class="peer__last-seen">{ relative_time(peer.last_seen) }</span>
+            </div>
             if !tags.is_empty() {
                 <div class="peer__labels">
-                    {for tags.iter().map(|(key, value)| html! {
-                        <span class="peer__label" title={format!("{key}={value}")}>
-                            <span class="peer__label-key">{*key}</span>
-                            <span class="peer__label-value">{*value}</span>
-                        </span>
-                    })}
+                    { for tags.iter().map(|(key, value)| html! {
+                        <Tag name={key.to_string()}>{ *value }</Tag>
+                    }) }
                 </div>
             }
         </div>
@@ -126,6 +141,8 @@ mod tests {
         html! {
             <StoreProvider peers={props.peers.clone()} nodes={props.nodes.clone()}>
                 <ClusterStatus />
+                // The popover only mounts its content once opened, which SSR can't reach.
+                <ClusterMembers />
             </StoreProvider>
         }
     }
@@ -174,10 +191,9 @@ mod tests {
             labels: Default::default(),
         });
         let html = render(vec![peer("local-node", PeerHealth::Online, true), degraded]).await;
-        assert!(html.contains("peer__node degraded"), "expected the node status badge, got: {html}");
-        assert!(html.contains("Degraded"), "expected the node status label, got: {html}");
+                assert!(html.contains("Degraded"), "expected the node status label, got: {html}");
         assert!(html.contains("2 of 3 probes disagree"), "expected the disagreement summary, got: {html}");
-        assert!(html.contains("cluster-status warning"), "a degraded node must warn on the chip, got: {html}");
+        assert!(html.contains("cluster-status--warn"), "a degraded node must warn on the chip, got: {html}");
     }
 
     /// A member with published metadata is named by its hostname (the raw identifier moves into the
@@ -193,8 +209,8 @@ mod tests {
         assert!(html.contains("grey-syd-1"), "expected the hostname, got: {html}");
         assert!(!html.contains(">1p3x9k<"), "the identifier must not be shown as the name, got: {html}");
         assert!(html.contains("Node 1p3x9k (grey-syd-1)"), "expected the id in the tooltip, got: {html}");
-        assert!(html.contains("peer__label-key\">region<") && html.contains("peer__label-value\">au-east<"), "expected the region tag, got: {html}");
-        assert!(html.contains(">cloud<"), "expected the cloud tag, got: {html}");
+        assert!(html.contains("region") && html.contains("au-east"), "expected the region tag, got: {html}");
+        assert!(html.contains("cloud"), "expected the cloud tag, got: {html}");
         assert!(!html.contains(">hostname<"), "the hostname is the name, not a tag, got: {html}");
 
         // A member without metadata falls back to its identifier and shows no tags.
@@ -216,7 +232,7 @@ mod tests {
         ])
         .await;
 
-        assert!(html.contains("cluster-status good"), "expected a healthy chip, got: {html}");
+        assert!(html.contains("cluster-status--ok"), "expected a healthy chip, got: {html}");
         assert!(html.contains("2/2 online"), "expected the online summary, got: {html}");
         assert!(html.contains("this node"), "expected the current-node tag, got: {html}");
 
@@ -232,14 +248,14 @@ mod tests {
             peer("remote-node", PeerHealth::Suspect, false),
         ])
         .await;
-        assert!(html.contains("cluster-status warning"), "expected a suspect member to warn, got: {html}");
+        assert!(html.contains("cluster-status--warn"), "expected a suspect member to warn, got: {html}");
 
         let html = render(vec![
             peer("local-node", PeerHealth::Online, true),
             peer("remote-node", PeerHealth::Offline, false),
         ])
         .await;
-        assert!(html.contains("cluster-status error"), "expected an offline member to error, got: {html}");
+        assert!(html.contains("cluster-status--danger"), "expected an offline member to error, got: {html}");
         assert!(html.contains("1/2 online"), "expected the online summary, got: {html}");
     }
 

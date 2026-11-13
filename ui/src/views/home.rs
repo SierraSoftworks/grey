@@ -1,9 +1,10 @@
 use chrono::Utc;
 use grey_api::Impact;
 use yew::prelude::*;
+use yewi::prelude::*;
 
 use crate::components::incidents::worst_impact;
-use crate::components::{Banner, BannerKind, IncidentsSection, ServiceList};
+use crate::components::{IncidentsSection, ServiceList};
 use crate::contexts::use_store;
 
 /// The status page: a top-line banner, the probe list, and recent/active incidents. The top-line
@@ -17,17 +18,17 @@ pub fn home_view() -> Html {
     let total = store.probes().len();
     let healthy = store.probes().iter().filter(|p| p.passing()).count();
     let probe_status = if total == 0 || healthy == total {
-        (BannerKind::Ok, "All services operating normally")
+        (Tone::Ok, "All services operating normally")
     } else if healthy * 2 >= total {
-        (BannerKind::Warning, "Partial degradation in service")
+        (Tone::Warn, "Partial degradation in service")
     } else {
-        (BannerKind::Error, "Major outage affecting multiple services")
+        (Tone::Danger, "Major outage affecting multiple services")
     };
 
     // An active incident takes over the top-line status.
-    let (banner_kind, status_text) = match worst_impact(store.incidents()) {
-        Some(Impact::Offline) => (BannerKind::Error, "Major incident affecting service"),
-        Some(Impact::Degraded) => (BannerKind::Warning, "Active incident affecting service"),
+    let (tone, status_text) = match worst_impact(store.incidents()) {
+        Some(Impact::Offline) => (Tone::Danger, "Major incident affecting service"),
+        Some(Impact::Degraded) => (Tone::Warn, "Active incident affecting service"),
         _ => probe_status,
     };
 
@@ -44,11 +45,8 @@ pub fn home_view() -> Html {
 
     html! {
         <>
-            <div class="content">
-                <Banner kind={banner_kind} text={status_text.to_string()} />
-                <ServiceList />
-            </div>
-
+            <Banner class="status-banner" {tone} bold=true size={Size::Large}>{ status_text }</Banner>
+            <ServiceList />
             <IncidentsSection incidents={recent_incidents} />
         </>
     }

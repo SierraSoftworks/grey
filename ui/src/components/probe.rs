@@ -1,11 +1,25 @@
-use super::{LiveStatus, ProbeHistory, StatusDot};
+use super::{LiveStatus, ProbeHistory};
 use crate::formatters::{availability, compact_duration};
-use crate::styles::probe_class;
+use crate::tones::probe_tone;
 use yew::prelude::*;
+use yewi::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct ProbeProps {
     pub probe: grey_api::Probe,
+}
+
+/// The tags of a probe or cron as `name: value` chips. The `service` tag is left out: it is the
+/// heading the entry already sits under.
+pub fn tags(tags: &std::collections::HashMap<String, String>) -> Html {
+    let mut tags: Vec<_> = tags.iter().filter(|(name, _)| *name != "service").collect();
+    // A map has no order of its own; sort so the server render and the hydrated page agree.
+    tags.sort();
+    html! {
+        { for tags.into_iter().map(|(name, value)| html! {
+            <Tag key={name.clone()} name={name.clone()}>{ value }</Tag>
+        }) }
+    }
 }
 
 #[function_component(Probe)]
@@ -27,7 +41,7 @@ pub fn probe(props: &ProbeProps) -> Html {
 
     // Key the status off the currently observed (debounced) state so a recovery is reflected once it
     // settles, using the recent average only to grade how severe an ongoing failure is.
-    let probe_class = probe_class(props.probe.passing(), recent_availability);
+    let tone = probe_tone(props.probe.passing(), recent_availability);
 
     // How long the probe has held its current state, e.g. "healthy for 5d" or "unhealthy for 17m".
     let streak_text = props.probe.since().map(|since| {
@@ -40,33 +54,25 @@ pub fn probe(props: &ProbeProps) -> Html {
     });
 
     html! {
-        <div class="probe">
-            <div class="probe__title">
-                <div class="probe__name-section">
-                    <StatusDot class={probe_class} active=true />
-                    <h3 class="probe__name">{&props.probe.name}</h3>
-
-                    if !props.probe.tags.is_empty() {
-                        <div class="probe__tags">
-                            {for props.probe.tags.iter().filter(|(name, _)| *name != "service").map(|(name, value)| {
-                                html! {
-                                    <div class="probe__tag">
-                                        <span class="probe__tag-name">{name}{":"}</span>
-                                        <strong class="probe__tag-value">{value}</strong>
-                                    </div>
-                                }
-                            })}
-                        </div>
-                    }
+        <div class="check probe">
+            <div class="check__title">
+                <div class="check__identity">
+                    <div class="check__label">
+                        <StatusDot {tone} active=true />
+                        <h3 class="check__name">{ &props.probe.name }</h3>
+                    </div>
+                    { tags(&props.probe.tags) }
                 </div>
-                
-                if let Some(observers_text) = observers_text {
-                    <div class="probe__observers">{observers_text}</div>
-                }
-                if let Some(streak_text) = streak_text {
-                    <div class="probe__streak">{streak_text}</div>
-                }
-                <div class="probe__availability">{availability(props.probe.availability())}</div>
+
+                <div class="check__state">
+                    if let Some(observers_text) = observers_text {
+                        <span class="probe__observers">{ observers_text }</span>
+                    }
+                    if let Some(streak_text) = streak_text {
+                        <span class="probe__streak">{ streak_text }</span>
+                    }
+                    <span class="check__figure">{ availability(props.probe.availability()) }</span>
+                </div>
             </div>
             <ProbeHistory samples={props.probe.history.clone()} live={live} />
         </div>

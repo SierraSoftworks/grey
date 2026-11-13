@@ -19,7 +19,7 @@ serde.workspace = true
 serde_json.workspace = true
 yew = { workspace = true, features = ["ssr", "hydration"] }
 yew-router = { workspace = true }
-pulldown-cmark = { workspace = true }
+yewi = { workspace = true, features = ["ssr", "hydration", "router", "markdown", "chrono"] }
 
 base64 = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
@@ -48,5 +48,6 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 
 [features]
 default = ["wasm"]
-ssr = []
+# The server half: also carries the font files the agent serves alongside the stylesheet.
+ssr = ["yewi/fonts"]
 wasm = ["gloo", "gloo-console", "gloo-net", "gloo-timers", "wasm-bindgen", "wasm-bindgen-futures", "wasm-logger", "web-sys", "base64", "futures"]
