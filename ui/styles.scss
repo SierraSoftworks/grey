@@ -387,8 +387,13 @@ $narrow: 40rem;
   gap: var(--yi-space-2xs) var(--yi-space-sm);
   margin: 0;
   font-family: var(--yi-font-heading);
-  font-size: var(--yi-text-lg);
-  font-weight: var(--yi-heading-weight-lg);
+  font-size: 1.2rem;
+  font-weight: 400;
+
+  // The title link reads as the heading, not as a link of its own weight.
+  a {
+    font-weight: inherit;
+  }
 }
 
 .incident__date {

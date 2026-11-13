@@ -27,13 +27,11 @@ pub fn incidents_list() -> Html {
 
     html! {
         <>
-            <PageHeader title="Incidents" subtitle={html! { { SUBTITLE } }} />
+            <PageHeader title="Incidents" />
             <IncidentList incidents={store.incidents().to_vec()} />
         </>
     }
 }
-
-const SUBTITLE: &str = "Every reported incident and the updates posted as it was worked on.";
 
 #[derive(Properties, PartialEq)]
 struct IncidentListProps {
@@ -126,7 +124,7 @@ fn admin_incidents_list(props: &AdminIncidentsListProps) -> Html {
 
     html! {
         <>
-            <PageHeader title="Incidents" subtitle={html! { { SUBTITLE } }} actions={declare} />
+            <PageHeader title="Incidents" actions={declare} />
             if *loading && incidents.is_empty() {
                 // Seed was empty and the admin fetch (which adds hidden drafts) is still in flight;
                 // wait for it before deciding between the list and the empty state, so a drafts-only
