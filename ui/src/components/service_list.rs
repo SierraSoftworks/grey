@@ -193,6 +193,30 @@ mod tests {
             .await
     }
 
+    /// A service is healthy when everything passes, degraded while at least half does, and down
+    /// below that; a service with nothing in it has no health to report.
+    #[test]
+    fn service_health_follows_the_share_of_passing_checks() {
+        let passing = probe("ok", "Storage");
+        let mut failing = probe("down", "Storage");
+        failing.history.push(grey_api::ProbeHistoryBucket {
+            start_time: chrono::Utc::now(),
+            pass: false,
+            message: String::new(),
+            validations: Default::default(),
+            observations: Default::default(),
+        });
+
+        let cases = [(0, 0, Tone::Neutral), (2, 0, Tone::Ok), (1, 1, Tone::Warn), (1, 2, Tone::Danger)];
+        for (up, down, expected) in cases {
+            let group = ServiceGroup {
+                probes: std::iter::repeat_n(&passing, up).chain(std::iter::repeat_n(&failing, down)).collect(),
+                crons: vec![],
+            };
+            assert!(group.summary(chrono::Utc::now()).0 == expected, "{up} passing, {down} failing");
+        }
+    }
+
     #[tokio::test]
     async fn probes_and_crons_share_a_service_group() {
         let html = render(
