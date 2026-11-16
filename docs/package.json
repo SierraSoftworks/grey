@@ -24,11 +24,11 @@
   },
   "homepage": "https://github.com/SierraSoftworks/grey#readme",
   "devDependencies": {
-    "@vuepress/bundler-vite": "2.0.0-rc.31",
+    "@vuepress/bundler-vite": "2.0.0-rc.32",
     "@vuepress/plugin-register-components": "2.0.0-rc.135",
     "@vuepress/theme-default": "2.0.0-rc.137",
     "@vuepress/utils": "2.0.0-rc.2",
     "sass-embedded": "^1.108.2",
-    "vuepress": "2.0.0-rc.31"
+    "vuepress": "2.0.0-rc.32"
   }
 }
