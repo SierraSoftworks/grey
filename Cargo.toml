@@ -87,9 +87,9 @@ yew-router = { version = "0.20" }
 # The design system the UI is built from. Its stylesheet and fonts are served by the agent.
 yewi = { version = "0.3" }
 
-gloo = { version = "0.12" }
+gloo = { version = "0.13" }
 gloo-console = { version = "0.4" }
-gloo-net = { version = "0.7" }
+gloo-net = { version = "0.8" }
 gloo-timers = { version = "0.4", features = ["futures"] }
 wasm-bindgen = { version = "0.2.100" }
 wasm-bindgen-futures = { version = "0.4" }
