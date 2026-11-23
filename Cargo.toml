@@ -46,7 +46,7 @@ lazy_static = "1.5"
 openssl-sys = { version = "0.9", features = ["vendored"] }
 radix_fmt = "1.0.0"
 rand = "0.10"
-redb = { version = "4.1.0" }
+redb = { version = "5.0.0" }
 reqwest = { version = "0.13", features = ["rustls"] }
 rmp-serde = "1.3.1"
 # The `ring` backend is selected explicitly at runtime (see targets/tls_cert.rs) because
