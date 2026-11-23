@@ -260,7 +260,7 @@ impl IncidentStore for State {
             let upper = cursor.map(u64::from);
             let iter = match upper {
                 Some(c) => table.range(..c)?,
-                None => table.range::<u64>(..)?,
+                None => table.range(..)?,
             };
             for entry in iter.rev().filter_map(|r| r.ok()) {
                 let (key, value) = entry;
