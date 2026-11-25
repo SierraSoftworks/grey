@@ -134,6 +134,13 @@ be configured; with no admin configured, nobody passes `auth.admin` and such an 
 everyone. The same `visible` property is available on [crons](crons.md).
 
 ::: warning
+In a [cluster](clustering.md), `visible` is applied by the node serving the request using its own
+configuration. A probe which a node learns about through gossip but does not configure itself is
+shown to administrators only, since that node cannot know which rule applies. Configure a probe on
+every node that serves the UI if it should be visible to anyone else.
+:::
+
+::: warning
 Visibility is a presentation control, not a security boundary for the probed services themselves — it
 governs what the status page and API expose, so use it to tidy a public status page rather than as the
 only protection for sensitive endpoints.

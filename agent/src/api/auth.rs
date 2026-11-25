@@ -450,8 +450,9 @@ pub async fn resolve_auth_context(
 }
 
 /// Drops the probes the given viewer may not see, honouring each probe's configured `visible` filter.
-/// A pooled probe with no local configuration entry (e.g. a gossiped record for a probe this node no
-/// longer configures) has no `visible` rule and stays visible, preserving the pre-visibility default.
+/// A pooled probe with no local configuration entry (e.g. a gossiped record for a probe only a peer
+/// configures) has no `visible` rule here, so the rule its owner applies is unknown: it fails closed
+/// and is shown to administrators only, rather than leaking a restricted probe to the public.
 pub fn retain_visible_probes(
     config: &crate::config::Config,
     ctx: &AuthContext,
@@ -463,12 +464,13 @@ pub fn retain_visible_probes(
             .iter()
             .find(|cfg| cfg.name == probe.name)
             .map(|cfg| ctx.can_see(&cfg.visible))
-            .unwrap_or(true)
+            .unwrap_or(ctx.admin)
     });
 }
 
 /// Drops the crons the given viewer may not see, honouring each cron's configured `visible` filter.
-/// As with [`retain_visible_probes`], a pooled cron with no local configuration entry stays visible.
+/// As with [`retain_visible_probes`], a pooled cron with no local configuration entry is shown to
+/// administrators only.
 pub fn retain_visible_crons(
     config: &crate::config::Config,
     ctx: &AuthContext,
@@ -480,7 +482,7 @@ pub fn retain_visible_crons(
             .iter()
             .find(|cfg| cfg.name == cron.name)
             .map(|cfg| ctx.can_see(&cfg.visible))
-            .unwrap_or(true)
+            .unwrap_or(ctx.admin)
     });
 }
 
@@ -760,8 +762,8 @@ mod tests {
         assert!(ctx.can_see(&in_group));
     }
 
-    /// The retain helper drops entities the viewer may not see, keeps unrestricted ones, and leaves
-    /// pooled records with no local configuration entry (orphans) visible.
+    /// The retain helper drops entities the viewer may not see, keeps unrestricted ones, and shows
+    /// pooled records with no local configuration entry (orphans) to administrators only.
     #[tokio::test]
     async fn retain_visible_probes_honours_context_and_orphans() {
         let dir = tempfile::tempdir().unwrap();
@@ -786,20 +788,27 @@ mod tests {
             quorum: None,
         };
 
-        // Anonymous: only the public probe survives, but the orphan (no config entry) is kept.
+        // Anonymous: only the public probe survives; the orphan's visibility rule is unknown here.
         let mut probes = vec![api_probe("public.probe"), api_probe("admin.probe"), api_probe("orphan.probe")];
         retain_visible_probes(&config, &AuthContext::default(), &mut probes);
         let mut names: Vec<&str> = probes.iter().map(|p| p.name.as_str()).collect();
         names.sort();
-        assert_eq!(names, vec!["orphan.probe", "public.probe"]);
+        assert_eq!(names, vec!["public.probe"]);
 
-        // An administrator sees the restricted probe too.
+        // Signed in without admin: the orphan stays hidden, as its rule may be `auth.admin`.
+        let user = AuthContext { authenticated: true, admin: false, claims: Map::new() };
+        let mut probes = vec![api_probe("public.probe"), api_probe("orphan.probe")];
+        retain_visible_probes(&config, &user, &mut probes);
+        let names: Vec<&str> = probes.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, vec!["public.probe"]);
+
+        // An administrator sees the restricted probe and the orphan too.
         let admin = AuthContext { authenticated: true, admin: true, claims: Map::new() };
-        let mut probes = vec![api_probe("public.probe"), api_probe("admin.probe")];
+        let mut probes = vec![api_probe("public.probe"), api_probe("admin.probe"), api_probe("orphan.probe")];
         retain_visible_probes(&config, &admin, &mut probes);
         let mut names: Vec<&str> = probes.iter().map(|p| p.name.as_str()).collect();
         names.sort();
-        assert_eq!(names, vec!["admin.probe", "public.probe"]);
+        assert_eq!(names, vec!["admin.probe", "orphan.probe", "public.probe"]);
     }
 
     #[test]
